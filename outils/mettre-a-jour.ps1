@@ -14,13 +14,50 @@ $Depot = 'Ishine93/agents-hq'
 $QG = Split-Path -Parent $PSScriptRoot
 $Tmp = Join-Path $QG 'runtime\mise-a-jour'
 
-function Relance {
-  if ($Relancer) {
-    Write-Host 'Relance du QG…'
-    # --sans-maj : le QG relancé ne revérifie pas (pas de boucle si la mise à jour a échoué).
-    $arguments = if ($Ouvrir) { '--sans-maj' } else { '--sans-maj --no-open' }
-    Start-Process -FilePath (Join-Path $QG 'lancer.bat') -ArgumentList $arguments -WorkingDirectory $QG
+function PortQG {
+  foreach ($f in @('config\reglages.json', 'config\defauts\reglages.json')) {
+    try {
+      $p = (Get-Content (Join-Path $QG $f) -Raw -Encoding UTF8 | ConvertFrom-Json).port
+      if ($p) { return [int]$p }
+    } catch { }
   }
+  return 4747
+}
+function QGRepond($port) {
+  $c = New-Object Net.Sockets.TcpClient
+  try { return $c.ConnectAsync('127.0.0.1', $port).Wait(800) -and $c.Connected } catch { return $false } finally { $c.Close() }
+}
+function QGDemarre {
+  # une fenêtre lancer.bat ou un serveur de CE QG est déjà là (démarrage lent) : on ne relance pas en double
+  $moi = [Regex]::Escape($QG)
+  return [bool](Get-CimInstance Win32_Process | Where-Object { ($_.Name -eq 'node.exe' -and $_.CommandLine -match "$moi.*serveur.*index\.js") -or ($_.Name -eq 'cmd.exe' -and $_.CommandLine -match "$moi.*lancer\.bat") })
+}
+function Relance {
+  if (-not $Relancer) { return }
+  Write-Host 'Relance du QG…'
+  # --sans-maj : le QG relancé ne revérifie pas (pas de boucle si la mise à jour a échoué).
+  $arguments = if ($Ouvrir) { '--sans-maj' } else { '--sans-maj --no-open' }
+  $port = PortQG
+  # Cette fenêtre attend que le QG réponde avant de se fermer : se fermer pendant que la nouvelle fenêtre
+  # démarre la faisait parfois échouer (cmd.exe, erreur 0xc0000142). Pas de réponse : on relance (3 essais).
+  for ($essai = 1; $essai -le 3; $essai++) {
+    if (-not (QGDemarre)) {
+      try { Start-Process -FilePath (Join-Path $QG 'lancer.bat') -ArgumentList $arguments -WorkingDirectory $QG } catch { Write-Host $_.Exception.Message }
+    }
+    for ($s = 0; $s -lt 40; $s++) {
+      Start-Sleep -Seconds 1
+      if (QGRepond $port) {
+        Write-Host 'Le QG est reparti.' -ForegroundColor Green
+        Start-Sleep -Seconds 1
+        return
+      }
+      # plus de fenêtre ni de serveur au bout de quelques secondes : ce démarrage a échoué, on réessaie
+      if ($s -ge 6 -and -not (QGDemarre)) { break }
+    }
+    Write-Host "Le QG ne répond pas encore, nouvel essai ($essai/3)…" -ForegroundColor Yellow
+  }
+  Write-Host 'Le QG n''a pas redémarré tout seul : lance lancer.bat (la mise à jour, elle, est faite).' -ForegroundColor Yellow
+  Read-Host 'Appuie sur Entrée pour fermer cette fenêtre' | Out-Null
 }
 function Echec($texte) {
   Write-Host ''
