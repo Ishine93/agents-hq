@@ -23,6 +23,15 @@ function quand(ms) {
     : d.toLocaleString(locale(), { weekday: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
+// Forfait affiché : celui de la découverte (« Claude Max »), sauf s'il ne correspond plus à celui que
+// donne la dernière lecture des limites (« max ») : forfait changé, la découverte n'est pas encore refaite.
+const motForfait = (s) => String(s || '').toLowerCase().replace(/^claude\s+/, '').split(/\s+/)[0];
+function nomForfait(c, l) {
+  const lu = l?.abonnement;
+  if (!lu || !c.abonnement || motForfait(c.abonnement) === motForfait(lu)) return c.abonnement || lu || null;
+  return 'Claude ' + lu.charAt(0).toUpperCase() + lu.slice(1);
+}
+
 function barre(pct) {
   const p = Math.max(0, Math.min(100, pct || 0));
   return h('div', { class: 'conso-jauge' }, h('div', { class: 'conso-jauge-barre' + (p >= 90 ? ' haut' : p >= 70 ? ' moyen' : ''), style: { width: p + '%' } }));
@@ -71,6 +80,7 @@ export class Conso {
       t('Consommation du jour : {n} tokens', { n: fmtTokens(totalTokens(jour)) }),
       l5 && l5.utilisation != null ? t('{compte} — session de 5 h : {p} % (remise à zéro {quand})', { compte: nomCompte, p: Math.round(l5.utilisation), quand: quand(l5.reinit) }) : null,
       pire && pire.cle !== 'five_hour' && pire.utilisation >= 50 ? t('{fenetre} : {p} %', { fenetre: t(NOMS_FENETRES[pire.cle] || pire.nom || pire.cle), p: Math.round(pire.utilisation) }) : null,
+      C?.limites?.[compte]?.erreur ? t('Relecture impossible ({raison}) : valeurs lues {quand}.', { raison: C.limites[compte].erreur, quand: quand(C.limites[compte].maj) || '—' }) : null,
       t('Clique pour le détail.'),
     ].filter(Boolean).join('\n');
     this.bouton.classList.toggle('alerte', !!(pire && pire.utilisation >= 90));
@@ -129,9 +139,11 @@ export class Conso {
     for (const c of S.comptes) {
       const l = C.limites?.[c.id];
       const lignes = [];
+      // Dernière relecture ratée : on montre quand même les anciennes valeurs, grisées et datées.
+      const perime = !!l?.erreur;
       for (const [cle, f] of Object.entries(l?.fenetres || {})) {
         if (f.utilisation == null) continue;
-        lignes.push(h('div', { class: 'conso-fenetre' },
+        lignes.push(h('div', { class: 'conso-fenetre' + (perime && !(f.lu > (l.essai || 0)) ? ' perime' : '') },
           h('span', { class: 'lib' }, t(NOMS_FENETRES[cle] || f.nom || cle)),
           barre(f.utilisation),
           h('span', { class: 'pct' }, Math.round(f.utilisation) + ' %'),
@@ -140,7 +152,8 @@ export class Conso {
       blocForfaits.append(h('div', { class: 'conso-compte' },
         h('div', { class: 'conso-compte-tete' },
           h('b', {}, c.nom),
-          h('span', { class: 'meta' }, [c.abonnement || l?.abonnement, !c.connecte ? t('non connecté') : null, l?.maj ? t('lu {quand}', { quand: quand(l.maj) }) : null].filter(Boolean).join(' · '))),
+          h('span', { class: 'meta' }, [nomForfait(c, l), !c.connecte ? t('non connecté') : null, l?.maj ? t('lu {quand}', { quand: quand(l.maj) }) : null].filter(Boolean).join(' · '))),
+        perime && lignes.length ? h('div', { class: 'conso-perime' }, t('Relecture impossible ({raison}) : valeurs lues {quand}.', { raison: l.erreur, quand: l.maj ? quand(l.maj) : '—' })) : null,
         lignes.length ? lignes : h('div', { class: 'vide' }, c.connecte ? (l?.erreur ? t('Limites illisibles pour l’instant ({raison}).', { raison: l.erreur }) : t('Limites pas encore lues : clique sur « Actualiser les limites ».')) : t('Connecte ce compte pour voir son forfait.'))));
     }
     sections.push(blocForfaits);

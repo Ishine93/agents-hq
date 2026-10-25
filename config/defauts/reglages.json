@@ -30,5 +30,6 @@
   },
   "dureeBulles": 1,
   "gitAuto": false,
+  "validationUtilisateur": false,
   "miseAJourAuto": true
 }

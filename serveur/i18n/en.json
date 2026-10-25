@@ -268,5 +268,9 @@
   "GitHub est injoignable : vérifie ta connexion Internet.": "GitHub cannot be reached: check your Internet connection.",
   "GitHub ne répond pas ({code}).": "GitHub is not answering ({code}).",
   "Installation de développement : la mise à jour automatique est désactivée ici.": "Development install: automatic updates are disabled here.",
-  "Nouvelle version {version} disponible (tu as la {actuelle}) : mise à jour automatique, le QG se relance tout seul.": "New version {version} available (you have {actuelle}): updating automatically, the HQ will restart on its own."
+  "Nouvelle version {version} disponible (tu as la {actuelle}) : mise à jour automatique, le QG se relance tout seul.": "New version {version} available (you have {actuelle}): updating automatically, the HQ will restart on its own.",
+  "le serveur n’a pas donné les limites, nouvel essai dans quelques minutes": "the server did not return the limits, trying again in a few minutes",
+  "QG relancé": "HQ resumed",
+  "Le forfait a de nouveau de la marge : le travail reprend sans attendre.": "The plan has room again: work resumes right away.",
+  "{ref} : la vérification est confiée à une IA (la validation par toi est coupée dans les Réglages).": "{ref}: the review is handed to an AI (your own approval is turned off in Settings)."
 }

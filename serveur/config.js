@@ -142,6 +142,12 @@ export function directive(nom) {
       REGLAGES.gitAuto === true
         ? "- Git : l'utilisateur autorise les opérations git sans demander (pull, commit, branche, merge, push), quand la mission le demande. Fais des commits clairs et ne pousse que ce que la mission a produit."
         : "- Git : pas de git push (ni de publication) sans accord de l'utilisateur.",
+    )
+    .replaceAll(
+      '{VALIDATION_USER}',
+      REGLAGES.validationUtilisateur === true
+        ? "- `user` : l'utilisateur valide lui-même (goût, gameplay, visuel)."
+        : "- `user` : désactivé, l'utilisateur veut que ses dossiers aillent de A à Z sans l'attendre. Pour le goût, le visuel ou le gameplay, choisis `agent` avec des checks concrets (captures d'écran, playtest automatisé, conventions du projet).",
     );
   return texte;
 }

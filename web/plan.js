@@ -62,7 +62,14 @@ export class PlanDossier {
     fermer.addEventListener('click', () => this.fermer());
     this.bFermer = fermer;
     const blocTitre = el('div', 'plan-entete');
-    blocTitre.append(this.titre, this.sous);
+    // ouvert depuis le tableau blanc d'un étage : choix du dossier que ce tableau affiche
+    this.choix = el('label', 'plan-choix');
+    this.choixLib = el('span', '');
+    this.choixListe = el('select', '');
+    this.choixListe.addEventListener('change', () => this.choisir(this.choixListe.value || null));
+    this.choix.append(this.choixLib, this.choixListe);
+    this.choix.hidden = true;
+    blocTitre.append(this.titre, this.sous, this.choix);
     tete.append(blocTitre, zoom, fermer);
     this.scroll = el('div', 'plan-scroll');
     this.taille = el('div', 'plan-taille');
@@ -110,9 +117,10 @@ export class PlanDossier {
     return !this.fond.hidden;
   }
 
-  // Sans dossier : le plan le plus récent.
-  ouvrir(dossier) {
+  // Sans dossier : le plan le plus récent. etage : ouvert depuis le tableau blanc de cet étage.
+  ouvrir(dossier, { etage = null } = {}) {
     const S = this.store;
+    this.etage = etage;
     let d = dossier;
     if (!d || !S.plans.has(d)) {
       let best = null;
@@ -124,6 +132,7 @@ export class PlanDossier {
       return;
     }
     this.dossier = d;
+    this.majChoix();
     this.sig = '';
     this.textesFixes();
     this.fond.hidden = false;
@@ -134,10 +143,48 @@ export class PlanDossier {
   fermer() {
     this.fond.hidden = true;
     this.dossier = null;
+    this.etage = null;
+  }
+
+  // Liste des dossiers que le tableau de l'étage peut afficher (ceux dont le plan le concerne ; tous pour
+  // la direction), du plus récent au plus ancien, plus « Automatique ».
+  majChoix() {
+    const S = this.store;
+    this.choix.hidden = !this.etage;
+    if (!this.etage) return;
+    const tous = this.etage === 'direction' || S.dg.etage === this.etage;
+    const plans = [...S.plans.values()]
+      .filter((p) => S.dossiers.has(p.dossier) && (tous || p.taches.some((t) => t.etage === this.etage)))
+      .sort((a, b) => b.t - a.t);
+    this.choixLib.textContent = tr('Afficher sur le tableau :') + ' ';
+    const choisi = S.tableauChoisi(this.etage) || '';
+    const options = [el('option', '', tr('Automatique (le plus récent, sans les annulés)'))];
+    options[0].value = '';
+    for (const p of plans) {
+      const d = S.dossiers.get(p.dossier);
+      const titre = String(d.titre || d.texte || '').replace(/\s+/g, ' ').trim();
+      const o = el('option', '', `${d.id} — ${titre.length > 48 ? titre.slice(0, 47) + '…' : titre} (${libelleDossier(d.etat)})`);
+      o.value = d.id;
+      options.push(o);
+    }
+    this.choixListe.replaceChildren(...options);
+    this.choixListe.value = choisi;
+  }
+
+  // Nouveau choix pour le tableau : il change tout de suite (la scène le relit à chaque image).
+  choisir(dossier) {
+    if (!this.etage) return;
+    this.store.choisirTableau(this.etage, dossier);
+    const p = dossier ? null : this.ui.dir.planAffiche();
+    this.dossier = dossier || (p && p.dossier) || this.dossier;
+    this.sig = '';
+    this.maj();
   }
 
   surEvenement(ev) {
     if (!this.ouvert || IGNORES.has(ev.type)) return;
+    if (ev.type === 'dossier_supprime' && ev.dossier === this.dossier) return void this.fermer();
+    if (ev.type === 'plan' || ev.type === 'dossier' || ev.type === 'dossier_supprime') this.majChoix();
     this.maj();
   }
 

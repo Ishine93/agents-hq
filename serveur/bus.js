@@ -55,7 +55,12 @@ export function abonner(fn) {
 
 export const nbClients = () => clients.size;
 
+// Dossiers supprimés (voir effacerDossier) : un événement tardif (session qui se termine…) ne doit ni les
+// faire réapparaître à l'écran, ni recréer leur dossier sur le disque.
+const supprimes = new Set();
+
 export function emettre(type, donnees = {}, dossierId = null) {
+  if (dossierId && supprimes.has(dossierId)) return null;
   const ev = { seq: ++seq, t: Date.now(), type, ...donnees };
   for (const envoyer of clients) {
     try {
@@ -107,6 +112,7 @@ export function reglagesPublics() {
     recolteAuto: REGLAGES.recolteAuto !== false,
     rojoPortsAuto: !!REGLAGES.rojoPortsAuto,
     gitAuto: REGLAGES.gitAuto === true,
+    validationUtilisateur: REGLAGES.validationUtilisateur === true,
     miseAJourAuto: REGLAGES.miseAJourAuto !== false,
     dureeBulles: Number(REGLAGES.dureeBulles) || 1,
     dg: { modele: REGLAGES.dg.modele, effort: REGLAGES.dg.effort },
@@ -183,12 +189,14 @@ export function instantane() {
 }
 
 export function majDossier(d) {
+  if (supprimes.has(d.id)) return;
   etat.dossiers.set(d.id, d);
   emettre('dossier', { dossier: publicDossier(d) }, d.id);
   planifierSauvegarde(d.id);
 }
 
 export function majTache(t, de = null) {
+  if (supprimes.has(t.dossier)) return;
   etat.taches.set(t.id, t);
   emettre('tache', { tache: publicTache(t), transition: { de, a: t.etat } }, t.dossier);
   planifierSauvegarde(t.dossier);
@@ -203,6 +211,7 @@ export function changerEtatTache(t, nouvelEtat, extra = {}) {
 // `pieces` : images publiques ({id, nom, type, legende, origine, url}) affichées avec le message.
 // extra : champs en plus, ex. { nom, tache, reponse: true } pour la réponse d'un agent (de: 'agent').
 export function message(dossierId, de, texte, etagesCibles = null, pieces = [], extra = null) {
+  if (dossierId && supprimes.has(dossierId)) return null;
   const d = dossierId ? etat.dossiers.get(dossierId) : null;
   const m = {
     id: `M${++compteurMessages}`,
@@ -267,6 +276,32 @@ function planifierSauvegarde(dossierId) {
     for (const id of aSauver) sauver(id);
     aSauver.clear();
   }, 300);
+}
+
+/**
+ * Efface complètement un dossier (déjà arrêté par l'ordonnanceur) : tâches, messages, notifications,
+ * demandes en attente, et son dossier sur le disque (journal, état, pièces jointes). Le site le retire aussi.
+ */
+export function effacerDossier(id) {
+  supprimes.add(id);
+  aSauver.delete(id);
+  const taches = new Set([...etat.taches.values()].filter((t) => t.dossier === id).map((t) => t.id));
+  for (const tid of taches) {
+    etat.taches.delete(tid);
+    etat.terminaux.delete(tid);
+    etat.pensees.delete(tid);
+  }
+  for (const [k, p] of etat.permissions) if (taches.has(p.tache)) etat.permissions.delete(k);
+  for (const [k, x] of etat.decisions) if (taches.has(x.tache)) etat.decisions.delete(k);
+  for (const [k, n] of etat.notifications) if (n.dossier === id || taches.has(n.tache)) etat.notifications.delete(k);
+  etat.messages = etat.messages.filter((m) => m.dossier !== id);
+  etat.dossiers.delete(id);
+  try {
+    fs.rmSync(path.join(DOSSIERS_DIR, id), { recursive: true, force: true });
+  } catch (e) {
+    console.error('suppression', id, e.message);
+  }
+  emettre('dossier_supprime', { dossier: id });
 }
 
 export function sauver(dossierId) {

@@ -134,6 +134,9 @@ body.redimensionne, body.redimensionne * { cursor: inherit !important; user-sele
 .conso-compte-tete { display: flex; gap: 8px; align-items: baseline; margin-bottom: 4px; }
 .conso-fenetre { display: grid; grid-template-columns: 190px 1fr 50px 200px; gap: 8px; align-items: center; font-size: 13px; padding: 2px 0; }
 .conso-fenetre .pct { font-weight: 800; text-align: right; font-variant-numeric: tabular-nums; }
+/* dernière relecture des limites ratée : anciennes valeurs grisées, avec la raison */
+.conso-fenetre.perime { opacity: 0.5; }
+.conso-perime { color: var(--orange); font-size: 12px; margin: 2px 0 4px; }
 .conso-chiffres { display: flex; flex-wrap: wrap; gap: 8px; }
 .conso-chiffre { flex: 1; min-width: 110px; border: 1px solid var(--bord-clair); border-radius: 8px; padding: 6px 10px; display: flex; flex-direction: column; }
 .conso-chiffre .v { font-size: 17px; font-weight: 800; font-variant-numeric: tabular-nums; }
@@ -305,3 +308,7 @@ body.redimensionne, body.redimensionne * { cursor: inherit !important; user-sele
   #btn-documents span, #btn-reglages span { display: none; }
   .cible-saisie { max-width: 180px; }
 }
+
+/* plan du dossier ouvert depuis un tableau blanc : choix du dossier affiché sur ce tableau */
+.plan-choix { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 12px; margin-top: 6px; color: var(--texte-doux, #b8bdd6); }
+.plan-choix select { max-width: min(420px, 70vw); font-size: 12px; }

@@ -160,6 +160,14 @@ export class Parametres {
       ligne(t('Tâches en même temps (par étage)'), plafond('plafondEtage')),
       h('h4', {}, t('Divers')),
       ligne(t('Ports Rojo automatiques'), h('label', { class: 'param-case' }, rojo, ' ', t('Donner un port Rojo unique à chaque nouveau jeu Roblox détecté (écrit dans son default.project.json).'))),
+      h('h4', {}, t('Vérification')),
+      ligne(t('Validation par toi'),
+        h('label', { class: 'param-case' },
+          h('input', { type: 'checkbox', checked: !!R.validationUtilisateur, on: { change: (e) => {
+            this.reglage({ validationUtilisateur: e.target.checked }, e.target.checked ? t('Le DG pourra te demander de valider certaines tâches.') : t('Une IA vérifie tout : tes dossiers vont de A à Z sans t’attendre.'));
+          } } }),
+          ' ', t('Me demander de valider moi-même certaines tâches (goût, visuel, gameplay).')),
+        h('small', { class: 'meta' }, t('Décoché : un vérificateur IA relit ces tâches à ta place et le dossier continue sans t’attendre (y compris les tâches qui attendaient déjà ta validation). Le QG te demande toujours ton accord avant de publier, d’envoyer, de supprimer ou d’acheter.'))),
       h('h4', {}, t('Git')),
       ligne(t('Git sans demander'),
         h('label', { class: 'param-case' },

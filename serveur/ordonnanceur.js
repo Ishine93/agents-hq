@@ -4,14 +4,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { REGLAGES, etage as trouverEtage } from './config.js';
-import { etat, majDossier, changerEtatTache, majTache, message, majDg, emettre, alerte } from './bus.js';
+import { etat, majDossier, changerEtatTache, majTache, message, majDg, emettre, alerte, effacerDossier } from './bus.js';
 import { canUseToolPour, refuserPour, demander } from './permissions.js';
 import { validerTaches } from './dg.js';
 import { promptProduction, promptRework } from './taches.js';
 import { ERREURS_FATALES } from './session.js';
 import { sauverPiecesUtilisateur, piecePublique } from './pieces.js';
 import { notifier, notificationResolue } from './notifications.js';
-import { enregistrerReemploi } from './conso.js';
+import { enregistrerReemploi, surLimitesLues, oublierDossier as oublierDossierConso } from './conso.js';
 import { recruter, reembaucher, occuper, liberer, agent as agentEquipe, tirerPrenom, libererPrenom } from './equipe.js';
 import { t as tr } from './i18n.js';
 
@@ -138,6 +138,8 @@ async function planifierDossier(d, opts) {
   }
   const erreurs = validerTaches(p.taches, []);
   if (!p.taches.length) erreurs.push('Le plan est vide.');
+  // le plan affiché montre la vérification qui aura vraiment lieu (IA si la validation par toi est coupée)
+  for (const x of p.taches) x.verification = verificationEffective(x.verification);
   if (erreurs.length) {
     if (d.x.essaisPlan++ < 2) return planifierDossier(d, { erreurs });
     d.etat = 'echec';
@@ -164,9 +166,16 @@ function echecDg(d, r, reessayer) {
   }
   if (r.erreur === 'rate_limit' || r.limite) {
     const jusqua = finLimite(r.limite);
-    message(d.id, 'systeme', tr("Limite d'usage atteinte : le DG reprend vers {heure}.", { heure: new Date(jusqua).toLocaleTimeString('fr-FR') }));
-    pauseGlobale(tr("Limite d'usage atteinte"), jusqua);
-    setTimeout(() => d.etat !== 'annule' && reessayer(), Math.max(0, jusqua - Date.now()) + 30000);
+    message(d.id, 'systeme', tr("Limite d'usage atteinte : le DG reprend vers {heure}.", { heure: quandReprise(jusqua) }));
+    pauseGlobale(tr("Limite d'usage atteinte"), jusqua, { limite: true, compte: d.compte });
+    // Le DG repart à la remise à zéro, ou plus tôt si la pause est levée (forfait changé, « Reprendre »).
+    const relance = () => {
+      if (!relancesDg.delete(relance)) return;
+      clearTimeout(minuterieRelance);
+      if (d.etat !== 'annule') reessayer();
+    };
+    const minuterieRelance = setTimeout(relance, Math.max(0, jusqua - Date.now()) + 30000);
+    relancesDg.add(relance);
     return;
   }
   d.etat = 'echec';
@@ -174,8 +183,23 @@ function echecDg(d, r, reessayer) {
   message(d.id, 'systeme', tr('Le DG a échoué : {raison}', { raison: r.echec }));
 }
 
+// Vérification « par toi » (goût, visuel, gameplay) : seulement si tu l'as demandé dans les réglages.
+// Sinon un vérificateur IA s'en charge, avec ses critères : le dossier va de A à Z sans t'attendre.
+function verificationEffective(v) {
+  if (v?.mode !== 'user' || REGLAGES.validationUtilisateur === true) return v;
+  return {
+    ...v,
+    mode: 'agent',
+    modele: v.modele || 'sonnet',
+    effort: v.effort || 'medium',
+    maxRework: Math.max(1, v.maxRework || 0),
+    checks: [...(v.checks || []), "Le résultat correspond à ce qui était demandé (rendu, visuel, gameplay) : juge sur des preuves (fichiers, captures, tests), pas sur l'intention."],
+  };
+}
+
 function ajouterTaches(d, liste) {
-  for (const p of liste) {
+  for (const p0 of liste) {
+    const p = { ...p0, verification: verificationEffective(p0.verification) };
     const t = {
       id: `${d.id}-${p.ref}`,
       dossier: d.id,
@@ -262,6 +286,28 @@ export function annulerDossier(d) {
   for (const t of tachesDe(d)) annulerTache(t, false);
   message(d.id, 'systeme', tr('Dossier annulé.'));
   majDg({ etat: 'libre', dossier: d.id, action: null });
+}
+
+// Suppression complète (dossier lancé par erreur…) : on l'arrête s'il tourne encore, puis on efface tout,
+// à l'écran comme sur le disque. Contrairement à l'annulation, il ne reste aucune trace.
+export function supprimerDossier(d) {
+  annulerDossier(d);
+  const r = reveils.get(d.id);
+  if (r) {
+    clearTimeout(r.minuterie);
+    reveils.delete(d.id);
+  }
+  for (const t of tachesDe(d)) {
+    t.x.gen += 1;
+    controleurs.get(t.id)?.abort();
+    libererVerrou(t);
+    notificationResolue(`V-${t.id}`);
+  }
+  notificationResolue(`QD-${d.id}`);
+  if (etat.dg.dossier === d.id) majDg({ etat: 'libre', dossier: null, action: null });
+  effacerDossier(d.id);
+  oublierDossierConso(d.id);
+  tick();
 }
 
 // ---------------------------------------------------------------- planification des lancements
@@ -517,6 +563,11 @@ async function informer(d, t, texte) {
 }
 
 async function verification(t, d) {
+  // tâche planifiée avant que tu coupes la validation par toi : elle passe aussi à un vérificateur IA
+  if (t.x.verification?.mode === 'user' && REGLAGES.validationUtilisateur !== true) {
+    t.x.verification = verificationEffective(t.x.verification);
+    t.verif = { mode: t.x.verification.mode, modele: t.x.verification.modele };
+  }
   const v = t.x.verification;
   const sortie = t.x.sortie;
   if (v.mode === 'none') return terminer(t, 'done', sortie);
@@ -589,7 +640,7 @@ function gererEchec(t, d, r, phase) {
     return;
   }
   if (r.erreur === 'rate_limit' || r.limite) {
-    pauseGlobale(tr("Limite d'usage atteinte"), finLimite(r.limite));
+    pauseGlobale(tr("Limite d'usage atteinte"), finLimite(r.limite), { limite: true, compte: d.compte });
     t.x.reprise = repriseDe(t, phase, "limite d'usage");
     changerEtatTache(t, 'queued', { motifFile: "limite d'usage" });
     return;
@@ -658,6 +709,20 @@ export function annulerTache(t, notifier = true) {
   refuserPour(new Set([t.id]));
   terminer(t, 'cancelled', { status: 'failed', summary: tr('Annulée.') });
   if (notifier) message(t.dossier, 'systeme', tr('{ref} annulée.', { ref: t.ref }), [t.etage]);
+}
+
+// Validation par toi coupée (réglage, ou au démarrage) : les tâches qui attendaient ta validation
+// passent à un vérificateur IA au lieu de bloquer le dossier.
+export function confierValidationsEnAttente() {
+  if (REGLAGES.validationUtilisateur === true) return;
+  for (const t of etat.taches.values()) {
+    if (t.etat !== 'verifying' || t.x.verification?.mode !== 'user') continue;
+    const d = etat.dossiers.get(t.dossier);
+    if (!d || d.etat === 'annule') continue;
+    notificationResolue(`V-${t.id}`);
+    message(d.id, 'systeme', tr('{ref} : la vérification est confiée à une IA (la validation par toi est coupée dans les Réglages).', { ref: t.ref }), [t.etage]);
+    verification(t, d).catch((e) => console.error('vérification', t.id, e?.message || e));
+  }
 }
 
 export function validerUtilisateur(t, decision) {
@@ -852,6 +917,7 @@ export function reprendreDossiers() {
   // Arrêt tombé pendant la synthèse finale (tout était fini) : on la relance.
   setImmediate(() => {
     for (const d of etat.dossiers.values()) if (d.etat === 'en_cours') verifierFinDossier(d);
+    confierValidationsEnAttente();
   });
 }
 
@@ -871,9 +937,21 @@ export function arreterSessions() {
 
 // ---------------------------------------------------------------- pause, urgence
 
-export function pauseGlobale(raison, jusqua) {
-  if (raison !== tr("Arrêt d'urgence")) notifier({ type: 'info', titre: tr('QG en pause'), texte: jusqua ? tr('{raison} — reprise vers {heure}', { raison, heure: new Date(jusqua).toLocaleTimeString('fr-FR') }) : raison });
-  etat.ordonnanceur = { pause: { raison, jusqua } };
+// Heure de reprise : l'heure seule si c'est aujourd'hui, sinon le jour aussi (limite de la semaine).
+function quandReprise(ms) {
+  const d = new Date(ms);
+  const loc = REGLAGES.langueInterface === 'en' ? 'en-GB' : 'fr-FR';
+  if (d.toDateString() === new Date().toDateString()) return d.toLocaleTimeString(loc, { hour: '2-digit', minute: '2-digit' });
+  return d.toLocaleString(loc, { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
+}
+
+// Relances du DG en attente de la fin d'une limite d'usage (elles partent aussi quand la pause est levée).
+const relancesDg = new Set();
+
+/** extra : { limite: true, compte } pour une pause due à une limite d'usage (levée dès que le compte a de la marge). */
+export function pauseGlobale(raison, jusqua, extra = {}) {
+  if (raison !== tr("Arrêt d'urgence")) notifier({ type: 'info', titre: tr('QG en pause'), texte: jusqua ? tr('{raison} — reprise vers {heure}', { raison, heure: quandReprise(jusqua) }) : raison });
+  etat.ordonnanceur = { pause: { raison, jusqua, ...extra } };
   emettre('ordonnanceur', { ordonnanceur: etat.ordonnanceur });
   clearTimeout(minuteriePause);
   if (jusqua) minuteriePause = setTimeout(() => reprendre(), Math.max(0, jusqua - Date.now()) + 30000);
@@ -883,8 +961,21 @@ export function reprendre() {
   clearTimeout(minuteriePause);
   etat.ordonnanceur = { pause: null };
   emettre('ordonnanceur', { ordonnanceur: etat.ordonnanceur });
+  for (const relance of [...relancesDg]) relance();
   tick();
 }
+
+// Limites relues (conso.js) : si le compte qui a mis le QG en pause a de nouveau de la marge (forfait
+// changé, fenêtre remise à zéro plus tôt), on reprend sans attendre l'heure annoncée.
+function limitesRelues(compteId, l) {
+  const p = etat.ordonnanceur.pause;
+  if (!p?.limite || (p.compte && p.compte !== compteId)) return;
+  const fenetres = Object.values(l.fenetres || {}).filter((f) => f.utilisation != null);
+  if (!fenetres.length || fenetres.some((f) => f.utilisation >= 100)) return;
+  notifier({ type: 'info', titre: tr('QG relancé'), texte: tr('Le forfait a de nouveau de la marge : le travail reprend sans attendre.') });
+  reprendre();
+}
+surLimitesLues(limitesRelues);
 
 // Arrêt d'urgence : tout s'arrête ; les tâches en cours repartiront (reprise de session) sur « Reprendre ».
 export function urgence() {

@@ -6,6 +6,7 @@ import path from 'node:path';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { RACINE } from './config.js';
 import { chargerComptes, compteConnecte, envPour, trouverCompte } from './comptes.js';
+import { t } from './i18n.js';
 
 // QG_CONSO_FICHIER : pour les tests (ne pas mélanger leurs appels à ta vraie consommation).
 const FICHIER = process.env.QG_CONSO_FICHIER || path.join(RACINE, 'runtime', 'conso.json');
@@ -117,19 +118,62 @@ export function enregistrerReemploi(contexte) {
 
 // ---------------------------------------------------------------- limites du forfait
 
-const pct = (v) => (v == null ? null : v <= 1 ? Math.round(v * 1000) / 10 : Math.round(v * 10) / 10);
+// La lecture des limites répond en pourcentage (0-100) ; les événements des sessions, en fraction (0-1).
+// (Deviner l'échelle d'après la valeur affichait 1 % de la semaine comme 100 %.)
+const pctLecture = (v) => (v == null ? null : Math.round(v * 10) / 10);
+const pctEvenement = (v) => (v == null ? null : Math.min(Math.round(v * 1000) / 10, 100));
 
 /** Événement « rate_limit » reçu pendant une session : mise à jour immédiate de la fenêtre concernée. */
 export function majLimiteEvenement(compteId, info) {
   if (!info?.rateLimitType || !compteId) return;
   const l = (etat.limites[compteId] = etat.limites[compteId] || { fenetres: {} });
   const f = (l.fenetres[info.rateLimitType] = l.fenetres[info.rateLimitType] || {});
-  if (info.utilization != null) f.utilisation = pct(info.utilization);
+  if (info.utilization != null) f.utilisation = pctEvenement(info.utilization);
   if (info.resetsAt) f.reinit = info.resetsAt * (info.resetsAt < 1e12 ? 1000 : 1);
   f.statut = info.status;
-  l.maj = Date.now();
+  // Seule cette fenêtre est neuve : l.maj reste l'heure de la dernière lecture complète.
+  f.lu = Date.now();
   changement();
 }
+
+// Après chaque lecture réussie (forfait changé, pause à lever…) : abonnés posés par index.js et l'ordonnanceur.
+const abonnesLimites = new Set();
+export const surLimitesLues = (fn) => abonnesLimites.add(fn);
+
+/** Range une réponse de la lecture des limites (exportée pour les tests). Lève une erreur si elle est vide. */
+export function appliquerLecture(compteId, u) {
+  // Forfait sans limites (clé API…) : rien à lire. Forfait avec limites mais réponse vide : le serveur
+  // n'a pas répondu (trop de lectures rapprochées), c'est un échec, on garde les anciennes valeurs.
+  if (u.rate_limits_available && !u.rate_limits) throw new Error(t('le serveur n’a pas donné les limites, nouvel essai dans quelques minutes'));
+  const lu = Date.now();
+  const l = { maj: lu, essai: lu, abonnement: u.subscription_type || null, disponible: !!u.rate_limits_available, fenetres: {} };
+  const r = u.rate_limits || {};
+  for (const k of ['five_hour', 'seven_day', 'seven_day_opus', 'seven_day_sonnet']) {
+    if (r[k]) l.fenetres[k] = { utilisation: pctLecture(r[k].utilization), reinit: r[k].resets_at ? Date.parse(r[k].resets_at) : null };
+  }
+  for (const m of r.model_scoped || []) l.fenetres[`modele:${m.display_name}`] = { nom: m.display_name, utilisation: pctLecture(m.utilization), reinit: m.resets_at ? Date.parse(m.resets_at) : null };
+  if (r.extra_usage?.is_enabled) l.extra = { utilisation: pctLecture(r.extra_usage.utilization), credits: r.extra_usage.used_credits, plafond: r.extra_usage.monthly_limit, devise: r.extra_usage.currency || null };
+  // Tout est remplacé : une fenêtre d'avant (ancien forfait, événement « limite atteinte ») ne survit pas.
+  etat.limites[compteId] = l;
+  changement();
+  for (const fn of abonnesLimites) {
+    try {
+      fn(compteId, l);
+    } catch (e) {
+      console.error('limites', compteId, e.message);
+    }
+  }
+  return l;
+}
+
+/** Lecture ratée : on garde les dernières valeurs, mais marquées comme anciennes (maj = dernière lecture réussie). */
+export function echecLecture(compteId, e) {
+  etat.limites[compteId] = { ...(etat.limites[compteId] || { fenetres: {} }), erreur: String(e?.message || e), essai: Date.now() };
+  changement();
+}
+
+/** Limites telles que gardées (pour les tests). */
+export const limitesDe = (compteId) => etat.limites[compteId];
 
 const enCours = new Map();
 /** Lit les limites du forfait d'un compte (aucun appel au modèle, ≈ 3 s). */
@@ -161,19 +205,9 @@ export function lireLimites(compteId) {
         q.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET({ skipBehaviors: true }),
         new Promise((_, rej) => setTimeout(() => rej(new Error('délai dépassé')), 20000)),
       ]);
-      const l = { maj: Date.now(), abonnement: u.subscription_type || null, disponible: !!u.rate_limits_available, fenetres: {} };
-      const r = u.rate_limits || {};
-      for (const k of ['five_hour', 'seven_day', 'seven_day_opus', 'seven_day_sonnet']) {
-        if (r[k]) l.fenetres[k] = { utilisation: pct(r[k].utilization), reinit: r[k].resets_at ? Date.parse(r[k].resets_at) : null };
-      }
-      for (const m of r.model_scoped || []) l.fenetres[`modele:${m.display_name}`] = { nom: m.display_name, utilisation: pct(m.utilization), reinit: m.resets_at ? Date.parse(m.resets_at) : null };
-      if (r.extra_usage?.is_enabled) l.extra = { utilisation: pct(r.extra_usage.utilization), credits: r.extra_usage.used_credits, plafond: r.extra_usage.monthly_limit, devise: r.extra_usage.currency || null };
-      etat.limites[compteId] = l;
-      changement();
-      return l;
+      return appliquerLecture(compteId, u);
     } catch (e) {
-      etat.limites[compteId] = { ...(etat.limites[compteId] || { fenetres: {} }), erreur: String(e.message || e), maj: Date.now() };
-      changement();
+      echecLecture(compteId, e);
       return null;
     } finally {
       liberer();
@@ -186,16 +220,17 @@ export function lireLimites(compteId) {
   return p;
 }
 
-// Relecture régulière : toutes les 5 min s'il y a eu de l'activité récente, sinon toutes les 30 min.
+// Relecture régulière : toutes les 5 min s'il y a eu de l'activité récente (ou si urgent(), le QG en pause
+// sur une limite d'usage), sinon toutes les 30 min. Un échec compte comme une lecture pour ce rythme.
 let derniereActivite = 0;
 export const signalerActivite = () => (derniereActivite = Date.now());
-export function demarrerSuiviLimites() {
+export function demarrerSuiviLimites({ urgent = () => false } = {}) {
   const tour = async () => {
     for (const c of chargerComptes().comptes) {
       if (!compteConnecte(c)) continue;
       const l = etat.limites[c.id];
-      const age = Date.now() - (l?.maj || 0);
-      const actif = Date.now() - derniereActivite < 10 * 60 * 1000;
+      const age = Date.now() - Math.max(l?.maj || 0, l?.essai || 0);
+      const actif = urgent() || Date.now() - derniereActivite < 10 * 60 * 1000;
       if (age > (actif ? 5 : 30) * 60 * 1000) await lireLimites(c.id).catch(() => null);
     }
   };
@@ -224,6 +259,13 @@ export function consoPublique() {
     limites: etat.limites,
     reemplois: etat.reemplois,
   };
+}
+
+// Dossier supprimé : il disparaît du détail « par dossier » (les totaux du jour gardent ce qui a été consommé).
+export function oublierDossier(id) {
+  delete etat.dossiers[id];
+  for (const k of Object.keys(etat.taches)) if (k.startsWith(`${id}-`)) delete etat.taches[k];
+  changement();
 }
 
 export const consoTaches = (dossierId) => Object.fromEntries(Object.entries(etat.taches).filter(([k]) => k.startsWith(`${dossierId}-`)));

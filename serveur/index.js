@@ -6,7 +6,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { RACINE, REGLAGES } from './config.js';
-import { etat, abonner, instantane, chargerHistorique, appliquerEvenement, DOSSIERS_DIR, sauver, utiliserDossiers, emettre, modelesPublics, mcpPublic, alerte } from './bus.js';
+import { etat, abonner, instantane, chargerHistorique, appliquerEvenement, DOSSIERS_DIR, sauver, utiliserDossiers, emettre, modelesPublics, mcpPublic, alerte, comptesPublics } from './bus.js';
 import { decouvrir, decouverteEnCache } from './decouverte.js';
 import { changerMode } from './mcp.js';
 import { resoudreDecision } from './decisions.js';
@@ -24,11 +24,12 @@ import * as dg from './dg.js';
 import * as taches from './taches.js';
 import { creerSimulation } from './simulation.js';
 import { routesReglages, ajouterEtages } from './api-reglages.js';
-import { surChangement as surConso, consoPublique, demarrerSuiviLimites } from './conso.js';
+import { surChangement as surConso, consoPublique, demarrerSuiviLimites, surLimitesLues } from './conso.js';
 import { t as tr } from './i18n.js';
 import { questionTache, questionDg } from './questions.js';
 import { verifierMaj, lancerMaj, majAuLancement, CODE_MISE_A_JOUR } from './maj.js';
 
+const decouverteEnCours = new Set();
 const alerteQuestion = (dossierId, e) => alerte('erreur', tr('Question sans réponse : {raison}', { raison: e.message }), dossierId);
 
 // ---------------------------------------------------------------- arguments
@@ -251,10 +252,11 @@ async function api(req, res, chemin) {
     emettre('mcp', { mcp: mcpPublic(), modeles: modelesPublics() });
     return json(res, 200, mcpPublic());
   }
-  if ((m = chemin.match(/^\/api\/dossiers\/(D\d+)\/(repondre|completer|annuler)$/))) {
+  if ((m = chemin.match(/^\/api\/dossiers\/(D\d+)\/(repondre|completer|annuler|supprimer)$/))) {
     const d = etat.dossiers.get(m[1]);
     if (!d) return json(res, 404, { erreur: tr('dossier inconnu') });
     if (m[2] === 'annuler') ordo.annulerDossier(d);
+    else if (m[2] === 'supprimer') ordo.supprimerDossier(d);
     else {
       const texte = String(corps.texte || '').trim();
       if (!texte) return json(res, 400, { erreur: tr('message vide') });
@@ -352,7 +354,26 @@ serveur.listen(PORT, HOTE, () => {
   if (REPLAY) lancerReplay();
   else ordo.reprendreDossiers(); // dossiers interrompus par un arrêt : ils repartent
   if (!REPLAY) prechargerDictee();
-  if (!DEMO && !REPLAY) demarrerSuiviLimites();
+  if (!DEMO && !REPLAY) {
+    // En pause sur une limite d'usage : relecture toutes les 5 min, pour reprendre dès qu'il y a de la marge.
+    demarrerSuiviLimites({ urgent: () => !!etat.ordonnanceur?.pause?.limite });
+    // Forfait changé (Pro → Max…) : la découverte en cache garde l'ancien forfait et ses modèles, on la refait.
+    // (la découverte dit « Claude Max », la lecture des limites « max » : on compare le mot du forfait)
+    const forfait = (s) => String(s || '').toLowerCase().replace(/^claude\s+/, '').split(/\s+/)[0];
+    surLimitesLues((id, l) => {
+      const avant = decouverteEnCache(id)?.abonnement;
+      if (!l.abonnement || !avant || forfait(avant) === forfait(l.abonnement) || decouverteEnCours.has(id)) return;
+      console.log(`Forfait de ${id} changé (${avant} → ${l.abonnement}) : relecture des modèles et connecteurs.`);
+      decouverteEnCours.add(id);
+      decouvrir(id)
+        .then(() => {
+          emettre('mcp', { mcp: mcpPublic(), modeles: modelesPublics() });
+          emettre('comptes', comptesPublics());
+        })
+        .catch((e) => console.error('découverte', id, e.message))
+        .finally(() => decouverteEnCours.delete(id));
+    });
+  }
   // Première découverte (sans tokens) des modèles et MCP de chaque compte connecté.
   if (!DEMO && !REPLAY) {
     for (const c of comptes) {

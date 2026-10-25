@@ -11,7 +11,7 @@ import { phraseOutil, phrase, liste as listePhrases, sujet, enumerer, blaguesSec
 import { t as tr, langueCourante } from './i18n.js';
 import {
   versArt, coinTuile, construireCouche, spriteMeuble, animerMeuble, spriteCloison, spriteAscenseur, spriteHorloge, spriteTableau,
-  ledsService, animerJeu, spriteTele, spriteCouverture, oreiller, voileNuit,
+  ledsService, animerJeu, spriteTele, spriteCouverture, oreiller, voileNuit, programmeTele, resteProgrammeTele,
 } from './decor.js';
 import { TERMINAUX } from './etat.js';
 
@@ -28,6 +28,11 @@ const SORTE_JEU = {
   billard: 'jeuBillard', babyfoot: 'jeuBabyfoot', tele: 'jeuTele', arcade: 'jeuArcade', pingpong: 'jeuPingpong',
   pouf: 'jeuPouf', cafe: 'jeuCafe', regarde: 'jeuRegarde',
 };
+// Ce qu'on dit en arrivant à une place (rien sur une place debout improvisée).
+const ARRIVEE_JEU = { tele: 'arriveeTele', cafe: 'jeuCafe', regarde: 'jeuRegarde', billard: 'arriveeJeu', babyfoot: 'arriveeJeu', pingpong: 'arriveeJeu', arcade: 'arriveeJeu', pouf: 'arriveeJeu' };
+// Durée d'une activité en salle de pause avant d'avoir envie d'autre chose (une visite est plus courte).
+const dureeEnvie = (visite = false) => (visite ? 20000 + Math.random() * 20000 : 35000 + Math.random() * 55000);
+const JOY_VISITE = [20000, 30000]; // salle de pause : Joy passe voir un joueur, puis un autre
 
 // ---------- où voit-on qui ? ----------
 // Une tâche qui n'a pas démarré attend dans la salle de pause ; un agent en réserve dort dans la salle de repos.
@@ -474,7 +479,7 @@ export class Directeur {
       const [a, b, c] = libres;
       const amb = (Array.isArray(S.bonheur && S.bonheur.ambiance) ? S.bonheur.ambiance : []).filter((x) => typeof x === 'string' && x.trim());
       // en salle de pause, une fois sur deux on parle du jeu en cours
-      const jeu = salle && a.spot && a.spot.activite && Math.random() < 0.5 ? listePhrases(SORTE_JEU[a.spot.activite]) : [];
+      const jeu = salle && a.spot && SORTE_JEU[a.spot.activite] && Math.random() < 0.5 ? this.phrasesJeu(a.spot.activite, now) : [];
       const lignes = jeu.length ? jeu : amb.length ? amb : listePhrases('ambiance');
       const rep = listePhrases('reponsesBavardage');
       const i2 = Math.floor(Math.random() * rep.length);
@@ -506,8 +511,106 @@ export class Directeur {
     const a = joueurs[Math.floor(Math.random() * joueurs.length)];
     const t = this.store.taches.get(a.tacheId);
     if (!t || estBloquee(t)) return;
-    const l = listePhrases(SORTE_JEU[a.spot.activite]);
+    const l = this.phrasesJeu(a.spot.activite, now);
     if (l.length) this.dire(a.id, { texte: l[Math.floor(Math.random() * l.length)] }, 2600, { phrase: true, parle: true });
+  }
+
+  // Phrases d'une activité de la salle de pause. Devant la télé, elles suivent le programme à l'écran
+  // (foot ou dessin animé) ; juste avant le changement de programme, une phrase qui va avec les deux.
+  phrasesJeu(activite, now) {
+    if (activite !== 'tele') return listePhrases(SORTE_JEU[activite]);
+    if (resteProgrammeTele(now) < 3500 * this.mult() + 800 || Math.random() < 0.25) return listePhrases('jeuTele');
+    return listePhrases(programmeTele(now) === 'foot' ? 'jeuTeleFoot' : 'jeuTeleDessin');
+  }
+
+  // ---------- salle de pause : chacun change d'activité de temps en temps ----------
+  // Sans ça, chacun gardait sa première place jusqu'à son tour et la salle paraissait figée. Une « envie »
+  // dure de 35 à 90 s ; ensuite l'agent va ailleurs : rejoindre quelqu'un qui joue seul, discuter avec un
+  // joueur sans jouer, regarder la télé, prendre un café, l'arcade, les poufs, regarder une partie…
+  placePause(av, now) {
+    const jeu = this.carte.spots.jeu || [];
+    const e = av.envie;
+    if (e && this.resa.get(cle(e.spot)) === av.id) {
+      // on ne part pas en pleine marche, en pleine phrase, ni pendant une blague de Joy
+      const occupe = !av.arrive || av.chemin.length || this.parleEncore(av.id, now) || (this.joyActe && now < this.joyActe.fin);
+      if (this._instant || now < e.jusqua || occupe) return e.spot;
+      const n = this.nouvelleEnvie(av);
+      if (n) {
+        av.envie = { ...n, jusqua: now + dureeEnvie(!!n.visite) };
+        return n.spot;
+      }
+      e.jusqua = now + 12000; // rien d'autre de libre : on réessaie un peu plus tard
+      return e.spot;
+    }
+    // première place (ou place perdue) : la première libre, en formant d'abord des duos
+    const s = this.reserver(av, jeu, [9.5, 6.5]);
+    // première envie décalée d'un agent à l'autre : tout le monde ne se lève pas en même temps
+    av.envie = { spot: s, jusqua: now + (e ? dureeEnvie() : 15000 + Math.random() * 45000) };
+    return s;
+  }
+
+  nouvelleEnvie(av) {
+    const jeu = this.carte.spots.jeu || [];
+    const ici = av.envie && av.envie.spot;
+    const ailleurs = (s) => !ici || cle(s) !== cle(ici);
+    const libres = jeu.filter((s) => ailleurs(s) && this.libre(s, av));
+    const auHasard = (l) => l[Math.floor(Math.random() * l.length)];
+    // un autre agent installé à sa place de jeu (arrivé, pas en train de marcher)
+    const installe = (s) => {
+      const o = this.resa.get(cle(s));
+      const a = o && o !== av.id ? this.avatars.get(o) : null;
+      return a && a.type === 'agent' && a.cat === 'jeu' && a.arrive && !a.chemin.length ? a : null;
+    };
+    const choix = [];
+    // 1. rejoindre quelqu'un qui joue seul : la place libre de la table la plus loin de lui (en face)
+    const tables = new Map();
+    for (const s of jeu) {
+      if (!s.table) continue;
+      if (!tables.has(s.table)) tables.set(s.table, { joueurs: [], libres: [], centre: s.centre });
+      const tb = tables.get(s.table);
+      const a = installe(s);
+      if (a) tb.joueurs.push(a);
+      else if (ailleurs(s) && this.libre(s, av)) tb.libres.push(s);
+    }
+    for (const tb of tables.values()) {
+      if (tb.joueurs.length === 1 && tb.libres.length) {
+        const j = tb.joueurs[0];
+        const face = tb.libres.slice().sort((a, b) => Math.hypot(b.x - j.gx, b.y - j.gy) - Math.hypot(a.x - j.gx, a.y - j.gy))[0];
+        choix.push({ poids: 4, spot: face, rejoint: j.id });
+      } else if (!tb.joueurs.length && tb.libres.length >= 2) {
+        // une table vide : on s'y installe en attendant qu'on vienne jouer avec nous
+        choix.push({ poids: 1, spot: tb.libres[0] });
+      } else if (tb.joueurs.length >= 2) {
+        // 2. regarder une partie à deux, à une place de spectateur
+        const spect = libres.filter((s) => s.activite === 'regarde' && s.centre && tb.centre && s.centre[0] === tb.centre[0] && s.centre[1] === tb.centre[1]);
+        if (spect.length) choix.push({ poids: 1.5, spot: auHasard(spect) });
+      }
+    }
+    // 3. discuter avec un joueur sans jouer : debout à côté de lui
+    const joueurs = [...this.avatars.values()].filter((a) => a !== av && a.type === 'agent' && a.cat === 'jeu' && a.arrive && !a.chemin.length && a.spot && a.spot.table);
+    if (joueurs.length) choix.push({ poids: 3, visite: auHasard(joueurs) });
+    // 4. la télé ; 5. café, arcade, poufs
+    const par = (act) => libres.filter((s) => s.activite === act);
+    if (par('tele').length && !(ici && ici.activite === 'tele')) choix.push({ poids: 3, spot: auHasard(par('tele')) });
+    for (const act of ['cafe', 'arcade', 'pouf']) if (par(act).length && !(ici && ici.activite === act)) choix.push({ poids: 1.2, spot: auHasard(par(act)) });
+    if (!choix.length) return null;
+    let r = Math.random() * choix.reduce((n, c) => n + c.poids, 0);
+    let c = choix[choix.length - 1];
+    for (const x of choix) {
+      r -= x.poids;
+      if (r < 0) {
+        c = x;
+        break;
+      }
+    }
+    let spot = c.spot;
+    if (c.visite) {
+      const j = c.visite;
+      spot = this.deboutLibre(av, [j.gx, j.gy], { rayon: 1.8 }) || this.deboutLibre(av, [j.gx, j.gy], { rayon: 3 });
+    }
+    if (!spot) return null;
+    this.resa.set(cle(spot), av.id);
+    return { spot, rejoint: c.rejoint || null, visite: c.visite ? c.visite.id : null };
   }
 
   // ---------- Joy, le happiness manager ----------
@@ -532,9 +635,12 @@ export class Directeur {
     if (this.joyActe && now < this.joyActe.fin && av.spot && av.cat === 'joy') return { cat: 'joy', spot: av.spot, cle: av.cle, centre: av.centre };
     const g = this.groupePrefere();
     if (g) {
+      // salle de pause : elle passe voir un joueur, puis un autre (sinon elle restait plantée au même endroit)
+      const j = this.estPause() ? this.joueurVuParJoy(now) : null;
+      const centre = j ? [j.gx, j.gy] : g.centre;
       // debout, sur une case libre près du groupe (jamais sur un siège ni à la place de quelqu'un)
-      const sp0 = this.deboutLibre(av, g.centre, { rayon: 4.5, garder: 2.5 });
-      if (sp0) return { cat: 'joy', spot: sp0, cle: 'joy:' + cle(sp0), centre: g.centre };
+      const sp0 = this.deboutLibre(av, centre, j ? { rayon: 3, garder: 1.6 } : { rayon: 4.5, garder: 2.5 });
+      if (sp0) return { cat: 'joy', spot: sp0, cle: 'joy:' + cle(sp0), centre };
     }
     // tournée : un arrêt toutes les 15 s
     const arrets = sp.tourJoy && sp.tourJoy.length ? sp.tourJoy : JOY_TOUR;
@@ -548,6 +654,19 @@ export class Directeur {
     const repli = this.deboutLibre(av, [tour[0].x + 0.5, tour[0].y + 0.5]);
     if (repli) return { cat: 'joy', spot: repli, cle: 'joy:' + cle(repli), centre: null };
     return { cat: 'joy', spot: av.spot || tour[0], cle: av.cle || 'joy:' + cle(tour[0]), centre: null };
+  }
+
+  // Joueur que Joy est en train de voir (salle de pause) : le même pendant 20 à 30 s, puis un autre.
+  joueurVuParJoy(now) {
+    const tous = [...this.oisifs().values()].flat();
+    if (!tous.length) return null;
+    const v = this.joyVisite;
+    const actuel = v && tous.find((a) => a.id === v.id);
+    if (actuel && now < v.jusqua) return actuel;
+    const autres = tous.filter((a) => !v || a.id !== v.id);
+    const choix = (autres.length ? autres : tous)[Math.floor(Math.random() * (autres.length || tous.length))];
+    this.joyVisite = { id: choix.id, jusqua: now + JOY_VISITE[0] + Math.random() * (JOY_VISITE[1] - JOY_VISITE[0]) };
+    return choix;
   }
 
   publicJoy(j, large = false) {
@@ -878,11 +997,17 @@ export class Directeur {
   }
 
   // ---------- plans au tableau ----------
+  // Plan du tableau blanc : celui que tu as choisi en cliquant dessus, sinon le plus récent qui concerne
+  // l'étage, sans les dossiers annulés (un dossier arrêté avant de démarrer ne prend plus la place).
   planAffiche() {
     const S = this.store;
+    const choisi = S.tableauChoisi(this.etageId);
+    if (choisi && S.plans.has(choisi)) return S.plans.get(choisi);
     let best = null;
     let dernier = null;
     for (const p of S.plans.values()) {
+      const d = S.dossiers.get(p.dossier);
+      if (!d || d.etat === 'annule') continue;
       if (!dernier || p.t > dernier.t) dernier = p;
       if (!p.taches.some((t) => t.etage === this.etageId)) continue;
       if (!best || p.t > best.t) best = p;
@@ -1244,8 +1369,9 @@ export class Directeur {
     // agent
     if (etageVisibleTache(S, t) !== this.etageId) return { cat: 'depart' };
     if (this.estPause()) {
-      // salle de pause : une place de jeu chacun (billard, baby-foot, canapé…), debout s'il n'y en a plus
-      const s = this.reserver(av, sp.jeu || [], [9.5, 6.5]);
+      // salle de pause : une place de jeu chacun (billard, baby-foot, canapé…), debout s'il n'y en a plus,
+      // et de temps en temps on change d'activité (placePause)
+      const s = this.placePause(av, now);
       return { cat: 'jeu', spot: s, cle: 'jeu:' + cle(s) };
     }
     const desc = this.descentes.get(t.id);
@@ -1395,7 +1521,9 @@ export class Directeur {
     for (const t of S.taches.values()) {
       if (t.etage !== this.etageId || t.etat !== 'verifying') continue;
       const v = S.verifs.get(t.id);
-      const parAgent = v ? v.phase === 'debut' : t.verif && t.verif.mode === 'agent';
+      // une validation qui t'attend n'a pas de vérificateur IA à côté de l'agent (sa bulle dit qu'il t'attend)
+      const parToi = (v && v.verificateur && v.verificateur.modele === 'toi') || (t.verif && t.verif.mode === 'user');
+      const parAgent = !parToi && (v ? v.phase === 'debut' : t.verif && t.verif.mode === 'agent');
       if (!parAgent || !this.avatars.has(t.id) || this.avatars.has('insp:' + t.id)) continue;
       this.avatars.set('insp:' + t.id, this.nouvelAvatar('insp:' + t.id, 'inspecteur', t.id, instant));
     }
@@ -1557,7 +1685,20 @@ export class Directeur {
     } else if (av.cat === 'dodo' && av.spot && av.spot.couche) {
       if (Math.random() < 0.5) this.dire(av.id, { texte: phrase('coucher', av.id + '|' + now) }, 2600, { phrase: true, parle: true });
     } else if (av.cat === 'jeu') {
-      if (Math.random() < 0.45) this.dire(av.id, { icone: 'sourire', texte: phrase('arriveeJeu', av.id + '|' + now) }, 3000, { phrase: true, parle: true });
+      const e = av.envie;
+      const autre = e && (e.rejoint || e.visite) ? this.avatars.get(e.rejoint || e.visite) : null;
+      if (autre && autre.arrive && !this.parleEncore(autre.id, now)) {
+        // venu jouer avec quelqu'un, ou discuter avec un joueur : il le dit, l'autre répond
+        if (e.visite) av.dir = dirVers(autre.gx - av.gx, autre.gy - av.gy);
+        // celui qu'on rejoint reste pour la partie (ou le temps de la discussion) au lieu de partir aussitôt
+        if (autre.envie) autre.envie.jusqua = Math.max(autre.envie.jusqua, now + (e.rejoint ? dureeEnvie() : 15000));
+        const [question, reponse] = e.rejoint ? ['rejoindreJeu', 'accepterJeu'] : ['visiteJoueur', 'reponseVisite'];
+        this.dire(av.id, { texte: phrase(question, av.id + '|' + now) }, 2800, { phrase: true, force: true, parle: true });
+        this.programmer(now + 2600 * this.mult(), () => this.dire(autre.id, { texte: phrase(reponse, autre.id + '|' + now) }, 2800, { phrase: true, force: true, parle: true }));
+        e.rejoint = e.visite = null;
+      } else if (ARRIVEE_JEU[av.spot && av.spot.activite] && Math.random() < 0.45) {
+        this.dire(av.id, { icone: 'sourire', texte: phrase(ARRIVEE_JEU[av.spot.activite], av.id + '|' + now) }, 3000, { phrase: true, parle: true });
+      }
     } else if (av.type === 'inspecteur' && av.cat === 'insp') {
       this.dire(av.id, { icone: 'loupe', texte: phrase('verifDebut', av.id) }, 3000, { phrase: true });
     } else if (av.type === 'joy') {
@@ -2479,7 +2620,7 @@ export class Directeur {
       if (ax >= b.x0 && ax <= b.x1 && ay >= b.y0 && ay <= b.y1) return { type: 'service', serviceId: b.id };
     }
     const tb = this.boiteTableau;
-    if (tb && ax >= tb.x0 && ax <= tb.x1 && ay >= tb.y0 && ay <= tb.y1) return { type: 'tableau', id: 'tableau', dossier: tb.dossier };
+    if (tb && ax >= tb.x0 && ax <= tb.x1 && ay >= tb.y0 && ay <= tb.y1) return { type: 'tableau', id: 'tableau', dossier: tb.dossier, etage: this.etageId };
     return null;
   }
 }

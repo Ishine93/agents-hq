@@ -244,7 +244,8 @@ export class Interface {
         return;
       }
       if (av.type === 'tableau') {
-        this.plan.ouvrir(av.dossier);
+        // depuis le tableau d'un étage : la vue du plan permet aussi de choisir le dossier qu'il affiche
+        this.plan.ouvrir(av.dossier, { etage: this.dir.etageId });
         return;
       }
       if (av.type === 'joy') {
@@ -930,7 +931,11 @@ export class Interface {
         h('div', { class: 'boutons' },
           S.plans.has(d.id) ? h('button', { class: 'petit', title: tr('Le plan du DG en grand, avec les dépendances'), on: { click: () => this.plan.ouvrir(d.id) } }, tr('Voir le plan')) : null,
           d.etat !== 'annule' ? h('button', { class: 'petit', title: tr('Ajouter un complément (texte, images) à ce dossier'), on: { click: () => this.modeCompleter(d.id) } }, d.etat === 'clarification' ? tr('Répondre') : tr('Compléter')) : null,
-          actif ? h('button', { class: 'petit danger', on: { click: () => this.action('/api/dossiers/' + encodeURIComponent(d.id) + '/annuler', undefined, tr('Annuler le dossier {dossier} et toutes ses tâches ?', { dossier: d.id })) } }, tr('Annuler le dossier')) : null));
+          actif ? h('button', { class: 'petit danger', on: { click: () => this.action('/api/dossiers/' + encodeURIComponent(d.id) + '/annuler', undefined, tr('Annuler le dossier {dossier} et toutes ses tâches ?', { dossier: d.id })) } }, tr('Annuler le dossier')) : null,
+          // suppression complète (dossier lancé par erreur…) : il ne reste aucune trace
+          h('button', { class: 'petit danger', title: tr('Effacer complètement ce dossier (lancé par erreur…)'), on: { click: () => this.action('/api/dossiers/' + encodeURIComponent(d.id) + '/supprimer', undefined,
+            (actif ? tr('Le dossier {dossier} est en cours : il sera d’abord arrêté.', { dossier: d.id }) + '\n\n' : '')
+            + tr('Supprimer complètement le dossier {dossier} ? Ses tâches, son plan, ses messages, son journal et ses pièces jointes disparaissent pour de bon. Les fichiers déjà modifiés dans tes projets ne sont pas touchés.', { dossier: d.id })) } }, tr('Supprimer'))));
     }));
   }
 
@@ -1920,6 +1925,16 @@ export class Interface {
         break;
       case 'dossier':
         this.majSaisie();
+        break;
+      case 'dossier_supprime':
+        // la fiche ouverte d'une de ses tâches se ferme ; fil, demandes et cloche se mettent à jour
+        if (this.fiche && String(this.fiche).startsWith(ev.dossier + '-')) this.selectionner(null);
+        this.dossiersOuverts.delete(ev.dossier);
+        this.majSaisie();
+        this.majFil();
+        this.majPermissions();
+        this.notifs.majCloche();
+        if (this.notifs.ouvert) this.notifs.rendreMenu();
         break;
       case 'tache':
         if (ev.tache && this.store.decisionDe(ev.tache.id)) this.majPermissions();

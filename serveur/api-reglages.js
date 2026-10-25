@@ -12,6 +12,7 @@ import { stockComplet, remplacerStock, importerStock, analyserImport, exporter, 
 import { consoPublique, consoTaches, lireLimites } from './conso.js';
 import { decouvrir } from './decouverte.js';
 import { zones } from './permissions.js';
+import { confierValidationsEnAttente } from './ordonnanceur.js';
 import { t } from './i18n.js';
 
 const publierComptes = () => emettre('comptes', comptesPublics());
@@ -199,7 +200,7 @@ export async function routesReglages(req, res, chemin, ctx) {
       if (typeof corps.utilisateur === 'string') patch.utilisateur = corps.utilisateur.trim().slice(0, 40);
       if (['auto', 'prudent'].includes(corps.modeTravail)) patch.modeTravail = corps.modeTravail;
       for (const k of ['plafondGlobal', 'plafondEtage']) if (Number.isInteger(corps[k]) && corps[k] >= 0 && corps[k] <= 64) patch[k] = corps[k];
-      for (const k of ['recolteAuto', 'rojoPortsAuto', 'gitAuto', 'miseAJourAuto']) if (typeof corps[k] === 'boolean') patch[k] = corps[k];
+      for (const k of ['recolteAuto', 'rojoPortsAuto', 'gitAuto', 'miseAJourAuto', 'validationUtilisateur']) if (typeof corps[k] === 'boolean') patch[k] = corps[k];
       if (typeof corps.dureeBulles === 'number' && corps.dureeBulles >= 0.5 && corps.dureeBulles <= 5) patch.dureeBulles = corps.dureeBulles;
       if (corps.dg && typeof corps.dg === 'object') {
         patch.dg = {};
@@ -209,6 +210,8 @@ export async function routesReglages(req, res, chemin, ctx) {
       const langueAvant = reglagesPublics().langueIA;
       modifierReglages(patch);
       if (patch.langueIA && patch.langueIA !== langueAvant) langueChangee();
+      // plus de validation par toi : ce qui attendait ta validation passe à un vérificateur IA
+      if (patch.validationUtilisateur === false) confierValidationsEnAttente();
       publierReglages();
       return json(res, 200, reglagesPublics()), true;
     }

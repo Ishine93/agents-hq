@@ -1666,8 +1666,14 @@ export function animerJeu(g, it, tx, ty, t, actif) {
 
 // ---------- télévision du salon (mur droit de la salle de pause) ----------
 const cacheTele = new Map();
+// Programme de la télé à l'instant t (le même pour tous les écrans) : un match de foot, puis un dessin animé.
+// Ce que disent ceux qui la regardent suit ce programme (scenes.js).
+const TELE_PROGRAMME_MS = 40000;
+export const programmeTele = (t) => (Math.floor(t / TELE_PROGRAMME_MS) % 2 === 0 ? 'foot' : 'dessin');
+export const resteProgrammeTele = (t) => TELE_PROGRAMME_MS - (t % TELE_PROGRAMME_MS);
+
 export function spriteTele(carte, t) {
-  const canal = Math.floor(t / 20000) % 2;
+  const canal = programmeTele(t) === 'foot' ? 0 : 1;
   const f = Math.floor(t / 160) % 48;
   const cle = carte.type + '|' + canal + '|' + f;
   let r = cacheTele.get(cle);

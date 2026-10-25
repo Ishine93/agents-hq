@@ -54,7 +54,7 @@ Les tâches à l'étage `direction` sont toujours en `lecture`.
 - `none` : tâche de lecture sans risque.
 - `self` : l'agent se vérifie avec ses critères (petites tâches).
 - `agent` : un vérificateur indépendant relit (tâches qui modifient du code ou décident). Choisis-lui si possible un modèle différent du producteur ; `maxRework` 1 par défaut.
-- `user` : l'utilisateur valide lui-même (goût, gameplay, visuel).
+{VALIDATION_USER}
 `checks` : critères concrets ou commandes (« rojo build passe », « selene sans erreur »).
 Quand l'utilisateur demande une relecture, préfère `verification.mode = "agent"` sur les tâches productrices (le vérificateur peut renvoyer en correction) ; une tâche de revue séparée, en `lecture+tests`, ne se justifie que pour un regard d'ensemble sur plusieurs tâches.
 

@@ -285,3 +285,15 @@ Erreurs : statut HTTP 4xx/5xx avec `{erreur: "texte"}`.
 | POST | `/api/dossiers/:id/question-dg` | `{texte}` | idem pour le DG du dossier |
 | POST | `/api/taches/:id/consigne` | `{texte}` | `{ok}` : consigne transmise en direct à l'agent (ou à sa prochaine reprise, selon son état) |
 | POST | `/api/equipe/renommer` | `{ancien, nouveau}` (`ancien` = un prénom, `@dg` ou `@joy`) | personnalisation ; renomme aussi, tout de suite, les agents de la réserve et les tâches en cours qui portent ce nom |
+
+## Ajouts 1.0.3
+- **Limites du forfait** : `limites[compte] = {maj, essai, erreur?, abonnement, disponible, fenetres, extra?}`. `maj` = dernière lecture **réussie**, `essai` = dernière tentative ; `erreur` présent si la dernière tentative a raté (les fenêtres gardées sont alors celles de `maj`). Une fenêtre mise à jour entre deux lectures par un événement de session porte `lu` (heure de l'événement) et `statut` (`allowed`, `allowed_warning`, `rejected`). `utilisation` est toujours en pourcentage (0-100) : la lecture répond en pourcentage, les événements en fraction (convertie).
+- **Pause sur limite d'usage** : `ordonnanceur.pause = {raison, jusqua, limite: true, compte}`. Levée toute seule dès qu'une lecture réussie du compte ne montre plus de fenêtre à 100 % (forfait changé, remise à zéro) ; les limites sont relues toutes les 5 min pendant cette pause.
+- **Forfait changé** : si la lecture des limites donne un autre forfait que la découverte en cache, la découverte (modèles, connecteurs) est refaite.
+- **Validation par l'utilisateur** : `reglages.validationUtilisateur` (défaut `false`). Coupé, une vérification `user` prévue par le DG devient `agent` (même modèle, au moins une correction possible, un critère « correspond à la demande » en plus) : à la planification, juste avant la vérification, et pour les tâches qui attendaient déjà (au démarrage et quand on coupe le réglage). La directive du DG lui dit alors de ne pas utiliser `user`.
+
+| Méthode | Route | Corps | Réponse |
+|---|---|---|---|
+| POST | `/api/dossiers/:id/supprimer` | — | `{ok}` : arrête le dossier s'il tourne, puis l'efface complètement (tâches, plan, messages, notifications, demandes, journal et pièces jointes sur le disque). Événement `dossier_supprime` `{dossier}` ; plus aucun événement de ce dossier ensuite. 404 s'il n'existe pas |
+
+- **Tableau blanc** : sans choix, il affiche le plan le plus récent qui concerne l'étage, sans les dossiers annulés. Le choix fait depuis la vue du plan (clic sur le tableau) est gardé par le navigateur (`localStorage` `qg.tableaux` = `{etage: dossier}`).

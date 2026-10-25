@@ -62,7 +62,8 @@ export function creerSimulation() {
             { ...tache('T2', tr('Inventaire des scripts serveur'), e2, 'analyse', 'haiku', 'low', [], [], 'lecture', { mode: 'none' }), agent: reserve.find((a) => a.etage === e2)?.id || '' },
             tache('T3', tr('Tests calibrés sur le bench'), e1, 'test', 'sonnet', 'medium', ['T1'], ['T1'], 'edition+tests', { mode: 'agent', modele: 'opus' }),
             tache('T4', tr('Refonte du module de spawn'), e2, 'impl', 'opus', 'high', ['T2'], ['T2'], 'edition', { mode: 'agent', modele: 'sonnet', effort: 'medium' }),
-            tache('T5', tr('Note de synthèse technique'), 'direction', 'synthese', 'haiku', 'low', ['T3', 'T4'], ['T3', 'T4'], 'lecture', { mode: 'self' }),
+            // QG_SIM_VALIDATION_USER (tests) : le DG simulé demande ta validation pour la synthèse
+            tache('T5', tr('Note de synthèse technique'), 'direction', 'synthese', 'haiku', 'low', ['T3', 'T4'], ['T3', 'T4'], 'lecture', { mode: process.env.QG_SIM_VALIDATION_USER ? 'user' : 'self' }),
           ],
         },
       };

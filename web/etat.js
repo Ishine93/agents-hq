@@ -70,6 +70,50 @@ export class Etat {
     this.conso = null;
   }
 
+  // Dossier supprimé sur le serveur : il disparaît de partout (liste, scènes, tableau, fil, notifications).
+  oublierDossier(id) {
+    if (!id) return;
+    const taches = new Set([...this.taches.values()].filter((t) => t.dossier === id).map((t) => t.id));
+    for (const tid of taches) {
+      for (const m of [this.taches, this.verifs, this.outils, this.fileDepuis, this.transitions, this.terminaux, this.pensees, this.historiquePensees]) m.delete(tid);
+    }
+    for (const [k, p] of this.permissions) if (taches.has(p.tache)) this.permissions.delete(k);
+    for (const [k, x] of this.decisions) if (taches.has(x.tache)) this.decisions.delete(k);
+    for (const [k, n] of this.notifications) if (n.dossier === id || taches.has(n.tache)) this.notifications.delete(k);
+    this.notifsRecentes = this.notifsRecentes.filter((n) => n.dossier !== id && !taches.has(n.tache));
+    this.messages = this.messages.filter((m) => m.dossier !== id);
+    this.passations = this.passations.filter((p) => !taches.has(p.a));
+    this.plans.delete(id);
+    this.dossiers.delete(id);
+    for (const [etage, d] of Object.entries(this.choixTableaux())) if (d === id) this.choisirTableau(etage, null);
+  }
+
+  // Tableau blanc de chaque étage : le dossier choisi en cliquant dessus (rien = automatique).
+  // Gardé dans ce navigateur seulement (une préférence d'affichage).
+  choixTableaux() {
+    try {
+      return JSON.parse(localStorage.getItem('qg.tableaux') || '{}') || {};
+    } catch {
+      return {};
+    }
+  }
+  tableauChoisi(etage) {
+    const s = this.tableauxSession;
+    const d = s && etage in s ? s[etage] : this.choixTableaux()[etage];
+    return d && this.dossiers.has(d) ? d : null;
+  }
+  choisirTableau(etage, dossier) {
+    const c = this.choixTableaux();
+    if (dossier) c[etage] = dossier;
+    else delete c[etage];
+    try {
+      localStorage.setItem('qg.tableaux', JSON.stringify(c));
+    } catch {
+      /* navigation privée : le choix ne dure que le temps de la page */
+    }
+    this.tableauxSession = { ...(this.tableauxSession || {}), [etage]: dossier || null };
+  }
+
   // Noms du DG et de Joy, modifiables dans Réglages › Équipe (en direct).
   nomDg() {
     return (this.personnalisation && this.personnalisation.noms && this.personnalisation.noms.dg) || tr('DG');
@@ -301,6 +345,9 @@ export class Etat {
         break;
       case 'dossier':
         if (ev.dossier && ev.dossier.id) this.dossiers.set(ev.dossier.id, ev.dossier);
+        break;
+      case 'dossier_supprime':
+        this.oublierDossier(ev.dossier);
         break;
       case 'tache': {
         const ta = ev.tache;
@@ -541,6 +588,8 @@ export class Etat {
         return tr('État complet reçu : {taches} tâche(s), {dossiers} dossier(s)', { taches: (ev.taches || []).length, dossiers: (ev.dossiers || []).length });
       case 'dossier':
         return tr('Dossier {id} : {etat}', { id: ev.dossier.id, etat: libelleDossier(ev.dossier.etat) }) + (ev.dossier.titre ? ' — ' + ev.dossier.titre : '');
+      case 'dossier_supprime':
+        return tr('Dossier {id} supprimé', { id: ev.dossier });
       case 'tache': {
         const tra = ev.transition || {};
         return tra.de
