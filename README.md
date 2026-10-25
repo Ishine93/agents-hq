@@ -33,7 +33,9 @@ Ensuite, pour lancer le QG : **`lancer.bat`** (ou le raccourci du bureau). Laiss
 - **Se déplacer** : ◀ ▶ ou Page précédente / suivante ; la colonne de gauche montre tout l'immeuble.
 - **Suivre un agent** : clique sur lui pour sa fiche, sa réflexion en direct et son terminal.
 - **Répondre** : la cloche 🔔 liste ce qui t'attend (autorisations, questions à choix, validations, nouveaux projets).
-- **Compléter un dossier en cours** : onglet Dossiers › « Compléter ». Le DG transmet l'info aux agents, même s'ils travaillent déjà.
+- **Choisir où va ton message** : le menu à côté d'« Envoyer » propose « Nouveau dossier », « Ajouter au dossier D3 » ou « Répondre au DG ». Un ajout est transmis aux agents, même s'ils travaillent déjà.
+- **Parler à un agent sans le couper** : dans sa fiche, « Demander où il en est » (une copie de sa conversation te répond, son travail continue) ou « Nouvelle consigne » (elle lui arrive en direct).
+- **Salle de pause et salle de repos** : les agents qui attendent leur tour jouent en salle de pause (billard, baby-foot, télé) ; ceux qui ont fini dorment en salle de repos, prêts à être réembauchés avec tout leur contexte.
 - **📄 Documents** : les fichiers `.md` produits par les agents, mis en forme (titres, gras, tableaux…), du plus récent au plus ancien. Les fichiers cités dans les messages s'ouvrent d'un clic.
 - **⚡ Consommation** : tokens du jour, limites de ton forfait (fenêtre de 5 h, semaine, par modèle), détail par compte, modèle, étage et dossier, et les tokens économisés grâce au cache.
 - **Arrêt d'urgence** : coupe tout, tout de suite.
@@ -45,7 +47,8 @@ Tout se règle dans le site, sans toucher aux fichiers :
 - **Comptes Claude** : autant de comptes que tu veux (perso, pro…), renommables ; connexion, déconnexion, compte par défaut. Aussi possible avec `ajouter-un-compte.bat`.
 - **Dossiers et étages** : tes dossiers racines, les projets détectés, les étages (renommer, activer, fiche du projet pour le DG).
 - **Connecteurs MCP** : les connecteurs de ton compte claude.ai (Notion, Drive…) et les MCP de tes projets, coupés par défaut ; « Sur demande » ou « Auto » un par un.
-- **Équipe et skins** : prénoms des agents, apparence de chacun (peau, cheveux, coiffure, tenue), du DG et de Joy.
+- **Équipe et skins** : tous les personnages en image ; nom (modifiable en direct, même au travail) et apparence de chacun, du DG et de Joy ; ajout et retrait de personnages.
+- **Git** (dans Général) : laisser les agents faire pull, commit, merge et push sans demander, si tu le souhaites.
 - **Happiness manager** : les blagues et anecdotes que Joy raconte aux agents qui attendent ; export et import en **Excel**, CSV ou JSON, édition directe.
 - **Dictée et notifications** : installation de la dictée locale (Whisper, gratuite, sur ton PC).
 

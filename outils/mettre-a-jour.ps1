@@ -1,7 +1,10 @@
 ﻿# Mise à jour du QG des agents depuis la dernière version publiée sur GitHub (lancée par mettre-a-jour.bat).
 # Tes réglages (config\*.json, fiches), ton historique (dossiers\) et runtime\ ne sont jamais touchés :
 # le zip de la version ne contient que le code et les réglages par défaut.
-param([switch]$Silencieux)
+# Depuis le site (Réglages › À propos) : -AttendrePid (le QG se ferme d'abord) et -Relancer (le QG redémarre
+# à la fin, même si la mise à jour échoue : on ne te laisse jamais sans QG).
+# -Ouvrir : à la relance, ouvrir le site dans le navigateur (mise à jour faite au lancement du QG).
+param([switch]$Silencieux, [int]$AttendrePid = 0, [switch]$Relancer, [switch]$Ouvrir)
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
@@ -11,7 +14,27 @@ $Depot = 'Ishine93/agents-hq'
 $QG = Split-Path -Parent $PSScriptRoot
 $Tmp = Join-Path $QG 'runtime\mise-a-jour'
 
-function Echec($texte) { Write-Host ''; Write-Host "ÉCHEC : $texte" -ForegroundColor Red; exit 1 }
+function Relance {
+  if ($Relancer) {
+    Write-Host 'Relance du QG…'
+    # --sans-maj : le QG relancé ne revérifie pas (pas de boucle si la mise à jour a échoué).
+    $arguments = if ($Ouvrir) { '--sans-maj' } else { '--sans-maj --no-open' }
+    Start-Process -FilePath (Join-Path $QG 'lancer.bat') -ArgumentList $arguments -WorkingDirectory $QG
+  }
+}
+function Echec($texte) {
+  Write-Host ''
+  Write-Host "ÉCHEC : $texte" -ForegroundColor Red
+  Relance
+  if ($Relancer) { Read-Host 'Appuie sur Entrée pour fermer cette fenêtre' | Out-Null }
+  exit 1
+}
+
+if ($AttendrePid) {
+  Write-Host 'Fermeture du QG (les dossiers en cours sont enregistrés et reprendront)…'
+  try { Wait-Process -Id $AttendrePid -Timeout 60 -ErrorAction Stop } catch { }
+  if (Get-Process -Id $AttendrePid -ErrorAction SilentlyContinue) { Echec 'le QG ne s''est pas fermé.' }
+}
 
 $actuelle = (Get-Content (Join-Path $QG 'package.json') -Raw | ConvertFrom-Json).version
 Write-Host "QG des agents — version installée : $actuelle"
@@ -21,7 +44,7 @@ try {
 } catch { Echec "impossible de joindre GitHub ($($_.Exception.Message))." }
 $derniere = $rel.tag_name -replace '^v', ''
 Write-Host "Dernière version publiée : $derniere"
-if ($derniere -eq $actuelle) { Write-Host 'Tu as déjà la dernière version.' -ForegroundColor Green; exit 0 }
+if ($derniere -eq $actuelle) { Write-Host 'Tu as déjà la dernière version.' -ForegroundColor Green; Relance; exit 0 }
 
 $zipAsset = $rel.assets | Where-Object { $_.name -like '*.zip' } | Select-Object -First 1
 $shaAsset = $rel.assets | Where-Object { $_.name -like '*.sha256' } | Select-Object -First 1
@@ -55,4 +78,9 @@ Remove-Item $Tmp -Recurse -Force
 Write-Host 'Fichiers mis à jour. Vérification des dépendances…'
 & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $QG 'outils\installer.ps1') -SansLancer -Silencieux
 Write-Host ''
-Write-Host "QG des agents mis à jour en version $derniere. Relance lancer.bat." -ForegroundColor Green
+if ($Relancer) {
+  Write-Host "QG des agents mis à jour en version $derniere." -ForegroundColor Green
+  Relance
+} else {
+  Write-Host "QG des agents mis à jour en version $derniere. Relance lancer.bat." -ForegroundColor Green
+}

@@ -6,7 +6,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { RACINE, REGLAGES } from './config.js';
-import { etat, abonner, instantane, chargerHistorique, appliquerEvenement, DOSSIERS_DIR, sauver, utiliserDossiers, emettre, modelesPublics, mcpPublic } from './bus.js';
+import { etat, abonner, instantane, chargerHistorique, appliquerEvenement, DOSSIERS_DIR, sauver, utiliserDossiers, emettre, modelesPublics, mcpPublic, alerte } from './bus.js';
 import { decouvrir, decouverteEnCache } from './decouverte.js';
 import { changerMode } from './mcp.js';
 import { resoudreDecision } from './decisions.js';
@@ -26,6 +26,10 @@ import { creerSimulation } from './simulation.js';
 import { routesReglages, ajouterEtages } from './api-reglages.js';
 import { surChangement as surConso, consoPublique, demarrerSuiviLimites } from './conso.js';
 import { t as tr } from './i18n.js';
+import { questionTache, questionDg } from './questions.js';
+import { verifierMaj, lancerMaj, majAuLancement } from './maj.js';
+
+const alerteQuestion = (dossierId, e) => alerte('erreur', tr('Question sans réponse : {raison}', { raison: e.message }), dossierId);
 
 // ---------------------------------------------------------------- arguments
 const args = process.argv.slice(2);
@@ -44,6 +48,11 @@ const OUVRIR = !args.includes('--no-open');
 const FICHIER_JETON = path.join(RACINE, 'runtime', 'jeton.txt');
 if (!fs.existsSync(FICHIER_JETON)) fs.writeFileSync(FICHIER_JETON, crypto.randomBytes(24).toString('hex'));
 const JETON = fs.readFileSync(FICHIER_JETON, 'utf8').trim();
+
+// ---------------------------------------------------------------- mise à jour au lancement
+// Avant de reprendre le moindre dossier : si une version plus récente est publiée, le script de mise à jour
+// prend le relais (il relance le QG avec --sans-maj) et on s'arrête ici.
+if (!DEMO && !REPLAY && !args.includes('--sans-maj') && (await majAuLancement(REGLAGES))) await new Promise(() => {});
 
 // ---------------------------------------------------------------- moteur
 if (DEMO) utiliserDossiers('dossiers-demo');
@@ -145,6 +154,13 @@ async function api(req, res, chemin) {
   if (req.method === 'GET' && chemin === '/api/mcp') return json(res, 200, mcpPublic());
   if (req.method === 'GET' && chemin === '/api/dictee') return json(res, 200, etatDictee);
   if (req.method === 'GET' && chemin === '/api/services') return json(res, 200, servicesPublics());
+  if (req.method === 'GET' && chemin === '/api/maj') {
+    try {
+      return json(res, 200, await verifierMaj({ forcer: new URL(req.url, 'http://127.0.0.1').searchParams.has('forcer') }));
+    } catch (e) {
+      return json(res, 502, { erreur: e.message });
+    }
+  }
   let m;
   if (req.method === 'GET' && (m = chemin.match(/^\/api\/services\/([^/]+)\/journaux$/))) {
     const [etageId, type] = decodeURIComponent(m[1]).split(':');
@@ -247,16 +263,47 @@ async function api(req, res, chemin) {
     }
     return json(res, 200, { ok: true });
   }
-  if ((m = chemin.match(/^\/api\/taches\/(D\d+-T\d+)\/(annuler|valider)$/))) {
+  if ((m = chemin.match(/^\/api\/taches\/(D\d+-T\d+)\/(annuler|valider|question|consigne)$/))) {
     const t = etat.taches.get(m[1]);
     if (!t) return json(res, 404, { erreur: tr('tâche inconnue') });
     if (m[2] === 'annuler') ordo.annulerTache(t);
-    else ordo.validerUtilisateur(t, corps.decision === 'pass' ? 'pass' : 'fail');
+    else if (m[2] === 'valider') ordo.validerUtilisateur(t, corps.decision === 'pass' ? 'pass' : 'fail');
+    else {
+      const texte = String(corps.texte || '').trim().slice(0, 4000);
+      if (!texte) return json(res, 400, { erreur: tr('message vide') });
+      if (m[2] === 'consigne') await ordo.consigneDirecte(t, texte);
+      else {
+        // La réponse arrive plus tard dans le fil : on ne fait pas attendre le site.
+        if (DEMO) return json(res, 409, { erreur: tr('Pas de question en mode démo : les agents sont simulés.') });
+        if (!t.x?.session) return json(res, 409, { erreur: tr("{nom} n'a pas encore commencé : il n'y a pas encore de conversation à interroger.", { nom: t.prenom || t.ref }) });
+        questionTache(t, texte).catch((e) => alerteQuestion(t.dossier, e));
+      }
+    }
+    return json(res, 200, { ok: true });
+  }
+  if ((m = chemin.match(/^\/api\/dossiers\/(D\d+)\/question-dg$/))) {
+    const d = etat.dossiers.get(m[1]);
+    if (!d) return json(res, 404, { erreur: tr('dossier inconnu') });
+    const texte = String(corps.texte || '').trim().slice(0, 4000);
+    if (!texte) return json(res, 400, { erreur: tr('message vide') });
+    if (DEMO) return json(res, 409, { erreur: tr('Pas de question en mode démo : les agents sont simulés.') });
+    if (!d.x?.dgSession) return json(res, 409, { erreur: tr("Le DG n'a pas encore commencé ce dossier.") });
+    questionDg(d, texte).catch((e) => alerteQuestion(d.id, e));
     return json(res, 200, { ok: true });
   }
   if ((m = chemin.match(/^\/api\/permissions\/(P\d+)$/))) {
     const ok = resoudre(m[1], ['allow', 'allow_session'].includes(corps.decision) ? corps.decision : 'deny');
     return ok ? json(res, 200, { ok: true }) : json(res, 404, { erreur: tr('demande inconnue ou déjà traitée') });
+  }
+  if (chemin === '/api/maj/lancer') {
+    try {
+      const m = await verifierMaj({ forcer: true });
+      if (!m.disponible) return json(res, 409, { erreur: tr('Tu as déjà la dernière version ({version}).', { version: m.actuelle }) });
+      lancerMaj(arreter);
+      return json(res, 200, { ok: true, version: m.derniere });
+    } catch (e) {
+      return json(res, 409, { erreur: e.message });
+    }
   }
   if (chemin === '/api/urgence') {
     ordo.urgence();

@@ -101,10 +101,6 @@
     <div class="zone-saisie">
       <div id="au-dessus" hidden>
         <div id="question-dg" hidden></div>
-        <div id="mode-saisie" class="puce-mode" hidden>
-          <span id="mode-texte"></span>
-          <button id="mode-annuler" type="button" data-t-aria="Annuler ce mode" aria-label="Annuler ce mode">×</button>
-        </div>
         <div id="jointes" class="jointes" hidden></div>
       </div>
       <textarea id="saisie" rows="1" maxlength="20000" data-t-placeholder="Écrire au DG…" placeholder="Écrire au DG…" data-t-aria="Message au DG" aria-label="Message au DG"></textarea>
@@ -119,7 +115,12 @@
       <span class="sep">·</span>
       <select id="dg-effort" data-t-aria="Effort du DG pour cette demande" aria-label="Effort du DG pour cette demande"></select>
     </div>
-    <button id="btn-envoyer" class="envoyer" data-t>Envoyer</button>
+    <div class="envoi" role="group" data-t-aria="Envoi du message" aria-label="Envoi du message">
+      <select id="cible-saisie" class="cible-saisie" data-t-aria="Où va le message" aria-label="Où va le message">
+        <option value="nouveau" data-t>Nouveau dossier</option>
+      </select>
+      <button id="btn-envoyer" class="envoyer" data-t>Envoyer</button>
+    </div>
     <button id="btn-rejouer" class="outil-saisie" data-t-title="Rejouer la maquette depuis le début" title="Rejouer la maquette depuis le début" data-t-aria="Rejouer la maquette" aria-label="Rejouer la maquette" hidden>↻</button>
   </footer>
 

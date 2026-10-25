@@ -477,6 +477,14 @@ async function roundComplement(t, d) {
   return true;
 }
 
+// Consigne de l'utilisateur adressée directement à un agent (fiche de l'agent), sans passer par le DG.
+export async function consigneDirecte(t, texte) {
+  const d = etat.dossiers.get(t.dossier);
+  if (!d) return;
+  message(d.id, 'toi', tr('Consigne pour {nom} : {texte}', { nom: t.prenom || t.ref, texte }), [t.etage], [], { tache: t.id });
+  await informer(d, t, texte);
+}
+
 // Transmet un complément de l'utilisateur à une tâche, quel que soit son état.
 async function informer(d, t, texte) {
   t.x.consignes.push(texte); // pour tout lancement ou relance futur

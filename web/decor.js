@@ -66,6 +66,18 @@ const THEMES = {
     sols: { def: ['damier', '#f5c400'] },
     mur: 'chantier', dalle: '#2a2a2a', bureau: '#d9d9d9', chaise: '#1d1d1d', canape: '#1d1d1d', canapeEquipe: '#f5c400', table: '#cfcfcf',
   },
+  // Salle de pause : bois chaud, moquette violette au salon télé, sol de salle d'arcade, couleurs vives.
+  pause: {
+    sols: { def: ['parquet', '#b97a45'], lobby: ['lino', '#e9dcc0'], cafe: ['lino', '#e9dcc0'], tele: ['moquette', '#5d4280'],
+      billard: ['moquette', '#7d2c36'], babyfoot: ['clous', '#e8962e'], arcade: ['arcade', '#1e2040'], pingpong: ['lino', '#4f86c6'],
+      poufs: ['moquette', '#2f7a68'] },
+    mur: 'pause', dalle: '#5a3a24', bureau: '#c99c66', chaise: '#e76f51', canape: '#e76f51', canapeEquipe: '#2a9d8f', table: '#8d5a34',
+  },
+  // Salle de repos : bleu nuit, couleurs éteintes.
+  repos: {
+    sols: { def: ['moquette', '#2a2d55'], lobby: ['lino', '#3a3e66'], allee: ['moquette', '#303462'] },
+    mur: 'nuit', dalle: '#17192f', bureau: '#4a4e7a', chaise: '#3a3e66', canape: '#4b4f8a', canapeEquipe: '#6b5b9a', table: '#4a4e7a',
+  },
 };
 export function theme(type) {
   return THEMES[type] || THEMES.roblox;
@@ -187,6 +199,16 @@ function tuile(typeTheme, zone, x, y) {
         if ((i + j) % 2) poly(g, [Pt(i / 2, j / 2), Pt((i + 1) / 2, j / 2), Pt((i + 1) / 2, (j + 1) / 2), Pt(i / 2, (j + 1) / 2)], nuance(col, -0.1));
       }
     }
+  } else if (motif === 'arcade') {
+    // moquette de salle d'arcade : confettis fluo sur fond sombre
+    const fluo = ['#3df2ff', '#ff4fd8', '#ffe14d', '#7dff6a'];
+    for (let i = 0; i < 26; i++) {
+      const px = Math.floor(rnd() * 64);
+      const py = Math.floor(rnd() * 31);
+      if (!dansTuile(px, py)) continue;
+      g.fillStyle = i % 3 ? nuance(col, 0.1) : fluo[Math.floor(rnd() * fluo.length)];
+      g.fillRect(px, py, rnd() < 0.4 ? 2 : 1, 1);
+    }
   } else if (motif === 'damier') {
     if (!parite) {
       for (let i = 0; i < 12; i++) {
@@ -298,6 +320,32 @@ function murPlat(typeTheme, longueur, cote, etage) {
       for (let x = 0; x < longueur; x += 32) R(x, HW - 26, 1, 26, '#b9c4d6');
       break;
     }
+    case 'pause': {
+      // crème à larges rayures, soubassement turquoise et cimaise orange
+      R(0, 0, longueur, HW, '#f3d9b1');
+      for (let x = 0; x < longueur; x += 24) R(x, 0, 12, HW - 30, '#eecd9c');
+      R(0, HW - 30, longueur, 30, '#2a9d8f');
+      R(0, HW - 31, longueur, 3, '#e76f51');
+      R(0, HW - 31, longueur, 1, '#f4a261');
+      for (let x = 6; x < longueur; x += 16) R(x, HW - 26, 1, 22, '#23887c');
+      R(0, HW - 4, longueur, 4, '#1f6f66');
+      break;
+    }
+    case 'nuit': {
+      // bleu nuit étoilé, plinthe sombre
+      R(0, 0, longueur, HW, '#1f2350');
+      for (let y = 0; y < HW - 24; y += 6) R(0, y, longueur, 1, '#22265a');
+      for (let i = 0; i < longueur / 7; i++) {
+        const x = Math.floor(rnd() * longueur);
+        const y = 2 + Math.floor(rnd() * (HW - 30));
+        g.fillStyle = rnd() < 0.25 ? '#fff4c4' : rnd() < 0.5 ? '#aab4ff' : '#5c66b0';
+        g.fillRect(x, y, 1, 1);
+      }
+      R(0, HW - 22, longueur, 22, '#262a5c');
+      R(0, HW - 23, longueur, 1, '#3c4280');
+      for (let x = 10; x < longueur; x += 20) R(x, HW - 18, 12, 12, '#2c3066');
+      break;
+    }
     default: {
       R(0, 0, longueur, HW, '#9c9c97');
       for (let i = 0; i < longueur * 2; i++) {
@@ -312,7 +360,10 @@ function murPlat(typeTheme, longueur, cote, etage) {
       }
     }
   }
-  if (cote === 'droite') decorMurDroit(g, typeTheme, longueur);
+  if (typeTheme === 'pause' || typeTheme === 'repos') {
+    if (cote === 'droite') decorMurDroitDetente(g, typeTheme, longueur);
+    else decorMurGaucheDetente(g, typeTheme, longueur, etage);
+  } else if (cote === 'droite') decorMurDroit(g, typeTheme, longueur);
   else decorMurGauche(g, typeTheme, longueur, etage);
   return c;
 }
@@ -339,7 +390,8 @@ function fenetre(g, x, y, w, h, typeTheme) {
   let ciel = ['#7cc4ff', '#a8dbff', '#d2efff'];
   let ville = '#7f8fa6';
   let fenetres = null;
-  if (typeTheme === 'unreal') {
+  const nuit = typeTheme === 'unreal' || typeTheme === 'repos';
+  if (nuit) {
     ciel = ['#0a1030', '#141f4a', '#22306a'];
     ville = '#0d1124';
     fenetres = '#ffd86b';
@@ -354,10 +406,25 @@ function fenetre(g, x, y, w, h, typeTheme) {
     g.fillRect(x + 2, y + 2 + Math.floor((ih * i) / 3), w - 4, Math.ceil(ih / 3));
   }
   const rnd = aleatoire(hacher(x + typeTheme));
-  if (typeTheme === 'unreal') {
+  if (nuit) {
     for (let i = 0; i < 10; i++) {
       g.fillStyle = '#ffffff';
       g.fillRect(x + 3 + Math.floor(rnd() * (w - 6)), y + 3 + Math.floor(rnd() * (ih / 2)), 1, 1);
+    }
+    if (typeTheme === 'repos') {
+      // croissant de lune
+      const lx = x + w - 12;
+      const ly = y + 8;
+      for (let yy = -4; yy <= 4; yy++) {
+        const d = Math.round(Math.sqrt(20 - yy * yy));
+        g.fillStyle = '#fff1b0';
+        g.fillRect(lx - d, ly + yy, d * 2, 1);
+      }
+      for (let yy = -4; yy <= 3; yy++) {
+        const d = Math.round(Math.sqrt(14 - yy * yy));
+        g.fillStyle = ciel[0];
+        g.fillRect(lx - d + 3, ly + yy - 1, d * 2, 1);
+      }
     }
   } else if (typeTheme !== 'direction') {
     g.fillStyle = '#ffffff';
@@ -458,11 +525,7 @@ function affiche(g, x, y, w, h, typeTheme) {
 
 function decorMurDroit(g, typeTheme, longueur) {
   // hall d'ascenseur : enseigne du QG
-  cadre(g, 18, 16, 60, 30, '#1b1e2b', '#23283b');
-  const haut = enseigne('QG DES', "AGENTS'");
-  const bas = enseigne('AGENTS', 'HQ');
-  g.drawImage(texteCanvas(haut, '#f4d35e'), 48 - Math.round(mesurer(haut) / 2), 21);
-  g.drawImage(texteCanvas(bas, '#ffffff'), 48 - Math.round(mesurer(bas) / 2), 32);
+  enseigneQG(g);
   // bureau du DG : petit tableau
   cadre(g, 100, 22, 26, 20, '#8b5a2b', '#9fd3ff');
   g.fillStyle = '#58a55c';
@@ -476,14 +539,131 @@ function decorMurDroit(g, typeTheme, longueur) {
   affiche(g, 14 * 32 + 6, 14, 52, 34, typeTheme);
 }
 
-function decorMurGauche(g, typeTheme, longueur, etage) {
-  const c = (gy) => (H - gy) * 32; // colonne plate pour une ordonnée de grille
-  // plaque de l'étage
+// Plaque du nom de l'étage (mur gauche, à côté de l'ascenseur).
+function plaqueEtage(g, etage) {
+  const c = (gy) => (H - gy) * 32;
   const x0 = Math.round(c(5.7));
   const x1 = Math.round(c(3.3));
   cadre(g, x0, 20, x1 - x0, 20, '#c9a227', '#1b1e2b');
   const nom = tronquer((etage && etage.nom) || '', x1 - x0 - 8);
   g.drawImage(texteCanvas(nom, '#ffffff'), Math.round((x0 + x1) / 2 - mesurer(nom) / 2), 26);
+}
+
+// Enseigne de l'immeuble au-dessus du hall d'ascenseur (mur droit).
+function enseigneQG(g) {
+  cadre(g, 18, 16, 60, 30, '#1b1e2b', '#23283b');
+  const haut = enseigne('QG DES', "AGENTS'");
+  const bas = enseigne('AGENTS', 'HQ');
+  g.drawImage(texteCanvas(haut, '#f4d35e'), 48 - Math.round(mesurer(haut) / 2), 21);
+  g.drawImage(texteCanvas(bas, '#ffffff'), 48 - Math.round(mesurer(bas) / 2), 32);
+}
+
+// Texte pixel agrandi ×2 (néons, enseignes).
+function texteDouble(g, s, cx, y, col, ombre = null) {
+  const t = texteCanvas(s, col, ombre);
+  g.drawImage(t, Math.round(cx - t.width), y, t.width * 2, t.height * 2);
+}
+
+// Guirlande lumineuse en haut d'un mur (salle de repos).
+function guirlande(g, longueur, graine) {
+  const cols = ['#ffd98a', '#ff8fb1', '#8fe6ff', '#c9ff8f'];
+  for (let x = 0; x < longueur; x++) {
+    const y = 7 + Math.round(Math.abs(Math.sin((x + graine) / 20)) * 4);
+    g.fillStyle = '#0d0f22';
+    g.fillRect(x, y, 1, 1);
+    if ((x + graine) % 11 === 0) {
+      g.fillStyle = cols[Math.floor((x + graine) / 11) % cols.length];
+      g.fillRect(x - 1, y + 1, 3, 3);
+      g.fillStyle = '#ffffff';
+      g.fillRect(x, y + 1, 1, 1);
+    }
+  }
+}
+
+function etoile(g, cx, cy, col) {
+  g.fillStyle = col;
+  g.fillRect(cx, cy - 3, 1, 7);
+  g.fillRect(cx - 3, cy, 7, 1);
+  g.fillRect(cx - 1, cy - 1, 3, 3);
+}
+
+// Murs de la salle de pause et de la salle de repos.
+function decorMurDroitDetente(g, typeTheme, longueur) {
+  enseigneQG(g);
+  if (typeTheme === 'pause') {
+    // petite affiche « manette » au-dessus de la plante
+    cadre(g, 88, 10, 38, 24, '#2b2b35', '#ffd23f');
+    g.fillStyle = '#3b3f4f';
+    g.fillRect(95, 18, 24, 9);
+    g.fillRect(93, 20, 28, 7);
+    g.fillStyle = '#ffffff';
+    g.fillRect(98, 22, 5, 1);
+    g.fillRect(100, 20, 1, 5);
+    g.fillStyle = '#e3342f';
+    g.fillRect(113, 21, 2, 2);
+    g.fillStyle = '#3aa655';
+    g.fillRect(116, 23, 2, 2);
+    // fenêtre et néon « PAUSE » au-dessus du baby-foot
+    fenetre(g, 9 * 32 + 3, 14, 34, 40, typeTheme);
+    cadre(g, 10 * 32 + 6, 12, 104, 30, '#3a2a4a', '#251a33');
+    texteDouble(g, enseigne('PAUSE', 'BREAK'), 10 * 32 + 58, 20, '#ff5fa2', '#7a1f4f');
+    // fronton des bornes d'arcade
+    cadre(g, 14 * 32 + 4, 3, 56, 13, '#15151f', '#15151f');
+    const hs = 'HI-SCORE';
+    g.drawImage(texteCanvas(hs, '#3df2ff'), 15 * 32 - Math.round(mesurer(hs) / 2), 5);
+  } else {
+    // salle de repos : guirlande, « Chut ! », hublots de nuit et petits cadres étoilés
+    guirlande(g, longueur, 3);
+    cadre(g, 82, 22, 42, 18, '#c9a227', '#1b1e2b');
+    const chut = enseigne('CHUT !', 'SHHH!');
+    g.drawImage(texteCanvas(chut, '#ffd98a'), 103 - Math.round(mesurer(chut) / 2), 27);
+    for (const x of [5, 9, 13]) fenetre(g, x * 32 + 4, 16, 24, 24, typeTheme);
+    for (const x of [7, 11, 15]) {
+      cadre(g, x * 32 + 7, 16, 18, 16, '#c9a227', '#2a2e66');
+      etoile(g, x * 32 + 16, 24, '#ffe9a0');
+    }
+  }
+}
+
+function decorMurGaucheDetente(g, typeTheme, longueur, etage) {
+  const c = (gy) => (H - gy) * 32;
+  plaqueEtage(g, etage);
+  if (typeTheme === 'pause') {
+    // cible de fléchettes au-dessus des poufs
+    const cx = Math.round(c(10.6));
+    const cy = 30;
+    const anneaux = [[11, CONTOUR], [10, '#1d1d1d'], [8, '#e3342f'], [7, '#f4ecd2'], [5, '#3aa655'], [4, '#f4ecd2'], [2, '#e3342f'], [1, '#3aa655']];
+    for (const [r, col] of anneaux) {
+      for (let y = -r; y <= r; y++) {
+        const w = Math.round(Math.sqrt(r * r - y * y + 0.5));
+        g.fillStyle = col;
+        g.fillRect(cx - w, cy + y, w * 2 + 1, 1);
+      }
+    }
+    for (const [dx, dy] of [[3, -4], [-5, 2]]) {
+      g.fillStyle = '#c9a227';
+      g.fillRect(cx + dx, cy + dy, 1, 1);
+      g.fillStyle = '#e3342f';
+      g.fillRect(cx + dx + 1, cy + dy - 1, 2, 1);
+    }
+    // ardoise du coin café, au-dessus de la machine
+    const a0 = Math.round(c(6.95));
+    cadre(g, a0, 12, 30, 20, '#8b5a2b', '#2b3a33');
+    g.drawImage(texteCanvas('CAFE', '#f4f4ee'), a0 + 15 - Math.round(mesurer('CAFE') / 2), 16);
+    g.fillStyle = '#c8d6cf';
+    g.fillRect(a0 + 6, 27, 18, 1);
+  } else {
+    guirlande(g, longueur, 9);
+    fenetre(g, Math.round(c(9.5)) - 12, 16, 24, 24, typeTheme);
+    const x = Math.round(c(11.5));
+    cadre(g, x - 9, 16, 18, 16, '#c9a227', '#2a2e66');
+    etoile(g, x, 24, '#ffe9a0');
+  }
+}
+
+function decorMurGauche(g, typeTheme, longueur, etage) {
+  const c = (gy) => (H - gy) * 32; // colonne plate pour une ordonnée de grille
+  plaqueEtage(g, etage);
   // affiche « pause »
   const p0 = Math.round(c(11.6));
   cadre(g, p0, 18, 44, 28, '#2b2b35', '#fff4e0');
@@ -557,6 +737,13 @@ export function construireCouche(carte, etage) {
     poly(g, [P0(3.25, 0.4), P0(6.8, 0.4), P0(6.8, 3.6), P0(3.25, 3.6)], '#c9a227');
     poly(g, [P0(3.4, 0.55), P0(6.65, 0.55), P0(6.65, 3.45), P0(3.4, 3.45)], '#8c2433');
   }
+  // tapis des étages de détente (salon télé, coin poufs, allées de la salle de repos)
+  for (const tp of carte.tapis || []) {
+    poly(g, [P0(tp.x0, tp.y0), P0(tp.x1, tp.y0), P0(tp.x1, tp.y1), P0(tp.x0, tp.y1)], tp.c0);
+    poly(g, [P0(tp.x0 + 0.15, tp.y0 + 0.15), P0(tp.x1 - 0.15, tp.y0 + 0.15), P0(tp.x1 - 0.15, tp.y1 - 0.15), P0(tp.x0 + 0.15, tp.y1 - 0.15)], tp.c1);
+    poly(g, [P0(tp.x0 + 0.3, tp.y0 + 0.3), P0(tp.x1 - 0.3, tp.y0 + 0.3), P0(tp.x1 - 0.3, tp.y1 - 0.3), P0(tp.x0 + 0.3, tp.y1 - 0.3)], tp.c0);
+    poly(g, [P0(tp.x0 + 0.36, tp.y0 + 0.36), P0(tp.x1 - 0.36, tp.y0 + 0.36), P0(tp.x1 - 0.36, tp.y1 - 0.36), P0(tp.x0 + 0.36, tp.y1 - 0.36)], tp.c1);
+  }
   // tapis du salon de l'équipe (réserve d'agents)
   if (carte.salon) {
     const sl = carte.salon;
@@ -599,6 +786,35 @@ function spriteTuile(htop, fn, contour = true) {
   fn(g, P);
   if (contour) contourner(c);
   return { c, dx: -1, dy: -(htop + 1) };
+}
+
+// Meuble de nx × ny cases (lits, billard…) dessiné d'un seul tenant. Même repère que spriteTuile :
+// P(0, 0) est le coin du fond de la première case.
+function spriteBloc(nx, ny, htop, fn, contour = true) {
+  const c = creerCanvas(32 * (nx + ny) + 2, htop + 16 * (nx + ny) + 4);
+  const g = c.getContext('2d');
+  const P = projeteur(32 * ny + 1, htop + 1);
+  fn(g, P);
+  if (contour) contourner(c);
+  return { c, dx: 31 - 32 * ny, dy: -(htop + 1) };
+}
+
+// Lits : u le long du lit (0 = tête), v en travers ; l'axe dit si le lit court selon x ou selon y.
+function axeLit(P, axe) {
+  return axe === 'x'
+    ? (g, u0, v0, u1, v1, z0, z1, col) => prisme(g, P, u0, v0, u1, v1, z0, z1, col)
+    : (g, u0, v0, u1, v1, z0, z1, col) => prisme(g, P, v0, u0, v1, u1, z0, z1, col);
+}
+const BOIS_LIT = '#6e4c36';
+const DRAP = '#e4e2ee';
+const COUVERTURES = ['#5b7bd6', '#c45b8a', '#4fae8a', '#c9a24a', '#8a6bd6', '#d6785b', '#5bb0c4', '#9ac45b'];
+// Hauteur du dessus du matelas (là où l'on pose la tête), selon le lit et l'étage du lit superposé.
+export const MATELAS = { lit: 14, futon: 6, bas: 14, haut: 48 };
+
+function litFait(Pr, g, z, couv) {
+  Pr(g, 0.14, 0.2, 0.44, 0.8, z, z + 3, '#f6f6fb');
+  Pr(g, 0.62, 0.1, 1.9, 0.9, z, z + 2, couv);
+  Pr(g, 0.62, 0.1, 0.72, 0.9, z + 2, z + 2.5, nuance(couv, 0.4));
 }
 
 function pieds(g, P, x0, y0, x1, y1, z, col, conn = {}) {
@@ -673,11 +889,11 @@ const GENRE_MACHINE = {
   roblox: 'studio', unreal: 'rendu', atelier3d: 'code', etudes: 'plans', serveur: 'console', direction: 'bourse', hall: 'code', bac: 'bac',
 };
 
-function plante(g, P, rnd, variante) {
+function plante(g, P, rnd, variante, petite = false) {
   prisme(g, P, 0.32, 0.32, 0.68, 0.68, 0, 12, '#c0603a');
   quadZ(g, P, 12, 0.36, 0.36, 0.64, 0.64, '#3b2a1e');
   const verts = ['#2e8b3e', '#3fae4f', '#1f6b2d', '#56c45f'];
-  const haut = variante % 2 ? 44 : 34;
+  const haut = petite ? 24 : variante % 2 ? 44 : 34;
   const [cx, cy] = P(0.5, 0.5, 12);
   for (let i = 0; i < 26; i++) {
     const a = rnd() * Math.PI * 2;
@@ -841,6 +1057,23 @@ export function spriteMeuble(it, typeTheme, etat = {}) {
       s = spriteTuile(30, (g, P) => {
         pieds(g, P, 0.18, 0.18, 0.82, 0.82, 9, '#4a4f5a');
         prisme(g, P, 0.15, 0.15, 0.85, 0.85, 9, 12, T.table);
+        if (it.variante === 'tele') {
+          // saladier de pop-corn et télécommande
+          prisme(g, P, 0.3, 0.3, 0.62, 0.62, 12, 15, '#e3342f');
+          quadZ(g, P, 15.2, 0.33, 0.33, 0.59, 0.59, '#fff3c4');
+          for (const [u, v] of [[0.38, 0.4], [0.5, 0.36], [0.45, 0.5], [0.55, 0.52]]) pixel(g, P(u, v, 16.5), '#ffffff', 2, 1);
+          prisme(g, P, 0.66, 0.5, 0.8, 0.58, 12, 13.5, '#2b2b33');
+          pixel(g, P(0.7, 0.52, 14), '#e3342f');
+          return;
+        }
+        if (it.variante === 'poufs') {
+          // jeu de société en cours
+          quadZ(g, P, 12.4, 0.24, 0.24, 0.76, 0.76, '#f4ecd2');
+          for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) if ((i + j) % 2) quadZ(g, P, 12.6, 0.26 + i * 0.12, 0.26 + j * 0.12, 0.38 + i * 0.12, 0.38 + j * 0.12, '#c45b5b');
+          prisme(g, P, 0.36, 0.36, 0.42, 0.42, 12.6, 16, '#2f6fde');
+          prisme(g, P, 0.6, 0.56, 0.66, 0.62, 12.6, 16, '#f2c14e');
+          return;
+        }
         quadZ(g, P, 12.5, 0.25, 0.3, 0.55, 0.5, '#e3342f');
         if (it.variante === 'equipe') {
           quadZ(g, P, 13, 0.3, 0.55, 0.62, 0.78, '#2f6fde');
@@ -889,7 +1122,7 @@ export function spriteMeuble(it, typeTheme, etat = {}) {
       break;
     }
     case 'plante':
-      s = spriteTuile(52, (g, P) => plante(g, P, rnd, it.variante || 0));
+      s = spriteTuile(52, (g, P) => plante(g, P, rnd, it.variante || 0, !!it.petite));
       break;
     case 'etagere': {
       s = spriteTuile(70, (g, P) => {
@@ -1085,6 +1318,261 @@ export function spriteMeuble(it, typeTheme, etat = {}) {
       });
       break;
     }
+    // ---------- salle de pause ----------
+    case 'billard': {
+      s = spriteBloc(2, 1, 100, (g, P) => {
+        const bois = '#6b3d1f';
+        for (const [x, y] of [[0.14, 0.16], [1.78, 0.16], [0.14, 0.7], [1.78, 0.7], [0.96, 0.7]]) prisme(g, P, x, y, x + 0.08, y + 0.14, 0, 16, nuance(bois, -0.25));
+        prisme(g, P, 0.08, 0.1, 1.92, 0.9, 14, 22, bois);
+        quadY(g, P, 0.9, 0.12, 1.88, 16, 18, '#c9a227');
+        quadZ(g, P, 22.5, 0.16, 0.2, 1.84, 0.8, '#1f8a4c');
+        quadZ(g, P, 22.6, 0.62, 0.3, 1.38, 0.7, '#27a35b');
+        // bandes
+        prisme(g, P, 0.06, 0.08, 1.94, 0.2, 22, 26, '#7a4524');
+        prisme(g, P, 0.06, 0.08, 0.16, 0.92, 22, 26, '#7a4524');
+        prisme(g, P, 0.06, 0.8, 1.94, 0.92, 22, 26, '#7a4524');
+        prisme(g, P, 1.84, 0.08, 1.94, 0.92, 22, 26, '#7a4524');
+        for (const [x, y] of [[0.16, 0.2], [0.99, 0.2], [1.82, 0.2], [0.16, 0.8], [0.99, 0.8], [1.82, 0.8]]) pixel(g, P(x, y, 26), '#101010', 3, 2);
+        // triangle de billes (la blanche est dessinée à part : elle roule)
+        const billes = [[0.62, 0.5, '#f6c21c'], [0.55, 0.44, '#e3342f'], [0.55, 0.56, '#2f6fde'], [0.48, 0.5, '#15151f'], [0.48, 0.38, '#3aa655'],
+          [0.48, 0.62, '#ef7d22'], [0.41, 0.44, '#9b5de5'], [0.41, 0.56, '#7a1f2a']];
+        for (const [x, y, col] of billes) pixel(g, P(x, y, 24.5), col, 2, 2);
+        // lampe suspendue
+        pixel(g, P(1, 0.5, 92), '#2b2b33', 1, 26);
+        prisme(g, P, 0.6, 0.36, 1.4, 0.64, 60, 66, '#2f6b3a');
+        quadY(g, P, 0.64, 0.6, 1.4, 60, 61, '#ffe9a0');
+        quadX(g, P, 1.4, 0.36, 0.64, 60, 61, '#ffe9a0');
+      });
+      break;
+    }
+    case 'babyfoot': {
+      s = spriteBloc(2, 1, 50, (g, P) => {
+        const caisse = '#b5532a';
+        for (const [x, y] of [[0.2, 0.26], [1.72, 0.26], [0.2, 0.66], [1.72, 0.66]]) prisme(g, P, x, y, x + 0.08, y + 0.08, 0, 18, '#2b2b33');
+        prisme(g, P, 0.12, 0.22, 1.88, 0.78, 16, 22, caisse);
+        quadZ(g, P, 22.5, 0.18, 0.28, 1.82, 0.72, '#2f9e44');
+        quadZ(g, P, 22.6, 0.98, 0.28, 1.02, 0.72, '#e8f5e8');
+        quadZ(g, P, 22.6, 0.18, 0.42, 0.22, 0.58, '#f4f4f4');
+        quadZ(g, P, 22.6, 1.78, 0.42, 1.82, 0.58, '#f4f4f4');
+        prisme(g, P, 0.12, 0.22, 1.88, 0.28, 22, 30, caisse);
+        prisme(g, P, 0.12, 0.22, 0.18, 0.78, 22, 30, caisse);
+        // barres et joueurs : gardien, défense, attaque adverse, milieu…
+        const rouges = [true, true, false, true, false, true, false, false];
+        const nb = [1, 2, 3, 5, 5, 3, 2, 1];
+        for (let i = 0; i < 8; i++) {
+          const x = 0.3 + i * 0.2;
+          prisme(g, P, x - 0.005, -0.08, x + 0.035, 0.04, 26, 29, '#15151f');
+          prisme(g, P, x, 0.04, x + 0.03, 0.96, 27, 28.5, '#c9ccd4');
+          for (let k = 0; k < nb[i]; k++) {
+            const y = 0.3 + ((k + 0.5) * 0.4) / nb[i];
+            prisme(g, P, x - 0.015, y - 0.03, x + 0.045, y + 0.03, 23, 29.5, rouges[i] ? '#e3342f' : '#2f6fde');
+          }
+          prisme(g, P, x - 0.005, 0.96, x + 0.035, 1.08, 26, 29, '#15151f');
+        }
+        prisme(g, P, 0.12, 0.72, 1.88, 0.78, 22, 30, caisse);
+        prisme(g, P, 1.82, 0.22, 1.88, 0.78, 22, 30, caisse);
+        quadY(g, P, 0.78, 0.9, 1.1, 24, 28, '#f4f4f4');
+      });
+      break;
+    }
+    case 'pingpong': {
+      s = spriteBloc(2, 1, 40, (g, P) => {
+        for (const [x, y] of [[0.2, 0.2], [1.72, 0.2], [0.2, 0.72], [1.72, 0.72]]) prisme(g, P, x, y, x + 0.07, y + 0.07, 0, 20, '#3a3d46');
+        prisme(g, P, 0.06, 0.1, 1.94, 0.9, 20, 23, '#1f5fa8');
+        const ligne = (x0, y0, x1, y1) => quadZ(g, P, 23.3, x0, y0, x1, y1, '#ffffff');
+        ligne(0.08, 0.12, 1.92, 0.15);
+        ligne(0.08, 0.85, 1.92, 0.88);
+        ligne(0.08, 0.12, 0.11, 0.88);
+        ligne(1.89, 0.12, 1.92, 0.88);
+        ligne(0.08, 0.49, 1.92, 0.51);
+        prisme(g, P, 0.985, 0.02, 1.015, 0.98, 23, 28, '#d9dde4');
+        quadX(g, P, 1.015, 0.04, 0.96, 27, 28, '#ffffff');
+        // raquettes posées
+        prisme(g, P, 0.3, 0.7, 0.42, 0.8, 23, 24, '#e3342f');
+        prisme(g, P, 1.6, 0.22, 1.72, 0.32, 23, 24, '#1d1d1d');
+      });
+      break;
+    }
+    case 'canape_tv': {
+      // canapé tourné vers l'écran (vers le mur du fond) : le dossier est devant les gens assis
+      const col = T.canape;
+      const p = it.part;
+      const x0 = p === 'g' ? 0.04 : 0;
+      const x1 = p === 'd' ? 0.96 : 1;
+      s = spriteTuile(44, (g, P) => {
+        prisme(g, P, x0, 0.14, x1, 0.84, 0, 11, nuance(col, -0.15));
+        prisme(g, P, x0, 0.16, x1, 0.74, 11, 14, nuance(col, 0.14));
+        if (p === 'g') prisme(g, P, 0.04, 0.14, 0.18, 0.84, 11, 22, col);
+        if (p === 'd') prisme(g, P, 0.82, 0.14, 0.96, 0.84, 11, 22, col);
+      });
+      s.avant = spriteTuile(44, (g, P) => {
+        prisme(g, P, x0, 0.72, x1, 0.88, 6, 30, col);
+        quadZ(g, P, 30, x0 + 0.02, 0.74, x1 - 0.02, 0.8, nuance(col, 0.2));
+      });
+      break;
+    }
+    case 'meuble_tv': {
+      const p = it.part;
+      const x0 = p === 'g' ? 0.06 : 0;
+      const x1 = p === 'd' ? 0.94 : 1;
+      s = spriteTuile(40, (g, P) => {
+        prisme(g, P, x0, 0.1, x1, 0.62, 0, 16, '#3b2f2a');
+        quadY(g, P, 0.62, x0 + 0.06, x1 - 0.06, 3, 13, '#4d3d33');
+        pixel(g, P(p === 'g' ? 0.86 : 0.12, 0.62, 9), '#c9a227', 2, 1);
+        if (p === 'g') {
+          prisme(g, P, 0.3, 0.22, 0.74, 0.5, 16, 19, '#ecedf2');
+          pixel(g, P(0.68, 0.5, 18), '#3df2ff', 2, 1);
+          prisme(g, P, 0.1, 0.3, 0.22, 0.42, 16, 18, '#2b2b33');
+        } else {
+          prisme(g, P, 0.56, 0.2, 0.8, 0.44, 16, 34, '#22222a');
+          quadY(g, P, 0.44, 0.61, 0.75, 20, 30, '#3a3a46');
+        }
+      });
+      break;
+    }
+    case 'arcade': {
+      const c0 = ['#e3342f', '#2f6fde', '#9b5de5'][(it.variante || 0) % 3];
+      s = spriteTuile(70, (g, P) => {
+        prisme(g, P, 0.16, 0.12, 0.84, 0.6, 0, 62, '#1b1b26');
+        quadX(g, P, 0.84, 0.16, 0.56, 4, 58, c0);
+        quadX(g, P, 0.84, 0.24, 0.48, 22, 44, nuance(c0, 0.4));
+        prisme(g, P, 0.16, 0.6, 0.84, 0.78, 0, 28, '#1b1b26');
+        quadY(g, P, 0.78, 0.38, 0.62, 6, 14, '#2b2b36');
+        pixel(g, P(0.48, 0.78, 12), '#ffb02e', 2, 2);
+        prisme(g, P, 0.14, 0.58, 0.86, 0.86, 28, 31, '#2c2c3a');
+        prisme(g, P, 0.3, 0.68, 0.35, 0.73, 31, 35, '#15151f');
+        pixel(g, P(0.31, 0.7, 37), '#e3342f', 3, 2);
+        pixel(g, P(0.55, 0.72, 32), '#ffe14d', 2, 1);
+        pixel(g, P(0.66, 0.72, 32), '#3ddc5a', 2, 1);
+        quadY(g, P, 0.6, 0.2, 0.8, 34, 55, '#05060a');
+        quadY(g, P, 0.6, 0.18, 0.82, 56, 61, c0);
+      });
+      break;
+    }
+    case 'jukebox': {
+      s = spriteTuile(58, (g, P) => {
+        prisme(g, P, 0.18, 0.16, 0.82, 0.66, 0, 44, '#7a4524');
+        prisme(g, P, 0.22, 0.2, 0.78, 0.62, 44, 50, '#b0703a');
+        quadY(g, P, 0.66, 0.26, 0.74, 24, 40, '#ffe1a0');
+        quadY(g, P, 0.66, 0.32, 0.68, 29, 35, '#c9a227');
+        quadY(g, P, 0.66, 0.3, 0.7, 6, 16, '#2b1d14');
+        for (let z = 7; z < 16; z += 2) quadY(g, P, 0.66, 0.32, 0.68, z, z + 1, '#4a3424');
+      });
+      break;
+    }
+    case 'distributeur': {
+      // distributeur de friandises, contre le mur gauche (vitrine côté x)
+      s = spriteTuile(70, (g, P) => {
+        prisme(g, P, 0.06, 0.12, 0.62, 0.88, 0, 62, '#c0392b');
+        quadX(g, P, 0.62, 0.16, 0.66, 20, 58, '#bfe3ff');
+        const snacks = ['#ffe14d', '#3aa655', '#ff8fb1', '#ef7d22', '#2f6fde', '#9b5de5'];
+        for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) pixel(g, P(0.62, 0.21 + c * 0.11, 24 + r * 9), snacks[(r * 4 + c) % snacks.length], 3, 3);
+        quadX(g, P, 0.62, 0.7, 0.84, 34, 52, '#1b1d24');
+        for (let r = 0; r < 3; r++) pixel(g, P(0.62, 0.74, 38 + r * 4), '#9fd3ff', 2, 1);
+        quadX(g, P, 0.62, 0.2, 0.6, 5, 13, '#1b1d24');
+      });
+      break;
+    }
+    case 'pouf': {
+      const cols = ['#e76f51', '#2a9d8f', '#e9c46a', '#9b5de5', '#f4a261', '#3a86ff'];
+      const col = cols[hacher(it.x + ',' + it.y) % cols.length];
+      const dir = it.dir || 'se';
+      const dossier = { se: [0.18, 0.2, 0.42, 0.8], nw: [0.58, 0.2, 0.82, 0.8], sw: [0.2, 0.18, 0.8, 0.42], ne: [0.2, 0.58, 0.8, 0.82] }[dir];
+      const devant = dir === 'ne' || dir === 'nw';
+      s = spriteTuile(26, (g, P) => {
+        prisme(g, P, 0.16, 0.16, 0.84, 0.84, 0, 6, nuance(col, -0.12));
+        prisme(g, P, 0.2, 0.2, 0.8, 0.8, 6, 9, col);
+        if (!devant) prisme(g, P, ...dossier, 9, 17, col);
+        pixel(g, P(0.4, 0.4, 9), nuance(col, 0.35), 3, 1);
+      });
+      if (devant) s.avant = spriteTuile(26, (g, P) => prisme(g, P, ...dossier, 6, 17, col));
+      break;
+    }
+    // ---------- salle de repos ----------
+    case 'lit':
+    case 'futon': {
+      const axe = it.axe || 'y';
+      const couv = COUVERTURES[(it.variante || 0) % COUVERTURES.length];
+      const futon = it.type === 'futon';
+      s = spriteBloc(axe === 'x' ? 2 : 1, axe === 'x' ? 1 : 2, 36, (g, P) => {
+        const Pr = axeLit(P, axe);
+        if (futon) {
+          Pr(g, 0.06, 0.08, 1.94, 0.92, 0, 4, '#c9b79c');
+          Pr(g, 0.08, 0.1, 1.92, 0.9, 4, 6, '#ddd3c4');
+          litFait(Pr, g, MATELAS.futon, couv);
+          return;
+        }
+        Pr(g, 0, 0.04, 0.12, 0.96, 0, 30, nuance(BOIS_LIT, 0.08));
+        Pr(g, 0.06, 0.08, 1.94, 0.92, 0, 9, BOIS_LIT);
+        Pr(g, 0.12, 0.1, 1.88, 0.9, 9, MATELAS.lit, DRAP);
+        litFait(Pr, g, MATELAS.lit, couv);
+        Pr(g, 1.88, 0.06, 1.96, 0.94, 0, 17, BOIS_LIT);
+      });
+      break;
+    }
+    case 'lit_superpose': {
+      // trois couches : le bas (et les montants du fond), l'étage du haut, puis montants avant et échelle
+      const axe = it.axe || 'y';
+      const nx = axe === 'x' ? 2 : 1;
+      const ny = axe === 'x' ? 1 : 2;
+      const v = it.variante || 0;
+      const couvBas = COUVERTURES[v % COUVERTURES.length];
+      const couvHaut = COUVERTURES[(v + 3) % COUVERTURES.length];
+      const bois2 = nuance(BOIS_LIT, 0.15);
+      s = spriteBloc(nx, ny, 74, (g, P) => {
+        const Pr = axeLit(P, axe);
+        Pr(g, 0.02, 0.02, 0.1, 0.1, 0, 68, BOIS_LIT);
+        Pr(g, 0.02, 0.9, 0.1, 0.98, 0, 68, BOIS_LIT);
+        Pr(g, 0.04, 0.06, 1.96, 0.94, 4, 10, BOIS_LIT);
+        Pr(g, 0.1, 0.1, 1.9, 0.9, 10, MATELAS.bas, DRAP);
+        litFait(Pr, g, MATELAS.bas, couvBas);
+      });
+      s.haut = spriteBloc(nx, ny, 74, (g, P) => {
+        const Pr = axeLit(P, axe);
+        Pr(g, 0.04, 0.04, 1.96, 0.96, 38, 44, BOIS_LIT);
+        Pr(g, 0.1, 0.1, 1.9, 0.9, 44, MATELAS.haut, DRAP);
+        litFait(Pr, g, MATELAS.haut, couvHaut);
+      });
+      s.devant = spriteBloc(nx, ny, 74, (g, P) => {
+        const Pr = axeLit(P, axe);
+        Pr(g, 1.9, 0.02, 1.98, 0.1, 0, 68, BOIS_LIT);
+        Pr(g, 1.9, 0.9, 1.98, 0.98, 0, 68, BOIS_LIT);
+        Pr(g, 0.1, 0.92, 0.16, 0.98, 48, 57, BOIS_LIT);
+        Pr(g, 1.2, 0.92, 1.26, 0.98, 48, 57, BOIS_LIT);
+        Pr(g, 0.1, 0.92, 1.26, 0.98, 55, 58, BOIS_LIT);
+        Pr(g, 1.42, 0.98, 1.46, 1.03, 0, 58, bois2);
+        Pr(g, 1.72, 0.98, 1.76, 1.03, 0, 58, bois2);
+        for (let z = 10; z <= 50; z += 10) Pr(g, 1.46, 0.98, 1.72, 1.02, z, z + 2, bois2);
+      });
+      break;
+    }
+    case 'table_chevet': {
+      s = spriteTuile(44, (g, P) => {
+        prisme(g, P, 0.24, 0.24, 0.76, 0.7, 0, 18, '#5b4636');
+        quadY(g, P, 0.7, 0.3, 0.7, 6, 12, '#4a382b');
+        pixel(g, P(0.5, 0.7, 10), '#c9a227', 2, 1);
+        if (it.lampe) {
+          prisme(g, P, 0.44, 0.4, 0.52, 0.48, 18, 28, '#c9a227');
+          prisme(g, P, 0.32, 0.3, 0.64, 0.58, 28, 36, '#ffd98a');
+          quadZ(g, P, 36, 0.36, 0.34, 0.6, 0.54, '#fff3c4');
+        } else {
+          prisme(g, P, 0.3, 0.3, 0.6, 0.5, 18, 21, '#2f6fde');
+          prisme(g, P, 0.32, 0.32, 0.58, 0.48, 21, 23, '#e3342f');
+          prisme(g, P, 0.62, 0.34, 0.72, 0.44, 18, 24, '#ff8fb1');
+          pixel(g, P(0.62, 0.4, 22), '#ffffff', 1, 1);
+        }
+      });
+      break;
+    }
+    case 'lampadaire': {
+      s = spriteTuile(64, (g, P) => {
+        prisme(g, P, 0.36, 0.36, 0.64, 0.64, 0, 2, '#2b2b33');
+        prisme(g, P, 0.48, 0.48, 0.53, 0.53, 2, 50, '#c9a227');
+        prisme(g, P, 0.3, 0.3, 0.7, 0.7, 50, 60, '#ffd98a');
+        quadZ(g, P, 60, 0.34, 0.34, 0.66, 0.66, '#fff3c4');
+      });
+      break;
+    }
     default:
       s = spriteTuile(20, (g, P) => prisme(g, P, 0.3, 0.3, 0.7, 0.7, 0, 10, '#ff00ff'));
   }
@@ -1121,7 +1609,183 @@ export function animerMeuble(g, it, tx, ty, t) {
     }
   } else if (it.type === 'poste_machine' && it.part === 'd') {
     if (Math.floor(t / 500) % 2) pixel(g, P(0.7, 0.2, 33), '#ffffff', 2, 1);
+  } else if (it.type === 'arcade') {
+    // écran en mode démo : envahisseurs, vaisseau, tir
+    const cols = ['#3df2ff', '#ff4fd8', '#ffe14d', '#7dff6a'];
+    const dec = Math.sin((t + (it.variante || 0) * 700) / 600) * 0.06;
+    for (let r = 0; r < 2; r++) for (let i = 0; i < 4; i++) pixel(g, P(0.28 + i * 0.12 + dec, 0.6, 52 - r * 4), cols[(r + i + (it.variante || 0)) % 4], 2, 1);
+    const sx = 0.48 + Math.sin(t / 900 + (it.variante || 0)) * 0.18;
+    pixel(g, P(sx, 0.6, 37), '#ffffff', 3, 1);
+    const tir = (t / 320) % 1;
+    pixel(g, P(sx + 0.03, 0.6, 39 + tir * 9), '#ffe14d', 1, 1);
+  } else if (it.type === 'jukebox') {
+    const cols = ['#ff5fa2', '#3df2ff', '#ffe14d', '#7dff6a'];
+    const k = Math.floor(t / 420);
+    quadY(g, P, 0.66, 0.2, 0.25, 4, 44, cols[k % 4]);
+    quadY(g, P, 0.66, 0.75, 0.8, 4, 44, cols[(k + 2) % 4]);
+    // notes de musique qui s'envolent
+    const u = (t / 1600) % 1;
+    pixel(g, P(0.62 + u * 0.3, 0.4, 52 + u * 18), u < 0.85 ? '#ffe14d' : '#7a6a2a', 2, 2);
+    pixel(g, P(0.66 + u * 0.3, 0.4, 56 + u * 18), u < 0.85 ? '#ffe14d' : '#7a6a2a', 1, 4);
   }
+}
+
+// Jeux en cours (balle de baby-foot, de ping-pong, bille blanche du billard) : `actif` quand au moins deux joueurs sont là
+// (un seul suffit au billard).
+export function animerJeu(g, it, tx, ty, t, actif) {
+  const P = projeteur(tx + 32, ty);
+  if (it.type === 'billard') {
+    // la blanche part du bas de la table, file vers le triangle puis revient se placer
+    let u = 1.45;
+    let v = 0.5;
+    if (actif) {
+      const c = (t % 6000) / 6000;
+      if (c < 0.25) {
+        const e = 1 - Math.pow(1 - c / 0.25, 2);
+        u = 1.45 - e * 0.7;
+        v = 0.5 + Math.sin(e * 3) * 0.06;
+      } else if (c < 0.85) {
+        u = 0.75;
+        v = 0.5 + Math.sin(3) * 0.06;
+      }
+    }
+    pixel(g, P(u, v, 24.5), '#ffffff', 2, 2);
+  } else if (it.type === 'babyfoot' && actif) {
+    const u = 0.3 + (Math.sin(t / 330) * 0.5 + 0.5) * 1.4;
+    const v = 0.5 + Math.sin(t / 210) * 0.16;
+    pixel(g, P(u, v, 24), '#ffffff', 2, 2);
+  } else if (it.type === 'pingpong' && actif) {
+    const c = (t % 1400) / 1400;
+    const aller = c < 0.5;
+    const e = aller ? c * 2 : (1 - c) * 2;
+    const u = 0.12 + e * 1.76;
+    const rebond = Math.abs(Math.sin(e * Math.PI * 2));
+    pixel(g, P(u, aller ? 0.4 : 0.6, 24 + rebond * 14), '#ffffff', 2, 2);
+  }
+}
+
+// ---------- télévision du salon (mur droit de la salle de pause) ----------
+const cacheTele = new Map();
+export function spriteTele(carte, t) {
+  const canal = Math.floor(t / 20000) % 2;
+  const f = Math.floor(t / 160) % 48;
+  const cle = carte.type + '|' + canal + '|' + f;
+  let r = cacheTele.get(cle);
+  if (r) return r;
+  const debut = Math.round(carte.tele.x0 * 32);
+  const largeur = Math.round((carte.tele.x1 - carte.tele.x0) * 32);
+  const hauteur = 46;
+  const plat = creerCanvas(largeur, hauteur);
+  const g = plat.getContext('2d');
+  const R = (x, y, w, h, col) => {
+    g.fillStyle = col;
+    g.fillRect(Math.round(x), Math.round(y), Math.max(1, Math.round(w)), Math.max(1, Math.round(h)));
+  };
+  R(0, 0, largeur, hauteur - 2, CONTOUR);
+  R(1, 1, largeur - 2, hauteur - 4, '#24242e');
+  R(1, 1, largeur - 2, 1, '#3a3a48');
+  const sx = 4;
+  const sy = 4;
+  const sw = largeur - 8;
+  const sh = hauteur - 10;
+  if (canal === 0) {
+    // match de foot
+    R(sx, sy, sw, sh, '#2f8f40');
+    for (let x = 0; x < sw; x += 10) R(sx + x, sy, 5, sh, '#37a24a');
+    R(sx + sw / 2, sy, 1, sh, '#e8f5e8');
+    R(sx, sy, sw, 1, '#e8f5e8');
+    R(sx, sy + sh - 1, sw, 1, '#e8f5e8');
+    for (let a = 0; a < 24; a++) R(sx + sw / 2 + Math.cos((a / 24) * Math.PI * 2) * 6, sy + sh / 2 + Math.sin((a / 24) * Math.PI * 2) * 6, 1, 1, '#e8f5e8');
+    R(sx, sy + sh / 2 - 7, 7, 1, '#e8f5e8');
+    R(sx, sy + sh / 2 + 7, 7, 1, '#e8f5e8');
+    R(sx + 7, sy + sh / 2 - 7, 1, 15, '#e8f5e8');
+    R(sx + sw - 7, sy + sh / 2 - 7, 7, 1, '#e8f5e8');
+    R(sx + sw - 7, sy + sh / 2 + 7, 7, 1, '#e8f5e8');
+    R(sx + sw - 8, sy + sh / 2 - 7, 1, 15, '#e8f5e8');
+    for (let i = 0; i < 3; i++) {
+      R(sx + sw * 0.3 + Math.sin(f * 0.26 + i * 2) * sw * 0.16, sy + sh * (0.22 + i * 0.28) + Math.cos(f * 0.2 + i) * 3, 2, 3, '#e3342f');
+      R(sx + sw * 0.7 + Math.sin(f * 0.22 + i * 1.7) * sw * 0.16, sy + sh * (0.22 + i * 0.28) + Math.sin(f * 0.18 + i) * 3, 2, 3, '#2f6fde');
+    }
+    R(sx + sw / 2 + Math.sin(f * 0.13) * sw * 0.36, sy + sh / 2 + Math.sin(f * 0.31) * sh * 0.32, 2, 2, '#ffffff');
+    R(sx + 1, sy + 1, 19, 9, 'rgba(0,0,0,0.55)');
+    g.drawImage(texteCanvas('2-1', '#ffffff'), sx + 3, sy + 2);
+  } else {
+    // dessin animé : petit héros qui saute, nuages, soleil
+    R(sx, sy, sw, sh, '#7cc8ff');
+    R(sx, sy + sh * 0.45, sw, sh * 0.2, '#a8dcff');
+    for (let y = -4; y <= 4; y++) {
+      const w = Math.round(Math.sqrt(17 - y * y));
+      R(sx + sw - 12 - w, sy + 8 + y, w * 2, 1, '#ffe14d');
+    }
+    const nx = sx + ((f * 2) % (sw + 24)) - 12;
+    R(nx, sy + 6, 12, 3, '#ffffff');
+    R(nx + 3, sy + 4, 6, 2, '#ffffff');
+    const sol = sy + sh - 8;
+    R(sx, sol, sw, 8, '#58c26a');
+    R(sx, sol, sw, 1, '#7ddc8a');
+    const hx = sx + ((f * 3) % (sw - 8));
+    const saut = Math.round(Math.abs(Math.sin(f * 0.5)) * 8);
+    R(hx, sol - 8 - saut, 7, 7, '#ff8fb1');
+    R(hx + 4, sol - 6 - saut, 1, 2, CONTOUR);
+    R(hx + 6, sol - 6 - saut, 1, 2, CONTOUR);
+    R(hx + 1, sol - 1 - saut, 2, 1, '#c4456f');
+    R(hx + 4, sol - 1 - saut, 2, 1, '#c4456f');
+  }
+  // reflet et voyant
+  R(sx + 2, sy + 2, 1, 6, 'rgba(255,255,255,0.25)');
+  R(largeur - 7, hauteur - 5, 2, 1, '#ff3b3b');
+  r = cisailler(plat, 'droite', debut, 14);
+  if (cacheTele.size > 200) cacheTele.clear();
+  cacheTele.set(cle, r);
+  return r;
+}
+
+// ---------- dormeurs (salle de repos) ----------
+// Couverture remontée sur un dormeur : `couche` = { ox, oy, axe, z } (voir carte.js) ; `souffle` 0 ou 1.
+const cacheCouv = new Map();
+export function spriteCouverture(couche, col, souffle) {
+  const cle = couche.axe + '|' + couche.z + '|' + col + '|' + souffle;
+  let s = cacheCouv.get(cle);
+  if (s) return s;
+  const axe = couche.axe;
+  const z = couche.z;
+  s = spriteBloc(axe === 'x' ? 2 : 1, axe === 'x' ? 1 : 2, z + 12, (g, P) => {
+    const Pr = axeLit(P, axe);
+    Pr(g, 0.4, 0.08, 1.9, 0.92, z, z + 3, col);
+    Pr(g, 0.4, 0.08, 0.52, 0.92, z + 3, z + 4, '#f2f2f8');
+    Pr(g, 0.58, 0.22, 1.66, 0.78, z + 3, z + 5 + souffle, col);
+    Pr(g, 1.66, 0.3, 1.86, 0.7, z + 3, z + 6, col);
+  });
+  if (cacheCouv.size > 300) cacheCouv.clear();
+  cacheCouv.set(cle, s);
+  return s;
+}
+
+// Point de l'oreiller (coordonnées de grille et hauteur) où l'on pose la tête d'un dormeur.
+export function oreiller(couche) {
+  return couche.axe === 'x' ? { gx: couche.ox + 0.3, gy: couche.oy + 0.5, z: couche.z + 3 } : { gx: couche.ox + 0.5, gy: couche.oy + 0.3, z: couche.z + 3 };
+}
+
+// Pénombre de la salle de repos, avec le halo des lampes de chevet.
+export function voileNuit(g, carte) {
+  const P0 = projeteur(OX, OY);
+  const pts = [P0(-0.3, -0.3, HW + 6), P0(W + 0.3, -0.3, HW + 6), P0(W + 0.3, 0, -12), P0(W, H, -12), P0(0, H + 0.3, -12), P0(-0.3, H + 0.3, HW + 6)];
+  g.save();
+  g.fillStyle = 'rgba(8, 10, 40, 0.2)';
+  g.beginPath();
+  pts.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y)));
+  g.closePath();
+  g.fill();
+  g.globalCompositeOperation = 'lighter';
+  for (const l of carte.lampes || []) {
+    const [x, y] = P0(l.x, l.y, l.z);
+    const grad = g.createRadialGradient(x, y, 2, x, y, 46);
+    grad.addColorStop(0, 'rgba(255, 196, 110, 0.26)');
+    grad.addColorStop(1, 'rgba(255, 196, 110, 0)');
+    g.fillStyle = grad;
+    g.fillRect(x - 46, y - 46, 92, 92);
+  }
+  g.restore();
 }
 
 // Voyants d'une baie de service selon son état (actif, démarrage, erreur, arrêté, externe).

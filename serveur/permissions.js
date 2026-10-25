@@ -22,29 +22,31 @@ const meme = (a, b) => path.resolve(a).toLowerCase() === path.resolve(b).toLower
 
 // Écrire hors des zones : toujours une demande (règles « ask », qui priment sur le mode auto).
 // Les règles ne savent pas dire « tout sauf », on énumère donc : les lecteurs sans zone en entier,
-// et, en descendant vers chaque zone, les fichiers et dossiers voisins qui n'en contiennent pas.
+// et, en descendant vers chaque zone, les dossiers et fichiers voisins qui n'en contiennent pas.
+// Jamais de règle « parent/* » : Claude Code l'applique aussi à tout ce qui est SOUS le dossier
+// enfant (comme un .gitignore), donc à la zone elle-même : chaque écriture dans un projet demandait.
 function explorer(dossier, zonesIci, cibles) {
-  cibles.push(`${cheminRegle(dossier)}/*`); // fichiers posés directement ici
-  let noms = [];
+  let entrees = [];
   try {
-    noms = fs.readdirSync(dossier, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name);
+    entrees = fs.readdirSync(dossier, { withFileTypes: true });
   } catch {
     return;
   }
-  for (const nom of noms) {
-    const p = path.join(dossier, nom);
+  for (const ent of entrees) {
+    const p = path.join(dossier, ent.name);
     if (zonesIci.some((z) => meme(z, p))) continue;
+    if (!ent.isDirectory()) {
+      cibles.push(cheminRegle(p)); // fichier existant posé à côté d'une zone
+      continue;
+    }
     const dessous = zonesIci.filter((z) => sous([p], z));
     if (dessous.length) explorer(p, dessous, cibles);
     else cibles.push(`${cheminRegle(p)}/**`);
   }
 }
 
-let cacheHorsZones = { cle: '', regles: [] };
-export function reglesHorsZones() {
-  const zs = zones();
-  const cle = zs.join('|');
-  if (cacheHorsZones.cle === cle) return cacheHorsZones.regles;
+/** Règles « demander » pour toute écriture hors des zones données. */
+export function reglesPourZones(zs) {
   const cibles = [];
   for (const l of 'ABCDEFGHIJKLMNOPQRSTUVWXYZ') {
     const lecteur = `${l}:\\`;
@@ -53,9 +55,15 @@ export function reglesHorsZones() {
     if (ici.length) explorer(lecteur, ici, cibles);
     else cibles.push(`//${l.toLowerCase()}/**`);
   }
-  const regles = cibles.flatMap((c) => ['Edit', 'Write', 'NotebookEdit'].map((o) => `${o}(${c})`));
-  cacheHorsZones = { cle, regles };
-  return regles;
+  return cibles.flatMap((c) => ['Edit', 'Write', 'NotebookEdit'].map((o) => `${o}(${c})`));
+}
+
+let cacheHorsZones = { cle: '', regles: [] };
+export function reglesHorsZones() {
+  const zs = zones();
+  const cle = zs.join('|');
+  if (cacheHorsZones.cle !== cle) cacheHorsZones = { cle, regles: reglesPourZones(zs) };
+  return cacheHorsZones.regles;
 }
 
 // Les profils citent {ZONES}, {QG}, {HOME} et {COMPTES} : on les remplace par les vrais chemins.
@@ -69,16 +77,21 @@ function developper(regles) {
   });
 }
 
+// Réglage « Git sans demander » : les profils qui écrivent peuvent faire toutes les commandes git
+// (pull, commit, branche, merge, push) ; git push n'est plus interdit.
+const GIT_LIBRE = ['Bash(git)', 'Bash(git *)'];
+
 export function optionsProfil(nom) {
   const { toujoursRefuse, profils: liste } = profils();
   const p = liste[nom] || liste.lecture;
   // Mode prudent (Réglages) : pas de mode auto, chaque action non couverte demande ton accord.
   const mode = p.mode === 'auto' && REGLAGES.modeTravail === 'prudent' ? 'default' : p.mode;
+  const gitLibre = REGLAGES.gitAuto === true && p.mode === 'auto';
   return {
     permissionMode: mode,
     tools: p.outils,
-    allowedTools: developper(p.autorises),
-    disallowedTools: developper(toujoursRefuse),
+    allowedTools: [...developper(p.autorises), ...(gitLibre ? GIT_LIBRE : [])],
+    disallowedTools: developper(toujoursRefuse).filter((r) => !(gitLibre && /^Bash\(git push/.test(r))),
     ...(p.mode === 'auto' ? { settings: { permissions: { ask: reglesHorsZones() } } } : {}),
   };
 }

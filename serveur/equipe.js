@@ -5,7 +5,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { RACINE } from './config.js';
-import { emettre, etat } from './bus.js';
+import { emettre, etat, majTache } from './bus.js';
+import { t as tr } from './i18n.js';
 
 const FICHIER = path.join(RACINE, 'runtime', 'equipe.json');
 export const CONTEXTE_MAX = 150000; // au-delà, l'agent part à la retraite (trop chargé pour bien travailler)
@@ -29,15 +30,26 @@ export function personnalisation() {
     p = {};
   }
   const prenoms = Array.isArray(p.prenoms) && p.prenoms.length ? p.prenoms : defaut.prenoms;
-  return { prenoms, skins: { ...(p.skins || {}) } };
+  return { prenoms, skins: { ...(p.skins || {}) }, noms: { dg: p.noms?.dg || '', joy: p.noms?.joy || '' } };
 }
 
-export function modifierPersonnalisation({ prenoms, skins } = {}) {
+const nomPropre = (x) => String(x ?? '').replace(/\s+/g, ' ').trim().slice(0, 24);
+
+function ecrirePersonnalisation(actuel) {
+  fs.writeFileSync(PERSO, JSON.stringify(actuel, null, 2) + '\n');
+  emettre('personnalisation', { personnalisation: actuel });
+  return actuel;
+}
+
+export function modifierPersonnalisation({ prenoms, skins, noms } = {}) {
   const actuel = personnalisation();
   if (Array.isArray(prenoms)) {
-    const propres = [...new Set(prenoms.map((x) => String(x).replace(/\s+/g, ' ').trim().slice(0, 24)).filter(Boolean))];
-    if (!propres.length) throw new Error('il faut au moins un prénom');
+    const propres = [...new Set(prenoms.map(nomPropre).filter(Boolean))];
+    if (!propres.length) throw new Error(tr('il faut au moins un prénom'));
     actuel.prenoms = propres;
+  }
+  if (noms && typeof noms === 'object') {
+    for (const k of ['dg', 'joy']) if (typeof noms[k] === 'string') actuel.noms[k] = nomPropre(noms[k]);
   }
   if (skins && typeof skins === 'object') {
     actuel.skins = {};
@@ -50,9 +62,43 @@ export function modifierPersonnalisation({ prenoms, skins } = {}) {
       if (Object.keys(propre).length) actuel.skins[String(nom).slice(0, 24)] = propre;
     }
   }
-  fs.writeFileSync(PERSO, JSON.stringify(actuel, null, 2) + '\n');
-  emettre('personnalisation', { personnalisation: actuel });
-  return actuel;
+  return ecrirePersonnalisation(actuel);
+}
+
+// Renomme un personnage partout et tout de suite : liste, skin, agents de la réserve (et leurs clones
+// « X bis »), tâches en cours. « @dg » et « @joy » renomment le DG et Joy.
+export function renommerPersonnage(ancien, nouveau) {
+  const actuel = personnalisation();
+  const n = nomPropre(nouveau);
+  // DG et Joy : un nom vide les ramène à leur nom par défaut.
+  if (ancien === '@dg' || ancien === '@joy') {
+    actuel.noms[ancien.slice(1)] = n;
+    return ecrirePersonnalisation(actuel);
+  }
+  if (!n) throw new Error(tr('nom vide'));
+  if (ancien === n) return actuel;
+  if (actuel.prenoms.includes(n)) throw new Error(tr('« {nom} » existe déjà dans l’équipe', { nom: n }));
+  const i = actuel.prenoms.indexOf(ancien);
+  if (i >= 0) actuel.prenoms[i] = n;
+  else actuel.prenoms.push(n);
+  if (actuel.skins[ancien]) {
+    actuel.skins[n] = actuel.skins[ancien];
+    delete actuel.skins[ancien];
+  }
+  const traduire = (p) => (p === ancien ? n : p === `${ancien} bis` ? `${n} bis` : p);
+  for (const a of Object.values(equipe.agents)) {
+    const p = traduire(a.prenom);
+    if (p !== a.prenom) {
+      a.prenom = p;
+      publier(a);
+    }
+  }
+  for (const t of etat.taches.values()) {
+    const p = traduire(t.prenom);
+    if (p !== t.prenom) majTache(Object.assign(t, { prenom: p }));
+  }
+  if (reserves.delete(ancien)) reserves.add(n);
+  return ecrirePersonnalisation(actuel);
 }
 
 const reserves = new Set(); // prénoms promis à des tâches pas encore lancées
@@ -65,7 +111,9 @@ export function tirerPrenom() {
     ...[...etat.taches.values()].filter((t) => !['done', 'failed', 'cancelled', 'skipped'].includes(t.etat)).map((t) => t.prenom),
   ]);
   const PRENOMS = personnalisation().prenoms;
-  const libre = PRENOMS.find((p) => !pris.has(p));
+  // Au hasard parmi les prénoms libres de la liste (Réglages › Équipe).
+  const libres = PRENOMS.filter((p) => !pris.has(p));
+  const libre = libres.length ? libres[Math.floor(Math.random() * libres.length)] : null;
   const prenom = libre || `${PRENOMS[equipe.compteur % PRENOMS.length]} ${Math.floor(equipe.compteur / PRENOMS.length) + 2}`;
   reserves.add(prenom);
   return prenom;

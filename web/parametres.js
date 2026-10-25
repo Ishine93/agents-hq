@@ -5,6 +5,8 @@ import { h, ouvrirModale, api } from './modale.js';
 import { t, LANGUES_INTERFACE, LANGUES_IA, locale } from './i18n.js';
 import { rendreMcp } from './reglages.js';
 import { apparence, spriteAvatar, PALETTE_PEAUX, PALETTE_CHEVEUX, PALETTE_PANTALONS } from './sprites.js';
+import { TERMINAUX } from './etat.js';
+import { md } from './markdown.js';
 
 const SECTIONS = [
   ['general', 'Général'],
@@ -46,8 +48,13 @@ export class Parametres {
     return !!this.m;
   }
 
-  ouvrir(section = null) {
+  // focus : personnage à ouvrir dans la section Équipe ('@dg', '@joy' ou un prénom).
+  ouvrir(section = null, focus = null) {
     if (section) this.section = section;
+    if (focus) {
+      this.skinOuvert = focus;
+      this.defiler = true;
+    }
     if (!this.m) {
       this.m = ouvrirModale({
         titre: t('Réglages'),
@@ -92,6 +99,10 @@ export class Parametres {
     const fn = { general: this.general, comptes: this.comptes, dossiers: this.dossiers, mcp: this.mcp, equipe: this.equipe, bonheur: this.bonheur, dictee: this.dictee, apropos: this.apropos }[this.section];
     this.contenu.replaceChildren(h('h3', {}, t(SECTIONS.find((s) => s[0] === this.section)[1])), ...[].concat(fn.call(this)).filter(Boolean));
     this.contenu.scrollTop = haut;
+    if (this.defiler) {
+      this.defiler = false;
+      this.contenu.querySelector('.param-skin.ouvert')?.scrollIntoView({ block: 'center' });
+    }
   }
 
   async poster(route, corps, ok = null) {
@@ -149,6 +160,18 @@ export class Parametres {
       ligne(t('Tâches en même temps (par étage)'), plafond('plafondEtage')),
       h('h4', {}, t('Divers')),
       ligne(t('Ports Rojo automatiques'), h('label', { class: 'param-case' }, rojo, ' ', t('Donner un port Rojo unique à chaque nouveau jeu Roblox détecté (écrit dans son default.project.json).'))),
+      h('h4', {}, t('Git')),
+      ligne(t('Git sans demander'),
+        h('label', { class: 'param-case' },
+          h('input', { type: 'checkbox', checked: !!R.gitAuto, on: { change: (e) => {
+            if (e.target.checked && !window.confirm(t('Les agents pourront faire pull, commit, branche, merge et push sans te demander, quand leur mission le demande. Activer ?'))) {
+              e.target.checked = false;
+              return;
+            }
+            this.reglage({ gitAuto: e.target.checked }, e.target.checked ? t('Git autorisé sans demande.') : t('Git push redemande ton accord.'));
+          } } }),
+          ' ', t('Autoriser les agents à faire toutes les opérations git (pull, commit, branche, merge, push) sans te demander.')),
+        h('small', { class: 'meta' }, t('Pratique si tu travailles avec Git et que tu relis l’historique ; sinon, laisse décoché : un git push te sera toujours demandé. S’applique aux prochaines tâches.'))),
       h('div', { class: 'boutons' }, h('button', { class: 'petit', type: 'button', on: { click: () => { this.m.fermer(); this.ui.accueil.ouvrir(true); } } }, t('Relancer la configuration guidée'))),
     ];
   }
@@ -281,7 +304,8 @@ export class Parametres {
   ligneEtage(e) {
     const nom = champ({ value: e.nom, maxlength: '40', 'aria-label': t('Nom de l’étage') });
     nom.addEventListener('change', () => this.poster('/api/etages/' + encodeURIComponent(e.id) + '/modifier', { nom: nom.value }, t('Étage renommé.')));
-    const fixe = e.id === 'direction';
+    // Étages qui font partie de l'immeuble : ni désactivables ni retirables.
+    const fixe = ['direction', 'salle-pause', 'salle-repos'].includes(e.id);
     const actif = h('input', { type: 'checkbox', checked: e.actif, disabled: fixe ? true : null, on: { change: (ev) => this.poster('/api/etages/' + encodeURIComponent(e.id) + '/modifier', { actif: ev.target.checked }) } });
     return h('div', { class: 'param-etage' + (e.actif ? '' : ' inactif') },
       h('div', { class: 'param-etage-tete' },
@@ -323,10 +347,10 @@ export class Parametres {
   }
 
   // ---------------------------------------------------------------- équipe et skins
+  // Grille de tous les personnages : un clic ouvre son nom (modifiable en direct, même au travail) et son apparence.
   equipe() {
-    const P = this.store.personnalisation || { prenoms: [], skins: {} };
-    const zone = h('textarea', { class: 'champ zone', rows: '8', 'aria-label': t('Prénoms des agents') });
-    zone.value = (P.prenoms || []).join('\n');
+    const S = this.store;
+    const P = S.personnalisation || { prenoms: [], skins: {}, noms: {} };
     const skins = { ...(P.skins || {}) };
     const sauverSkins = () => {
       clearTimeout(this.enregistrerSkins);
@@ -335,22 +359,54 @@ export class Parametres {
         if (r) this.store.personnalisation = r;
       }, 500);
     };
-    const noms = [['@dg', t('Le DG')], ['@joy', t('Joy (happiness manager)')], ...(P.prenoms || []).map((p) => [p, p])];
+    // Qui est au travail en ce moment (badge sur sa carte).
+    const occupes = new Set([...S.taches.values()].filter((x) => !TERMINAUX.has(x.etat)).map((x) => S.nom(x)));
+    const persos = [['@dg', S.nomDg()], ['@joy', S.nomJoy()], ...(P.prenoms || []).map((p) => [p, p])];
     const grille = h('div', { class: 'param-skins' });
-    const rendreGrille = () => grille.replaceChildren(...noms.map(([id, lib]) => this.carteSkin(id, lib, skins, (sauver = true) => { if (sauver) sauverSkins(); rendreGrille(); })));
+    const changer = (sauver = true) => {
+      if (sauver) sauverSkins();
+      rendreGrille();
+    };
+    const rendreGrille = () => grille.replaceChildren(...persos.map(([id, lib]) => this.carteSkin(id, lib, skins, changer, occupes.has(id))), this.carteAjout(P));
     rendreGrille();
     return [
-      h('h4', {}, t('Prénoms des agents')),
-      h('p', { class: 'meta' }, t('Un prénom par ligne, tirés dans l’ordre. Deux agents actifs ne portent jamais le même prénom.')),
-      zone,
-      h('div', { class: 'boutons' }, h('button', { class: 'petit ok', type: 'button', on: { click: async () => { const r = await this.poster('/api/personnalisation', { prenoms: zone.value.split('\n') }, t('Prénoms enregistrés.')); if (r) { this.store.personnalisation = r; this.rendre(); } } } }, t('Enregistrer les prénoms'))),
-      h('h4', {}, t('Skins')),
-      h('p', { class: 'meta' }, t('Clique sur un personnage pour choisir sa peau, ses cheveux, sa coiffure et sa tenue. La couleur de chemise des agents indique leur modèle (Opus, Sonnet…) : elle ne change que pour le DG et Joy.')),
+      h('p', { class: 'meta' }, t('Clique sur un personnage pour changer son nom et son apparence. Un nouveau nom s’applique tout de suite, même à un agent au travail. Les nouvelles recrues prennent un prénom au hasard parmi ceux de cette liste.')),
+      h('p', { class: 'meta' }, t('La couleur de chemise des agents indique leur modèle (Opus, Sonnet…) : elle ne change que pour le DG et Joy.')),
       grille,
     ];
   }
 
-  carteSkin(id, lib, skins, changer) {
+  async renommer(ancien, nouveau) {
+    const n = String(nouveau || '').trim();
+    // DG et Joy acceptent un nom vide (retour au nom par défaut) ; un agent doit garder un nom.
+    if ((!n && !ancien.startsWith('@')) || n === ancien) return;
+    const r = await this.poster('/api/equipe/renommer', { ancien, nouveau: n }, t('Nom changé.'));
+    if (!r) return;
+    this.store.personnalisation = r;
+    if (!ancien.startsWith('@')) this.skinOuvert = n;
+    this.rendre();
+  }
+
+  carteAjout(P) {
+    return h('button', {
+      class: 'param-skin param-skin-ajout', type: 'button', title: t('Ajouter un personnage à l’équipe'),
+      on: {
+        click: async () => {
+          let n = 1;
+          while ((P.prenoms || []).includes(t('Recrue {n}', { n }))) n++;
+          const nom = t('Recrue {n}', { n });
+          const r = await this.poster('/api/personnalisation', { prenoms: [...(P.prenoms || []), nom] });
+          if (!r) return;
+          this.store.personnalisation = r;
+          this.skinOuvert = nom;
+          this.focusNom = true;
+          this.rendre();
+        },
+      },
+    }, h('span', { class: 'plus' }, '+'), h('span', {}, t('Nouveau personnage')));
+  }
+
+  carteSkin(id, lib, skins, changer, occupe = false) {
     const special = id.startsWith('@');
     const type = special ? id.slice(1) : 'agent';
     const skin = skins[id] || null;
@@ -363,12 +419,37 @@ export class Parametres {
     g.drawImage(spriteAvatar(L, { dir: 'se', posture: 'debout', frame: 0 }), 0, 0, 68, 140);
     const ouvert = this.skinOuvert === id;
     const carte = h('div', { class: 'param-skin' + (ouvert ? ' ouvert' : '') + (skin ? ' perso' : '') },
-      h('button', { class: 'param-skin-apercu', type: 'button', title: t('Modifier le skin de {nom}', { nom: lib }), on: { click: () => { this.skinOuvert = ouvert ? null : id; changer(false); } } }, c, h('span', {}, lib)));
+      h('button', { class: 'param-skin-apercu', type: 'button', title: t('Modifier {nom}', { nom: lib }), on: { click: () => { this.skinOuvert = ouvert ? null : id; changer(false); } } },
+        c, h('span', {}, lib), occupe ? h('span', { class: 'badge st-ok' }, t('au travail')) : null));
     if (!ouvert) return carte;
     const regler = (k, v) => {
       skins[id] = { ...(skins[id] || {}), [k]: v };
       changer();
     };
+    const P = this.store.personnalisation || { prenoms: [] };
+    const nom = h('input', { class: 'champ', value: lib, maxlength: '24', 'aria-label': t('Nom'), placeholder: special ? (id === '@dg' ? t('DG') : 'Joy') : '' });
+    nom.addEventListener('change', () => this.renommer(id, nom.value));
+    nom.addEventListener('keydown', (e) => e.key === 'Enter' && nom.blur());
+    if (this.focusNom) {
+      this.focusNom = false;
+      setTimeout(() => {
+        nom.focus();
+        nom.select();
+      }, 0);
+    }
+    carte.append(h('div', { class: 'param-skin-nom' },
+      h('small', {}, t('Nom')), nom,
+      !special && (P.prenoms || []).length > 1
+        ? h('button', { class: 'petit danger', type: 'button', title: t('Les agents qui portent déjà ce nom le gardent jusqu’à leur retraite'), on: { click: async () => {
+          if (!window.confirm(t('Retirer {nom} de l’équipe ?', { nom: lib }))) return;
+          const r = await this.poster('/api/personnalisation', { prenoms: P.prenoms.filter((x) => x !== id) });
+          if (r) {
+            this.store.personnalisation = r;
+            this.skinOuvert = null;
+            this.rendre();
+          }
+        } } }, t('Retirer de l’équipe'))
+        : null));
     const pastilles = (k, palette, actuel) => h('div', { class: 'pastilles' },
       palette.map((col) => h('button', { type: 'button', class: 'pastille-couleur' + (actuel === col ? ' choisie' : ''), style: { background: col }, title: col, on: { click: () => regler(k, col) } })),
       h('input', { type: 'color', value: actuel || palette[0], title: t('Autre couleur'), on: { change: (e) => regler(k, e.target.value) } }));
@@ -414,6 +495,11 @@ export class Parametres {
         h('dt', {}, t('Stock')), h('dd', {}, t('{b} blagues · {f} anecdotes · {a} phrases de pause', { b: tot.blagues || 0, f: tot.faits || 0, a: tot.ambiance || 0 })),
         h('dt', {}, t('Mise à jour')), h('dd', {}, maj + (B.source ? ' (' + B.source + ')' : ''))),
       ligne(t('Récolte automatique'), h('label', { class: 'param-case' }, h('input', { type: 'checkbox', checked: R.recolteAuto !== false, on: { change: (e) => this.reglage({ recolteAuto: e.target.checked }) } }), ' ', t('Toutes les 12 h : blagues gratuites en ligne, plus quelques appels Haiku (très peu de tokens).'))),
+      ligne(t('Durée des bulles'),
+        h('select', { class: 'champ', on: { change: (e) => this.reglage({ dureeBulles: Number(e.target.value) }, t('Enregistré.')) } },
+          [[1, t('Normale')], [1.5, t('Un peu plus longue (×1,5)')], [2, t('Longue (×2)')], [3, t('Très longue (×3)')]].map(([v, lib]) =>
+            h('option', { value: String(v), selected: Number(R.dureeBulles || 1) === v ? true : null }, lib))),
+        h('small', { class: 'meta' }, t('Le temps que restent affichées les bulles des agents et de Joy, pour avoir le temps de tout lire.'))),
       h('div', { class: 'boutons' }, recolte),
       h('h4', {}, t('Exporter, modifier dans Excel, réimporter')),
       h('div', { class: 'boutons' }, lienExport('xlsx', t('Exporter en Excel')), lienExport('csv', t('Exporter en CSV')), lienExport('json', t('Exporter en JSON'))),
@@ -525,8 +611,56 @@ export class Parametres {
         h('dt', {}, t('Version')), h('dd', {}, R.version || '—'),
         h('dt', {}, t('Dossier du QG')), h('dd', {}, h('code', {}, R.qg || '—')),
         h('dt', {}, t('Code source')), h('dd', {}, h('a', { href: DEPOT_GITHUB, target: '_blank', rel: 'noopener noreferrer' }, DEPOT_GITHUB))),
+      h('h4', {}, t('Mises à jour')),
+      h('label', { class: 'param-case' },
+        h('input', { type: 'checkbox', checked: R.miseAJourAuto !== false, on: { change: (e) => this.reglage({ miseAJourAuto: e.target.checked }, t('Enregistré.')) } }),
+        ' ', t('Mettre à jour automatiquement au lancement du QG (si une nouvelle version est publiée, elle s’installe avant que le QG démarre).')),
+      this.blocMaj(),
       h('p', { class: 'meta' }, t('Tout reste sur ce PC : tes réglages (dossier config), l’historique des dossiers (dossier dossiers) et les données de travail (dossier runtime). Le QG n’écoute que ton ordinateur (127.0.0.1) et ne partage rien.')),
       h('div', { class: 'boutons' }, h('button', { class: 'petit', type: 'button', on: { click: () => this.ui.lecteur.ouvrir(R.qg + '\\README.md') } }, t('Lire le mode d’emploi'))),
     ];
+  }
+
+  // Vérifier la dernière version publiée et, s'il y en a une plus récente, la lancer : le QG se ferme
+  // (dossiers enregistrés), se met à jour, se relance, et la page se recharge toute seule.
+  blocMaj() {
+    const boite = h('div', { class: 'param-maj' });
+    const verifier = async (forcer = false) => {
+      boite.replaceChildren(h('div', { class: 'vide' }, t('Vérification sur GitHub…')));
+      try {
+        this.majInfo = await api('/api/maj' + (forcer ? '?forcer=1' : ''));
+        afficher(this.majInfo);
+      } catch (e) {
+        boite.replaceChildren(h('div', { class: 'vide erreur' }, e.message), h('button', { class: 'petit', type: 'button', on: { click: () => verifier(true) } }, t('Réessayer')));
+      }
+    };
+    const afficher = (m) => {
+      if (!m.disponible) {
+        boite.replaceChildren(
+          h('p', { class: 'ok-texte' }, '✓ ' + t('Tu as la dernière version ({version}).', { version: m.actuelle })),
+          h('button', { class: 'petit', type: 'button', on: { click: () => verifier(true) } }, t('Vérifier à nouveau')));
+        return;
+      }
+      const date = m.publieLe ? new Date(m.publieLe).toLocaleDateString(locale(), { day: 'numeric', month: 'long', year: 'numeric' }) : '';
+      const lancer = h('button', { class: 'petit ok', type: 'button', disabled: m.dev ? true : null, on: { click: async () => {
+        if (!window.confirm(t('Mettre à jour en version {version} ? Le QG va se fermer, se mettre à jour et se relancer tout seul (environ une minute). Les dossiers en cours sont enregistrés et reprendront.', { version: m.derniere }))) return;
+        lancer.disabled = true;
+        try {
+          await api('/api/maj/lancer', {});
+          boite.replaceChildren(h('p', { class: 'ok-texte' }, t('Mise à jour vers la version {version} en cours : le QG se ferme, se met à jour et se relance. Cette page se rechargera toute seule.', { version: m.derniere })));
+        } catch (e) {
+          this.ui.toast('erreur', e.message);
+          lancer.disabled = false;
+        }
+      } } }, t('Mettre à jour maintenant'));
+      boite.replaceChildren(
+        h('p', {}, h('b', {}, t('Version {version} disponible', { version: m.derniere })), date ? h('span', { class: 'meta' }, ' · ' + t('publiée le {date}', { date })) : null, h('span', { class: 'meta' }, ' · ' + t('tu as la {version}', { version: m.actuelle }))),
+        m.notes ? h('details', { class: 'notes-maj', open: true }, h('summary', {}, t('Nouveautés')), md(m.notes, { titres: 'compact' })) : null,
+        h('div', { class: 'boutons' }, lancer, h('a', { class: 'petit bouton-lien', href: m.url, target: '_blank', rel: 'noopener noreferrer' }, t('Voir sur GitHub'))),
+        m.dev ? h('p', { class: 'meta' }, t('Installation de développement (dossiers tests ou SPEC.md présents) : la mise à jour automatique est désactivée ici pour ne pas écraser ton travail.')) : null);
+    };
+    if (this.majInfo) afficher(this.majInfo);
+    else boite.append(h('button', { class: 'petit', type: 'button', on: { click: () => verifier(true) } }, t('Vérifier les mises à jour')));
+    return boite;
   }
 }

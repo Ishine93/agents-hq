@@ -100,6 +100,19 @@ const PHRASES = {
   reponsesBavardage: ['Carrément !', 'Tu m’étonnes.', 'Ah bon ?', 'Haha, pas faux !', 'Moi je dis : café.', 'Bien dit.', 'On en reparle au déjeuner ?', "C'est clair."],
   ambiance: ['Il fait beau aujourd’hui, non ?', 'Ce café a un goût de vendredi.', 'Vivement le week-end !', 'Quelqu’un a vu mon stylo ?', 'La machine à café fait un drôle de bruit.'],
   joyPassage: ['Courage, l’équipe !', 'Qui veut un café ?', 'Souriez, vous codez !', 'Je passe juste dire bonjour !', 'Tout roule par ici ?', 'Pensez à boire de l’eau !'],
+  // salle de pause : ce qu'on dit en jouant, en attendant son tour
+  arriveeJeu: ['Une partie en attendant mon tour ?', 'Je joue en attendant !', 'Qui veut une partie ?', 'Pause bien méritée… avant même de commencer !'],
+  jeuBillard: ['La 8 dans le coin !', 'Joli coup !', 'Raté… à toi.', 'Je vise la rouge.', 'Passe-moi la craie !', 'Une bande, puis le coin !'],
+  jeuBabyfoot: ['Gamelle !', 'But !', 'Pas de roulette !', 'Demi ! Demi !', 'Le gardien est en feu !', 'Revanche ?'],
+  jeuTele: ['Il y a quoi après ?', 'Monte le son !', 'Quel but !', 'Encore une pub…', 'Passe-moi le pop-corn !', 'J’adore ce dessin animé.'],
+  jeuArcade: ['Nouveau record !', 'Game over…', 'Encore une pièce !', 'Ce boss est impossible.', 'Niveau 12 !'],
+  jeuPingpong: ['Smash !', 'Filet !', 'Balle de match !', 'À toi de servir.', 'Joli revers !'],
+  jeuPouf: ['Échec et… non, attends.', 'À toi de jouer.', 'Ces poufs sont trop confortables.', 'Je relance les dés.', 'Qui a triché ?'],
+  jeuCafe: ['Un petit café ?', 'La machine fait encore des siennes.', 'Plutôt thé ou café ?', 'Il reste des cookies !'],
+  jeuRegarde: ['Allez, vas-y !', 'Pas mal !', 'Je prends le gagnant.', 'Oh, presque !'],
+  // salle de repos
+  coucher: ['Une petite sieste…', 'Bonne nuit, tout le monde.', 'Je recharge les batteries.', 'Réveillez-moi s’il y a du travail.'],
+  reveil: ['Hop, au boulot !', 'Déjà ? J’arrive !', 'Je reprends du service !', 'Un café et j’y vais.'],
 };
 
 // Mêmes situations, en anglais (mêmes repères {p} et {t}).
@@ -122,6 +135,17 @@ const PHRASES_EN = {
   reponsesBavardage: ['Totally!', 'You bet.', 'Really?', 'Haha, fair point!', 'I say: coffee.', 'Well said.', 'Talk about it over lunch?', 'For sure.'],
   ambiance: ["Lovely weather today, isn't it?", 'This coffee tastes like Friday.', "Can't wait for the weekend!", 'Has anyone seen my pen?', 'The coffee machine is making a funny noise.'],
   joyPassage: ['Keep it up, team!', 'Who wants a coffee?', "Smile, you're coding!", 'Just popping by to say hi!', 'All good over here?', 'Remember to drink some water!'],
+  arriveeJeu: ['A quick game while I wait my turn?', "I'll play while I wait!", 'Who fancies a game?', 'A well-earned break… before I even start!'],
+  jeuBillard: ['8 ball, corner pocket!', 'Nice shot!', 'Missed… your turn.', "I'm going for the red.", 'Pass me the chalk!', 'Off the cushion, into the corner!'],
+  jeuBabyfoot: ['Goal!', 'What a shot!', 'No spinning!', 'Defend! Defend!', 'The goalie is on fire!', 'Rematch?'],
+  jeuTele: ["What's on next?", 'Turn it up!', 'What a goal!', 'Another ad…', 'Pass the popcorn!', 'I love this cartoon.'],
+  jeuArcade: ['New high score!', 'Game over…', 'One more coin!', 'This boss is impossible.', 'Level 12!'],
+  jeuPingpong: ['Smash!', 'Net!', 'Match point!', 'Your serve.', 'Nice backhand!'],
+  jeuPouf: ['Checkmate… no, wait.', 'Your move.', 'These bean bags are way too comfy.', "I'll roll again.", 'Who cheated?'],
+  jeuCafe: ['Coffee, anyone?', 'The machine is acting up again.', 'Tea or coffee?', "There are cookies left!"],
+  jeuRegarde: ['Go on!', 'Not bad!', "I'll play the winner.", 'Ooh, so close!'],
+  coucher: ['Just a little nap…', 'Good night, everyone.', 'Recharging my batteries.', "Wake me up if there's work."],
+  reveil: ['Right, back to work!', "Already? I'm coming!", 'Back in action!', "One coffee and I'm off."],
 };
 
 // Réserve minimale si le serveur n'a encore rien récolté.

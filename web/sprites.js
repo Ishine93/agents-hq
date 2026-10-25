@@ -644,6 +644,34 @@ export function spriteAvatar(L, o) {
   return c;
 }
 
+// Tête d'un dormeur (yeux fermés), posée sur l'oreiller : le haut d'un avatar assis, coupé sous le menton.
+// La couverture (dessinée par decor.js) vient par-dessus le cou.
+export const TETE_AX = 17;
+export const TETE_AY = 41;
+const cacheTetes = new Map();
+export function teteDormeur(L, dir = 'sw') {
+  const cle = L.cle + '|' + dir;
+  let c = cacheTetes.get(cle);
+  if (c) return c;
+  const corps = spriteAvatar(L, { dir, posture: 'assis', bras: 'repos', frame: 0, yeuxFermes: true });
+  c = creerCanvas(corps.width, TETE_AY + 2);
+  c.getContext('2d').drawImage(corps, 0, 0, corps.width, TETE_AY + 2, 0, 0, corps.width, TETE_AY + 2);
+  if (cacheTetes.size > 400) cacheTetes.clear();
+  cacheTetes.set(cle, c);
+  return c;
+}
+
+// Petit « z » qui s'envole au-dessus d'un dormeur.
+const cacheZ = new Map();
+export function lettreZ(grand = false) {
+  const cle = grand ? 'Z' : 'z';
+  let c = cacheZ.get(cle);
+  if (c) return c;
+  c = texteCanvas(cle, '#dfe6ff', '#262a5c');
+  cacheZ.set(cle, c);
+  return c;
+}
+
 let ombreCache = null;
 export function ombre() {
   if (ombreCache) return ombreCache;

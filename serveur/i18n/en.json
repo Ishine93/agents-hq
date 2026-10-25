@@ -253,5 +253,20 @@
   "plan de travail": "work plan",
   "Direction": "Board",
   "Bac à sable": "Sandbox",
-  "Hall": "Lobby"
+  "Hall": "Lobby",
+  "Salle de pause": "Break room",
+  "Salle de repos": "Nap room",
+  "il faut au moins un prénom": "at least one name is needed",
+  "« {nom} » existe déjà dans l’équipe": "“{nom}” is already in the team",
+  "Question sans réponse : {raison}": "Question left unanswered: {raison}",
+  "Pas de question en mode démo : les agents sont simulés.": "No questions in demo mode: the agents are simulated.",
+  "Consigne pour {nom} : {texte}": "Instruction for {nom}: {texte}",
+  "(pas de réponse : {raison})": "(no answer: {raison})",
+  "À {nom} : {texte}": "To {nom}: {texte}",
+  "Au DG : {texte}": "To the CEO: {texte}",
+  "Tu as déjà la dernière version ({version}).": "You already have the latest version ({version}).",
+  "GitHub est injoignable : vérifie ta connexion Internet.": "GitHub cannot be reached: check your Internet connection.",
+  "GitHub ne répond pas ({code}).": "GitHub is not answering ({code}).",
+  "Installation de développement : la mise à jour automatique est désactivée ici.": "Development install: automatic updates are disabled here.",
+  "Nouvelle version {version} disponible (tu as la {actuelle}) : mise à jour automatique, le QG se relance tout seul.": "New version {version} available (you have {actuelle}): updating automatically, the HQ will restart on its own."
 }

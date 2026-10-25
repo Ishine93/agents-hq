@@ -70,6 +70,21 @@ export class Etat {
     this.conso = null;
   }
 
+  // Noms du DG et de Joy, modifiables dans Réglages › Équipe (en direct).
+  nomDg() {
+    return (this.personnalisation && this.personnalisation.noms && this.personnalisation.noms.dg) || tr('DG');
+  }
+
+  nomJoy() {
+    return (this.personnalisation && this.personnalisation.noms && this.personnalisation.noms.joy) || 'Joy';
+  }
+
+  // Durée d'affichage des bulles (Réglages › Happiness manager) : 1 = normale.
+  dureeBulles() {
+    const v = Number(this.reglages && this.reglages.dureeBulles);
+    return v > 0 ? v : 1;
+  }
+
   // Prénom d'une tâche (ou de son agent), avec la ref en secours.
   nom(t) {
     if (!t) return '?';

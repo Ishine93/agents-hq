@@ -7,7 +7,7 @@ import { RACINE, modifierReglages, racines, sous, etage as trouverEtage, fiche }
 import { emettre, comptesPublics, reglagesPublics, etagesPublics, modelesPublics, mcpPublic } from './bus.js';
 import { ajouterCompte, modifierCompte, supprimerCompte, ouvrirConnexion, deconnecter, trouverCompte, compteConnecte, dossierConfig } from './comptes.js';
 import { listerProjets, ajouterEtage, modifierEtage, retirerEtage, ignorerProjet, marquerSignales, TYPES as TYPES_PROJET } from './detection.js';
-import { personnalisation, modifierPersonnalisation } from './equipe.js';
+import { personnalisation, modifierPersonnalisation, renommerPersonnage } from './equipe.js';
 import { stockComplet, remplacerStock, importerStock, analyserImport, exporter, langueChangee } from './bonheur.js';
 import { consoPublique, consoTaches, lireLimites } from './conso.js';
 import { decouvrir } from './decouverte.js';
@@ -187,7 +187,7 @@ export async function routesReglages(req, res, chemin, ctx) {
     }
   }
 
-  const routes = /^\/api\/(reglages|racines|choisir-dossier|comptes|personnalisation|bonheur\/stock|conso\/limites|dictee\/installer|onboarding\/terminer|etages\/[^/]+\/(modifier|retirer))/;
+  const routes = /^\/api\/(reglages|racines|choisir-dossier|comptes|personnalisation|equipe\/renommer|bonheur\/stock|conso\/limites|dictee\/installer|onboarding\/terminer|etages\/[^/]+\/(modifier|retirer))/;
   if (!routes.test(chemin)) return false;
   const corps = await ctx.lireCorps(req, chemin === '/api/bonheur/stock' ? 30 * 1024 * 1024 : 256 * 1024);
   try {
@@ -199,7 +199,8 @@ export async function routesReglages(req, res, chemin, ctx) {
       if (typeof corps.utilisateur === 'string') patch.utilisateur = corps.utilisateur.trim().slice(0, 40);
       if (['auto', 'prudent'].includes(corps.modeTravail)) patch.modeTravail = corps.modeTravail;
       for (const k of ['plafondGlobal', 'plafondEtage']) if (Number.isInteger(corps[k]) && corps[k] >= 0 && corps[k] <= 64) patch[k] = corps[k];
-      for (const k of ['recolteAuto', 'rojoPortsAuto']) if (typeof corps[k] === 'boolean') patch[k] = corps[k];
+      for (const k of ['recolteAuto', 'rojoPortsAuto', 'gitAuto', 'miseAJourAuto']) if (typeof corps[k] === 'boolean') patch[k] = corps[k];
+      if (typeof corps.dureeBulles === 'number' && corps.dureeBulles >= 0.5 && corps.dureeBulles <= 5) patch.dureeBulles = corps.dureeBulles;
       if (corps.dg && typeof corps.dg === 'object') {
         patch.dg = {};
         if (typeof corps.dg.modele === 'string' && corps.dg.modele) patch.dg.modele = corps.dg.modele.slice(0, 60);
@@ -260,6 +261,7 @@ export async function routesReglages(req, res, chemin, ctx) {
 
     // --- équipe, happiness manager, consommation
     if (chemin === '/api/personnalisation') return json(res, 200, modifierPersonnalisation(corps)), true;
+    if (chemin === '/api/equipe/renommer') return json(res, 200, renommerPersonnage(String(corps.ancien || ''), corps.nouveau)), true;
     if (chemin === '/api/bonheur/stock') return json(res, 200, remplacerStock(corps)), true;
     if (chemin === '/api/conso/limites') {
       await Promise.all(comptesPublics().comptes.filter((c) => c.connecte).map((c) => lireLimites(c.id).catch(() => null)));

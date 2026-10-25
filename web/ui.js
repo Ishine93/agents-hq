@@ -1,7 +1,7 @@
 // Interface HTML par-dessus le canvas : barre du bas, vue globale, panneau latéral, cartes de permission,
 // bandeau de pause, alertes. Tout texte venant du serveur passe par textContent (jamais innerHTML).
 import { envoyer, MAQUETTE, rejouerMaquette } from './flux.js';
-import { libelleEtat, libelleDossier, TERMINAUX, DOSSIER_ACTIF } from './etat.js';
+import { libelleEtat, libelleDossier, TERMINAUX, DOSSIER_ACTIF, PAS_DEMARREE } from './etat.js';
 import { modele } from './sprites.js';
 import { Jointes, fichiersImages, vignettes } from './pieces.js';
 import { Visionneuse } from './visionneuse.js';
@@ -10,7 +10,7 @@ import { Dictee } from './dictee.js';
 import { ConsoleService, rendreTerminal, libelleService } from './consoles.js';
 import { PlanDossier } from './plan.js';
 import { carteDemandes, grouperPermissions, clePermissions } from './permis.js';
-import { etageJoy } from './scenes.js';
+import { etageJoy, etageVisibleTache, etageVisibleAgent } from './scenes.js';
 import { md } from './markdown.js';
 import { Lecteur } from './lecteur.js';
 import { Conso } from './conso.js';
@@ -59,7 +59,15 @@ const PHASES = { reflexion: 'réfléchit', redaction: 'rédige sa réponse', rap
 const COUL_TYPE = {
   roblox: '#e3342f', unreal: '#3df2ff', atelier3d: '#f06a2a', etudes: '#c99a5e', serveur: '#5c626a',
   direction: '#c9a227', hall: '#2f6fde', bac: '#f5c400', unity: '#9aa4b5', godot: '#478cbf', comfyui: '#b07cff',
-  web: '#3fd36b', python: '#ffd23f', projet: '#7fa7d9',
+  web: '#3fd36b', python: '#ffd23f', projet: '#7fa7d9', pause: '#19b39b', repos: '#f27fb8',
+};
+// Étages sans projet où le bouton « Documents » montre quand même ceux d'un autre étage (vues d'ensemble).
+const DOCS_AILLEURS = new Set(['hall', 'direction']);
+// Une question sans réponse au bout de ce délai n'est plus « en cours » (la copie de conversation a échoué).
+const QUESTION_DELAI = 5 * 60 * 1000;
+const court = (s, n = 40) => {
+  const x = String(s || '').split('\n')[0].trim();
+  return x.length > n ? x.slice(0, n - 1).trimEnd() + '…' : x;
 };
 const ICONE_OUTIL = (nom) => {
   const n = String(nom || '');
@@ -96,7 +104,34 @@ export class Interface {
     this.historiqueFiches = []; // fiches précédentes (navigation par les références)
     this.detailsOuverts = new Set(); // replis « Détails techniques » ouverts
     this.clePerm = new Map(); // id de permission -> clé de sa carte (pile)
+    this.choixDecisions = new Map(); // id de question -> option choisie (pas encore envoyée)
     this.joyVu = null;
+    this.dialogue = null; // { cle: id de tâche | 'dg', type: 'question' | 'consigne' } : saisie ouverte dans la fiche
+    this.composeurs = new Map(); // `${cle}|${type}` -> { el, champ, aide, bEnvoyer } (gardés : la saisie survit aux mises à jour)
+    this.zonesFiche = null;
+    this.signatureCibles = '';
+  }
+
+  // ---------- noms du DG et de Joy (modifiables dans Réglages › Équipe) ----------
+  // Nom choisi par l'utilisateur, ou null si le DG s'appelle encore « DG ».
+  dgPerso() {
+    const n = this.store.nomDg();
+    return n && n !== tr('DG') ? n : null;
+  }
+
+  // « le DG » / « Le DG » dans une phrase, ou son nom s'il en a un.
+  leDg(majuscule = false) {
+    return this.dgPerso() || (majuscule ? tr('Le DG') : tr('le DG'));
+  }
+
+  // « Personnaliser » : Réglages › Équipe, ouverts sur ce personnage ('@dg', '@joy' ou le prénom de l'agent).
+  boutonPerso(id, nom, titre = null) {
+    return h('button', {
+      class: 'petit perso',
+      type: 'button',
+      title: titre || (nom ? tr('Changer le nom et l’apparence de {nom}', { nom }) : tr('Changer le nom et l’apparence')),
+      on: { click: () => this.parametres.ouvrir('equipe', id || undefined) },
+    }, '🎨 ' + tr('Personnaliser'));
   }
 
   init() {
@@ -172,7 +207,7 @@ export class Interface {
     };
     $('#dg-modele').addEventListener('change', choixDg);
     $('#dg-effort').addEventListener('change', choixDg);
-    $('#mode-annuler').addEventListener('click', () => this.annulerMode());
+    $('#cible-saisie').addEventListener('change', () => this.choisirCible($('#cible-saisie').value));
     const saisie = $('#saisie');
     saisie.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
@@ -317,6 +352,7 @@ export class Interface {
     const i = liste.findIndex((x) => x.id === this.etageId);
     $('#etage-haut').disabled = i <= 0;
     $('#etage-bas').disabled = i < 0 || i >= liste.length - 1;
+    this.majBoutonDocuments(e);
     const now = Date.now();
     $('#etage-haut').classList.toggle('clignote', now - this.clignote.haut < 5000);
     $('#etage-bas').classList.toggle('clignote', now - this.clignote.bas < 5000);
@@ -351,8 +387,14 @@ export class Interface {
         if (actifs) marques.appendChild(h('span', { class: 'mq serveur s-actif', title: tr('{n} serveur(s) en marche', { n: actifs }) }, String(actifs)));
         if (erreurs) marques.appendChild(h('span', { class: 'mq serveur s-erreur', title: tr('{n} serveur(s) en erreur', { n: erreurs }) }, '!'));
       }
-      if (!marques.childNodes.length) marques.appendChild(h('span', { class: 'mq gris', title: tr('inactif') }));
+      if (e.type === 'repos') {
+        // salle de repos : les agents en réserve y dorment
+        const dodo = [...S.equipe.values()].filter((a) => a.etat === 'disponible').length;
+        if (dodo) marques.appendChild(h('span', { class: 'mq repos', title: tr('{n} agent(s) en réserve, prêts à être réembauchés', { n: dodo }) }, 'z' + dodo));
+      }
+      if (!marques.childNodes.length) marques.appendChild(h('span', { class: 'mq gris', title: e.projet ? tr('inactif') : tr('salle commune, sans projet') }));
       const recent = now - (this.clignote.etages.get(e.id) || 0) < 5000;
+      const nomDg = this.dgPerso();
       const ligne = h('button', {
         class: 'etage' + (e.id === this.etageId ? ' courant' : '') + (recent ? ' agite' : ''),
         title: tr('Aller à {etage}', { etage: e.nom }),
@@ -360,8 +402,8 @@ export class Interface {
       },
       h('span', { class: 'ordre', style: { background: COUL_TYPE[e.type] || '#888' } }, libOrdre(e.ordre)),
       h('span', { class: 'nom' }, e.nom),
-      m.dg ? h('span', { class: 'dg', title: tr('le DG est ici') }, tr('DG')) : null,
-      etageJoy(S, now) === e.id ? h('span', { class: 'joy', title: tr('Joy, le happiness manager, est ici') }, '😊') : null,
+      m.dg ? h('span', { class: 'dg', title: nomDg ? tr('{nom}, le DG, est ici', { nom: nomDg }) : tr('le DG est ici') }, S.nomDg()) : null,
+      etageJoy(S, now) === e.id ? h('span', { class: 'joy', title: tr('{nom}, le happiness manager, est ici', { nom: S.nomJoy() }) }, '😊') : null,
       marques);
       coupe.appendChild(ligne);
     }
@@ -414,12 +456,47 @@ export class Interface {
     location.reload();
   }
 
+  // Une fois par chargement : une version plus récente est-elle publiée ? (rien en maquette)
+  async verifierMaj() {
+    if (MAQUETTE) return;
+    try {
+      const m = await api('/api/maj');
+      this.parametres.majInfo = m;
+      if (m.disponible && !m.dev) this.toast('info', tr('Mise à jour {version} disponible : Réglages › À propos.', { version: m.derniere }));
+    } catch {
+      /* hors ligne : on ne dit rien */
+    }
+  }
+
   // ---------- documents ----------
-  ouvrirDocuments() {
+  // Étage dont le bouton « Documents » montre les fichiers : l'étage affiché s'il a un projet ; depuis le
+  // hall ou la Direction, le premier étage de projet ; ailleurs (salles communes, sous-sol…), aucun.
+  etageDocuments(e = this.store.etage(this.etageId)) {
     const S = this.store;
-    const e = S.etage(this.etageId);
-    const cible = e && e.projet ? e : S.etages.find((x) => x.projet && x.actif && x.id !== 'direction') || S.etage('direction');
-    if (!cible) return this.toast('info', tr('Aucun étage avec un projet.'));
+    if (e && e.projet) return e;
+    if (e && !DOCS_AILLEURS.has(e.type) && !DOCS_AILLEURS.has(e.id)) return null;
+    const projets = S.etages.filter((x) => x.projet && x.actif !== false);
+    return projets.find((x) => x.id !== 'direction') || projets[0] || null;
+  }
+
+  majBoutonDocuments(e) {
+    const b = $('#btn-documents');
+    const cible = this.etageDocuments(e);
+    const titre = !cible
+      ? tr('Pas de documents ici : {etage} n’a pas de projet.', { etage: e ? e.nom : '—' })
+      : cible === e ? tr('Les fichiers .md de cet étage, mis en forme') : tr('Les fichiers .md de {etage} (cet étage n’a pas de projet)', { etage: cible.nom });
+    if (b.title !== titre) b.title = titre;
+    b.classList.toggle('inactif', !cible);
+    b.setAttribute('aria-disabled', cible ? 'false' : 'true');
+  }
+
+  ouvrirDocuments() {
+    const e = this.store.etage(this.etageId);
+    const cible = this.etageDocuments(e);
+    if (!cible) {
+      this.toast('info', e && !e.projet ? tr('Pas de documents ici : {etage} n’a pas de projet.', { etage: e.nom }) : tr('Aucun étage avec un projet.'));
+      return;
+    }
     this.lecteur.documents(cible.id);
   }
 
@@ -527,11 +604,13 @@ export class Interface {
     });
   }
 
-  // Mode de la saisie : nouvelle demande, réponse à une question du DG, complément d'un dossier.
+  // Destination de la saisie (menu à côté d'« Envoyer ») : nouveau dossier, réponse à une question du DG,
+  // complément d'un dossier existant. null = nouveau dossier.
   calculerMode() {
     const S = this.store;
     let m = this.mode;
     if (m && m.dossier && !S.dossiers.has(m.dossier)) m = this.mode = null;
+    if (m && m.type === 'completer' && S.dossiers.get(m.dossier).etat === 'annule') m = this.mode = null;
     const clar = S.dossierEnClarification();
     if (m && m.type === 'repondre' && (S.dossiers.get(m.dossier) || {}).etat !== 'clarification') m = this.mode = null;
     if (m && m.type === 'nouveau' && (!clar || clar.id !== m.ignore)) m = this.mode = null;
@@ -550,45 +629,105 @@ export class Interface {
     if (!dossierId || !this.store.dossiers.has(dossierId)) return;
     this.mode = { type: 'repondre', dossier: dossierId };
     this.majSaisie();
-    $('#saisie').focus();
+    this.signalerCible();
   }
 
   modeCompleter(dossierId) {
     if (!dossierId || !this.store.dossiers.has(dossierId)) return;
     this.mode = { type: 'completer', dossier: dossierId };
     this.majSaisie();
+    this.signalerCible();
+  }
+
+  // Le menu de destination clignote et la saisie prend le focus (après un clic sur « Compléter », « Répondre »…).
+  signalerCible() {
+    const sel = $('#cible-saisie');
+    sel.classList.remove('eclair');
+    void sel.offsetWidth;
+    sel.classList.add('eclair');
     $('#saisie').focus();
   }
 
-  annulerMode() {
-    const m = this.modeEffectif;
-    if (m && m.type === 'repondre' && m.auto) this.mode = { type: 'nouveau', ignore: m.dossier };
-    else this.mode = null;
+  // Choix dans le menu de destination : 'nouveau', 'repondre:D3' ou 'completer:D3'.
+  choisirCible(v) {
+    const S = this.store;
+    if (!v || v === 'nouveau') {
+      const clar = S.dossierEnClarification();
+      // « Nouveau dossier » alors que le DG attend une réponse : on ne rebascule pas tout seul sur la réponse.
+      this.mode = clar ? { type: 'nouveau', ignore: clar.id } : null;
+    } else {
+      const [type, id] = v.split(':');
+      this.mode = S.dossiers.has(id) ? { type, dossier: id } : null;
+    }
     this.majSaisie();
+    $('#saisie').focus();
+  }
+
+  valeurCible(m) {
+    return m ? m.type + ':' + m.dossier : 'nouveau';
+  }
+
+  // Menu « où va le message » : nouveau dossier, réponse au DG, puis chaque dossier (actifs d'abord, puis finis).
+  majCibles(m) {
+    const S = this.store;
+    const sel = $('#cible-saisie');
+    const ds = [...S.dossiers.values()].filter((d) => d.etat !== 'annule').sort((a, b) => (b.creeLe || 0) - (a.creeLe || 0));
+    const nomDg = this.dgPerso();
+    const repondre = ds.filter((d) => d.etat === 'clarification');
+    const actifs = ds.filter((d) => DOSSIER_ACTIF.has(d.etat) && d.etat !== 'clarification');
+    const finis = ds.filter((d) => !DOSSIER_ACTIF.has(d.etat));
+    const ajout = (d) => ({ v: 'completer:' + d.id, l: tr('Ajouter au dossier {dossier} · {titre}', { dossier: d.id, titre: court(d.titre || d.texte, 38) }) });
+    const groupes = [
+      { options: [{ v: 'nouveau', l: tr('Nouveau dossier') }] },
+      repondre.length ? { label: nomDg ? tr('{nom} attend ta réponse', { nom: nomDg }) : tr('Le DG attend ta réponse'), options: repondre.map((d) => ({ v: 'repondre:' + d.id, l: nomDg ? tr('Répondre à {nom} ({dossier})', { nom: nomDg, dossier: d.id }) : tr('Répondre au DG ({dossier})', { dossier: d.id }) })) } : null,
+      actifs.length ? { label: tr('Dossiers en cours'), options: actifs.map(ajout) } : null,
+      finis.length ? { label: tr('Dossiers terminés'), options: finis.map(ajout) } : null,
+    ].filter(Boolean);
+    const valeur = this.valeurCible(m);
+    // On ne reconstruit le menu que s'il change : le refaire pendant qu'il est déroulé le refermerait.
+    const signature = JSON.stringify(groupes);
+    if (signature !== this.signatureCibles) {
+      this.signatureCibles = signature;
+      sel.replaceChildren(...groupes.map((g) => {
+        const opts = g.options.map((o) => h('option', { value: o.v }, o.l));
+        return g.label ? h('optgroup', { label: g.label }, opts) : opts;
+      }).flat());
+    }
+    if (sel.value !== valeur) sel.value = valeur;
+    sel.className = 'cible-saisie cible-' + (m ? m.type : 'nouveau');
+    const d = m ? S.dossiers.get(m.dossier) : null;
+    sel.title = !m
+      ? tr('Le message ouvre un nouveau dossier : {nom} le découpe en tâches.', { nom: this.leDg() })
+      : m.type === 'repondre'
+        ? nomDg
+          ? tr('Le message répond à la question de {nom} sur le dossier {dossier}.', { nom: nomDg, dossier: m.dossier })
+          : tr('Le message répond à la question du DG sur le dossier {dossier}.', { dossier: m.dossier })
+        : tr('Le message s’ajoute au dossier {dossier} ({titre}) : {nom} le transmet aux agents, même déjà lancés.', { dossier: m.dossier, titre: court(d && (d.titre || d.texte), 60), nom: this.leDg() });
   }
 
   majSaisie() {
     const S = this.store;
     const m = (this.modeEffectif = this.calculerMode());
     const s = $('#saisie');
-    s.placeholder = m && m.type === 'repondre' ? tr('Répondre au DG…') : m && m.type === 'completer' ? tr('Compléter le dossier {dossier}…', { dossier: m.dossier }) : tr('Écrire au DG…');
+    const nomDg = this.dgPerso();
+    s.placeholder = m && m.type === 'repondre'
+      ? nomDg ? tr('Répondre à {nom}…', { nom: nomDg }) : tr('Répondre au DG…')
+      : m && m.type === 'completer'
+        ? tr('Compléter le dossier {dossier}…', { dossier: m.dossier })
+        : nomDg ? tr('Écrire à {nom}…', { nom: nomDg }) : tr('Écrire au DG…');
     s.title = tr('Entrée pour envoyer, Maj+Entrée pour aller à la ligne. Ctrl+V ou glisser-déposer pour joindre des images.');
-    const puce = $('#mode-saisie');
-    if (m) {
-      puce.hidden = false;
-      puce.className = 'puce-mode mode-' + m.type;
-      $('#mode-texte').textContent = m.type === 'repondre' ? tr('Répondre au DG ({dossier})', { dossier: m.dossier }) : tr('Compléter {dossier}', { dossier: m.dossier });
-      $('#mode-annuler').title = m.type === 'repondre' ? tr('Écrire une nouvelle demande à la place') : tr('Revenir à une nouvelle demande');
-    } else puce.hidden = true;
+    this.majCibles(m);
     const q = $('#question-dg');
     const d = m && m.type === 'repondre' ? S.dossiers.get(m.dossier) : null;
     if (d && d.question) {
       q.hidden = false;
-      remplir(q, h('b', {}, tr('Le DG demande ({dossier}) :', { dossier: d.id }) + ' '), d.question);
+      remplir(q, h('b', {}, tr('{nom} demande ({dossier}) :', { nom: this.leDg(true), dossier: d.id }) + ' '), d.question);
     } else q.hidden = true;
     document.body.classList.toggle('clarification', !!(m && m.type === 'repondre'));
     document.body.classList.toggle('complement', !!(m && m.type === 'completer'));
-    $('#au-dessus').hidden = puce.hidden && q.hidden && !(this.jointes && this.jointes.liste.length);
+    // Le modèle et l'effort du DG ne servent qu'à un nouveau dossier.
+    $('#reglage-dg').hidden = !(S.modeles[this.compte] || []).length || !!m;
+    $('#au-dessus').hidden = q.hidden && !(this.jointes && this.jointes.liste.length);
   }
 
   async envoyerSaisie() {
@@ -612,7 +751,11 @@ export class Interface {
       }
       s.value = '';
       this.jointes.vider();
-      if (m && m.type === 'completer') this.mode = null;
+      if (m && m.type === 'completer') {
+        // complément envoyé : le prochain message repart sur un nouveau dossier
+        this.mode = null;
+        this.toast('info', tr('Ajouté au dossier {dossier}. Le prochain message ouvrira un nouveau dossier.', { dossier: m.dossier }));
+      }
       this.ajusterSaisie();
       this.majSaisie();
     } catch (e) {
@@ -636,7 +779,7 @@ export class Interface {
     const S = this.store;
     const box = $('#reglage-dg');
     const liste = S.modeles[this.compte] || [];
-    box.hidden = !liste.length;
+    box.hidden = !liste.length || !!this.calculerMode();
     if (!liste.length) return;
     const def = S.dgDefaut || {};
     const voulu = this.dgChoix || def;
@@ -714,15 +857,42 @@ export class Interface {
       sv ? h('button', { class: 'raccourci-service s-' + sv.etat, title: tr('Ouvrir la console du serveur'), on: { click: () => this.console.ouvrir(sv.id) } }, '▣ ' + libelleService(sv)) : null,
       ...(msgs.length ? [] : [h('div', { class: 'vide' }, tout ? tr('Aucun message pour l’instant.') : tr('Aucun message pour cet étage. Le fil complet est dans le Hall.'))]),
       ...msgs.map((m) =>
-        h('div', { class: 'msg de-' + m.de },
+        h('div', { class: 'msg de-' + m.de + (m.reponse ? ' reponse' : '') + (m.question ? ' question' : '') },
           h('div', { class: 'entete' },
-            h('span', { class: 'auteur' }, { toi: tr('Toi'), dg: tr('DG'), systeme: tr('Système') }[m.de] || m.de),
+            h('span', { class: 'auteur' }, this.auteurMessage(m)),
+            m.reponse ? h('span', { class: 'etiquette-msg' }, tr('réponse')) : m.question ? h('span', { class: 'etiquette-msg' }, tr('question')) : null,
+            m.tache ? this.lienTacheMsg(m.tache) : m.cible === 'dg' && m.de !== 'dg' ? h('button', { class: 'lien ref-tache', type: 'button', title: this.dgPerso() ? tr('Ouvrir la fiche de {nom}', { nom: this.dgPerso() }) : tr('Ouvrir la fiche du DG'), on: { click: () => this.selectionner('dg') } }, S.nomDg()) : null,
             m.dossier ? h('span', { class: 'ref' }, m.dossier) : null,
             h('span', { class: 'heure' }, heure(m.t))),
           md(m.texte || '', { classe: 'texte', fichier: (c) => this.ouvrirFichier(c, (m.etages || []).find((x) => x !== 'hall') || null) }),
           m.pieces && m.pieces.length ? vignettes(m.pieces, (p, i) => this.visionneuse.ouvrir(p, i)) : null)),
     );
     if (enBas) box.scrollTop = box.scrollHeight;
+  }
+
+  auteurMessage(m) {
+    if (m.de === 'toi') return tr('Toi');
+    if (m.de === 'dg') return this.store.nomDg();
+    if (m.de === 'systeme') return tr('Système');
+    if (m.de === 'agent') {
+      const t = m.tache ? this.store.taches.get(m.tache) : null;
+      return m.nom || (t ? this.store.nom(t) : tr('Agent'));
+    }
+    return m.de;
+  }
+
+  // Référence « Léa · T2 » d'un message vers la fiche de sa tâche (et son étage).
+  lienTacheMsg(id) {
+    const S = this.store;
+    const t = S.taches.get(id);
+    if (!t) return h('span', { class: 'ref' }, String(id).replace(/^D\d+-/, ''));
+    const nom = S.nom(t);
+    return h('button', {
+      class: 'lien ref-tache e-' + t.etat,
+      type: 'button',
+      title: tr('Ouvrir la fiche de {ref}', { ref: t.ref }) + (t.titre ? ' — ' + t.titre : ''),
+      on: { click: () => this.voirTache(t.id) },
+    }, nom !== t.ref ? nom + ' · ' + t.ref : t.ref);
   }
 
   majDossiers() {
@@ -779,7 +949,9 @@ export class Interface {
 
   voirTache(id, opts = {}) {
     const t = this.store.taches.get(id);
-    if (t && t.etage !== this.etageId) this.allerEtage(t.etage);
+    // une tâche qui attend se voit en salle de pause, pas sur l'étage de son projet
+    const ou = t ? etageVisibleTache(this.store, t) || t.etage : null;
+    if (ou && ou !== this.etageId) this.allerEtage(ou);
     this.selectionner(id, opts);
   }
 
@@ -811,8 +983,8 @@ export class Interface {
 
   nomFiche(id) {
     const S = this.store;
-    if (id === 'dg') return tr('le DG');
-    if (id === 'joy') return 'Joy';
+    if (id === 'dg') return this.leDg();
+    if (id === 'joy') return S.nomJoy();
     if (String(id).startsWith('ag:')) {
       const a = S.equipe.get(id.slice(3));
       return a ? a.prenom || a.id : id.slice(3);
@@ -910,7 +1082,7 @@ export class Interface {
       bRecolte.textContent = tr('Récolte en cours…');
       try {
         await envoyer('/api/bonheur/recolter', {});
-        this.toast('info', tr('Récolte terminée : Joy a de quoi faire rire l’équipe.'));
+        this.toast('info', tr('Récolte terminée : {nom} a de quoi faire rire l’équipe.', { nom: S.nomJoy() }));
       } catch (e) {
         this.toast('erreur', tr('Récolte : {erreur}', { erreur: e.message }));
       } finally {
@@ -922,9 +1094,10 @@ export class Interface {
     remplir(box,
       this.boutonRetour(),
       h('div', { class: 'fiche-entete', style: { borderColor: '#ffd23f' } },
-        h('span', { class: 'ref joy-badge', style: { background: '#ffd23f' } }, '😊 Joy'),
-        h('span', { class: 'titre' }, 'Happiness manager')),
-      h('p', { class: 'meta' }, tr('Joy fait le tour des étages pour remonter le moral de ceux qui attendent : une blague, une anecdote, un mot gentil. Jamais quand quelqu’un lève la main.')),
+        h('span', { class: 'ref joy-badge', style: { background: '#ffd23f' } }, '😊 ' + S.nomJoy()),
+        h('span', { class: 'titre' }, 'Happiness manager'),
+        this.boutonPerso('@joy', S.nomJoy())),
+      h('p', { class: 'meta' }, tr('{nom} fait le tour des étages pour remonter le moral de ceux qui attendent : une blague, une anecdote, un mot gentil. Jamais quand quelqu’un lève la main.', { nom: S.nomJoy() })),
       h('dl', {},
         h('dt', {}, tr('Étage')), h('dd', {}, ej ? S.etage(ej)?.nom || ej : '—'),
         h('dt', {}, tr('Réserve')), h('dd', {}, tr('{blagues} blagues · {faits} anecdotes · {ambiance} phrases d’ambiance', { blagues: n('blagues'), faits: n('faits'), ambiance: n('ambiance') })),
@@ -947,17 +1120,21 @@ export class Interface {
     if (this.fiche === 'dg') {
       const dg = S.dg;
       const d = dg.dossier ? S.dossiers.get(dg.dossier) : null;
-      remplir(box,
+      const z = this.zones(box);
+      remplir(z.haut,
         this.boutonRetour(),
-        h('h3', {}, tr('Le DG')),
+        h('div', { class: 'fiche-entete', style: { borderColor: COUL_TYPE.direction } },
+          h('span', { class: 'ref', style: { background: COUL_TYPE.direction } }, S.nomDg()),
+          h('span', { class: 'titre' }, tr('Directeur général')),
+          this.boutonPerso('@dg', this.dgPerso(), this.dgPerso() ? null : tr('Changer le nom et l’apparence du DG'))),
         h('dl', {},
           h('dt', {}, tr('État')), h('dd', {}, dg.etat === 'reflechit' ? tr('réfléchit') : tr('libre')),
           h('dt', {}, tr('Action')), h('dd', {}, { plan: tr('affiche son plan'), delta: tr('modifie le plan'), synthese: tr('synthèse'), question: tr('question pour toi') }[dg.action] || '—'),
           h('dt', {}, tr('Étage')), h('dd', {}, S.etage(dg.etage)?.nom || dg.etage || '—'),
           h('dt', {}, tr('Dossier')), h('dd', {}, d ? d.id + ' — ' + (d.titre || d.texte || '') : '—')),
-        d && S.plans.has(d.id) ? h('div', { class: 'boutons' }, h('button', { class: 'petit', on: { click: () => this.plan.ouvrir(d.id) } }, tr('Voir le plan'))) : null,
-        this.blocPensees('dg', dg.etat === 'reflechit'),
-      );
+        d && S.plans.has(d.id) ? h('div', { class: 'boutons' }, h('button', { class: 'petit', on: { click: () => this.plan.ouvrir(d.id) } }, tr('Voir le plan'))) : null);
+      this.majDialogue(z.dialogue, this.dialogueDg());
+      remplir(z.bas, this.blocPensees('dg', dg.etat === 'reflechit'));
       return;
     }
     if (String(this.fiche).startsWith('ag:')) {
@@ -1010,11 +1187,16 @@ export class Interface {
     const nomT = S.nom(t);
     const donne = this.donneA(t);
     const orig = agent && agent.cloneDe ? S.equipe.get(agent.cloneDe) : null;
-    remplir(box,
+    const prenom = nomT !== t.ref ? nomT : null;
+    // Trois zones : la saisie « Demander / Nouvelle consigne » (au milieu) n'est jamais redessinée,
+    // pour garder le texte et le focus pendant que la fiche se met à jour (pensées, outils…).
+    const z = this.zones(box);
+    remplir(z.haut,
       this.boutonRetour(),
       h('div', { class: 'fiche-entete', style: { borderColor: M.c } },
         h('span', { class: 'ref', style: { background: M.c } }, nomT),
-        h('span', { class: 'titre' }, (nomT !== t.ref ? '— ' + t.ref + ' · ' : '') + (t.titre || ''))),
+        h('span', { class: 'titre' }, (nomT !== t.ref ? '— ' + t.ref + ' · ' : '') + (t.titre || '')),
+        this.boutonPerso(prenom, prenom)),
       sousOnglets,
       h('div', { class: 'meta' }, (S.etage(t.etage)?.nom || t.etage) + ' — ' + tr('dossier {dossier}', { dossier: t.dossier }) + (t.nature ? ' — ' + t.nature : '')),
       h('dl', {},
@@ -1032,7 +1214,9 @@ export class Interface {
           h('button', { class: 'lien', on: { click: () => this.ouvrirFicheDepuis('ag:' + t.agent) } }, agent && agent.prenom ? agent.prenom + ' (' + t.agent + ')' : t.agent),
           t.reembauche ? (agent && agent.cloneDe ? ' — ' + tr('clone de {nom}', { nom: (orig && orig.prenom) || agent.cloneDe }) : ' — ' + tr('réembauché')) : ' — ' + tr('nouvelle recrue'),
           agent ? ' · ' + tr('{n} mission(s)', { n: agent.missions || 0 }) : '')] : null),
-      agent ? this.jaugeContexte(agent) : null,
+      agent ? this.jaugeContexte(agent) : null);
+    this.majDialogue(z.dialogue, this.dialogueTache(t));
+    remplir(z.bas,
       this.blocPensees(t.id, ['running', 'rework', 'verifying'].includes(t.etat)),
       q ? h('div', { class: 'bloc question-agent' }, h('h4', {}, tr('Question en attente')), h('p', {}, q.question || ''),
         h('button', { class: 'petit', on: { click: () => this.montrerCarte('q-' + q.id, true) } }, tr('Répondre'))) : null,
@@ -1061,6 +1245,244 @@ export class Interface {
           lisible(f)
             ? h('button', { class: 'md-fichier code', type: 'button', title: tr('Ouvrir {f}', { f }), on: { click: () => ouvrir(f) } }, f)
             : h('code', {}, f))))) : null);
+  }
+
+  // ---------- parler à un agent ou au DG sans l'interrompre ----------
+  // Fiche en trois zones persistantes : haut et bas sont redessinés (remplir), le dialogue garde sa saisie.
+  zones(box) {
+    let z = this.zonesFiche;
+    if (!z || box.children.length !== 3 || box.children[0] !== z.haut || box.children[1] !== z.dialogue || box.children[2] !== z.bas) {
+      z = this.zonesFiche = { haut: h('div', { class: 'fiche-zone' }), dialogue: h('div', { class: 'fiche-dialogue' }), bas: h('div', { class: 'fiche-zone' }) };
+      box.replaceChildren(z.haut, z.dialogue, z.bas);
+    }
+    return z;
+  }
+
+  // Dossier sur lequel on interroge le DG : celui qu'il traite, sinon le plus récent.
+  dossierDg() {
+    const S = this.store;
+    const d = S.dg && S.dg.dossier ? S.dossiers.get(S.dg.dossier) : null;
+    if (d) return d;
+    const ds = [...S.dossiers.values()].sort((a, b) => (b.creeLe || 0) - (a.creeLe || 0));
+    return ds.find((x) => x.etat !== 'annule') || ds[0] || null;
+  }
+
+  dialogueTache(t) {
+    const S = this.store;
+    const nom = S.nom(t);
+    const dos = S.dossiers.get(t.dossier);
+    const pasCommencee = PAS_DEMARREE.has(t.etat);
+    const fermee = ['cancelled', 'skipped'].includes(t.etat) || !dos || dos.etat === 'annule';
+    let aideConsigne = tr('Transmise en direct si possible, sinon dès la fin de son tour. Elle peut changer son travail.');
+    if (['planned', 'waiting', 'ready', 'queued'].includes(t.etat)) aideConsigne = tr('{nom} n’a pas encore commencé : la consigne sera ajoutée à sa mission.', { nom });
+    else if (t.etat === 'verifying') aideConsigne = tr('{nom} est en vérification : la consigne sera intégrée juste après.', { nom });
+    else if (TERMINAUX.has(t.etat) || t.etat === 'interrupted') aideConsigne = tr('Tâche finie : {nom} la reprend pour intégrer la consigne.', { nom });
+    return {
+      cle: t.id,
+      nom,
+      question: {
+        ok: !pasCommencee,
+        raison: tr('{nom} n’a pas encore commencé : rien à lui demander pour l’instant.', { nom }),
+        titre: tr('Demander à {nom} où il en est, sans l’interrompre', { nom }),
+        entete: tr('Question à {nom}', { nom }),
+        aide: tr('{nom} continue son travail : une copie de sa conversation te répond, ici et dans le fil.', { nom }),
+        placeholder: tr('Ta question à {nom}…', { nom }),
+      },
+      consigne: {
+        ok: !fermee,
+        raison: tr('Cette tâche est fermée : ajoute plutôt un complément au dossier.'),
+        titre: tr('Donner une nouvelle consigne à {nom} : elle peut changer son travail', { nom }),
+        entete: tr('Nouvelle consigne pour {nom}', { nom }),
+        aide: aideConsigne,
+        placeholder: tr('Ce que {nom} doit faire autrement ou en plus…', { nom }),
+      },
+      echanges: S.messages.filter((m) => m.tache === t.id && (m.question || m.reponse || m.de === 'toi')),
+    };
+  }
+
+  dialogueDg() {
+    const S = this.store;
+    const d = this.dossierDg();
+    const perso = this.dgPerso(); // « à Max » / « au DG » : phrases distinctes pour la grammaire
+    const nom = this.leDg(true);
+    const vars = { nom, dossier: d ? d.id : '—', titre: d ? court(d.titre || d.texte, 40) : '' };
+    const sansDossier = tr('Aucun dossier pour l’instant : écris d’abord une demande en bas de l’écran.');
+    return {
+      cle: 'dg',
+      nom,
+      question: {
+        ok: !!d,
+        raison: sansDossier,
+        titre: perso ? tr('Demander à {nom} où il en est, sans l’interrompre', { nom: perso }) : tr('Demander au DG où il en est, sans l’interrompre'),
+        entete: perso ? tr('Question à {nom} (dossier {dossier})', { ...vars, nom: perso }) : tr('Question au DG (dossier {dossier})', vars),
+        aide: tr('{nom} continue son travail : une copie de sa conversation sur le dossier {dossier} te répond, ici et dans le fil.', vars),
+        placeholder: perso ? tr('Ta question à {nom}…', { nom: perso }) : tr('Ta question au DG…'),
+      },
+      consigne: {
+        ok: !!d && d.etat !== 'annule',
+        raison: d ? tr('Le dossier {dossier} est annulé : écris une nouvelle demande.', vars) : sansDossier,
+        titre: tr('Ajouter une consigne au dossier {dossier} : {nom} la transmet aux agents', { ...vars, nom: this.leDg() }),
+        entete: tr('Nouvelle consigne pour le dossier {dossier} · {titre}', vars),
+        aide: tr('{nom} l’ajoute au dossier {dossier} et la transmet aux agents concernés, même déjà lancés.', vars),
+        placeholder: tr('Ce qui doit changer ou s’ajouter dans le dossier {dossier}…', vars),
+      },
+      echanges: S.messages.filter((m) => m.cible === 'dg'),
+    };
+  }
+
+  cfgDialogue(cle) {
+    if (cle === 'dg') return this.dialogueDg();
+    const t = this.store.taches.get(cle);
+    return t ? this.dialogueTache(t) : null;
+  }
+
+  ouvrirDialogue(cle, type) {
+    const cfg = this.cfgDialogue(cle);
+    if (!cfg) return;
+    if (this.dialogue && this.dialogue.cle === cle && this.dialogue.type === type) {
+      this.dialogue = null;
+      this.majFiche();
+      return;
+    }
+    if (!cfg[type].ok) {
+      this.toast('info', cfg[type].raison);
+      return;
+    }
+    this.dialogue = { cle, type };
+    this.majFiche();
+    const c = this.composeurs.get(cle + '|' + type);
+    if (c) c.champ.focus();
+  }
+
+  // Petite saisie (question ou consigne) : créée une fois par cible et gardée, pour ne jamais perdre le texte.
+  composeur(cle, type) {
+    const k = cle + '|' + type;
+    if (this.composeurs.has(k)) return this.composeurs.get(k);
+    const champ = h('textarea', { class: 'q-reponse dlg-champ', rows: '3', maxlength: '4000' });
+    const entete = h('div', { class: 'dlg-entete' });
+    const aide = h('small', { class: 'dlg-aide' });
+    const bEnvoyer = h('button', { class: 'petit ok', type: 'button', title: tr('Envoyer (Ctrl+Entrée)'), disabled: true }, tr('Envoyer'));
+    const bAnnuler = h('button', { class: 'petit', type: 'button', title: tr('Fermer sans envoyer (Échap)') }, tr('Annuler'));
+    const el = h('div', { class: 'dlg-composeur dlg-' + type }, entete, champ, h('div', { class: 'dlg-pied' }, aide, bAnnuler, bEnvoyer));
+    const c = { el, champ, entete, aide, bEnvoyer, occupe: false };
+    const maj = () => (bEnvoyer.disabled = c.occupe || !champ.value.trim());
+    const fermer = () => {
+      if (this.dialogue && this.dialogue.cle === cle && this.dialogue.type === type) this.dialogue = null;
+      this.majFiche();
+    };
+    const go = async () => {
+      const texte = champ.value.trim();
+      if (!texte || c.occupe) return;
+      c.occupe = true;
+      maj();
+      bEnvoyer.textContent = tr('Envoi…');
+      try {
+        await this.envoyerDialogue(cle, type, texte);
+        champ.value = '';
+        fermer();
+      } catch (e) {
+        // 409 : pas encore de conversation, mode démo… le texte reste pour réessayer
+        this.toast('warn', e.message);
+      } finally {
+        c.occupe = false;
+        bEnvoyer.textContent = tr('Envoyer');
+        maj();
+      }
+    };
+    champ.addEventListener('input', maj);
+    champ.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        go();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        fermer();
+      }
+    });
+    bEnvoyer.addEventListener('click', go);
+    bAnnuler.addEventListener('click', fermer);
+    this.composeurs.set(k, c);
+    return c;
+  }
+
+  async envoyerDialogue(cle, type, texte) {
+    const S = this.store;
+    if (cle === 'dg') {
+      const d = this.dossierDg();
+      if (!d) throw new Error(tr('Aucun dossier pour l’instant : écris d’abord une demande en bas de l’écran.'));
+      const route = '/api/dossiers/' + encodeURIComponent(d.id) + (type === 'question' ? '/question-dg' : '/completer');
+      await envoyer(route, { texte });
+      this.toast('info', type === 'question'
+        ? this.dgPerso()
+          ? tr('Question envoyée : la réponse de {nom} arrivera ici et dans le fil.', { nom: this.dgPerso() })
+          : tr('Question envoyée : la réponse du DG arrivera ici et dans le fil.')
+        : tr('Consigne ajoutée au dossier {dossier}.', { dossier: d.id }));
+      return;
+    }
+    const t = S.taches.get(cle);
+    const nom = t ? S.nom(t) : cle;
+    await envoyer('/api/taches/' + encodeURIComponent(cle) + '/' + type, { texte });
+    this.toast('info', type === 'question'
+      ? tr('Question envoyée : la réponse de {nom} arrivera ici et dans le fil.', { nom })
+      : tr('Consigne envoyée à {nom}.', { nom }));
+  }
+
+  majDialogue(zone, cfg) {
+    let p = zone.parties;
+    if (!p) {
+      p = zone.parties = { boutons: h('div', { class: 'boutons dlg-boutons' }), saisie: h('div', { class: 'dlg-saisie' }), echanges: h('div', { class: 'dlg-echanges' }) };
+      zone.replaceChildren(p.boutons, p.saisie, p.echanges);
+    }
+    let ouvert = this.dialogue && this.dialogue.cle === cfg.cle ? this.dialogue.type : null;
+    if (ouvert && !cfg[ouvert].ok) ouvert = this.dialogue = null;
+    const bouton = (type, libelle) => {
+      const c = cfg[type];
+      return h('button', {
+        class: 'petit dlg-bouton' + (ouvert === type ? ' actif' : '') + (c.ok ? '' : ' inactif'),
+        type: 'button',
+        title: c.ok ? c.titre : c.raison,
+        'aria-expanded': ouvert === type ? 'true' : 'false',
+        'aria-disabled': c.ok ? null : 'true',
+        on: { click: () => this.ouvrirDialogue(cfg.cle, type) },
+      }, libelle);
+    };
+    remplir(p.boutons, bouton('question', '💬 ' + tr('Demander où il en est')), bouton('consigne', '✎ ' + tr('Nouvelle consigne')));
+    if (ouvert) {
+      const c = this.composeur(cfg.cle, ouvert);
+      const x = cfg[ouvert];
+      if (c.entete.textContent !== x.entete) c.entete.textContent = x.entete;
+      if (c.aide.textContent !== x.aide) c.aide.textContent = x.aide;
+      if (c.champ.placeholder !== x.placeholder) c.champ.placeholder = x.placeholder;
+      c.champ.setAttribute('aria-label', x.entete);
+      if (p.saisie.firstChild !== c.el) p.saisie.replaceChildren(c.el);
+    } else if (p.saisie.firstChild) p.saisie.replaceChildren();
+    remplir(p.echanges, this.blocEchanges(cfg.echanges));
+  }
+
+  // Bloc « Questions » : tes questions (et consignes) et les réponses, avec « réponse en cours… » en attendant.
+  blocEchanges(msgs) {
+    if (!msgs.length) return null;
+    const enAttente = [];
+    for (const m of msgs) {
+      if (m.reponse) enAttente.shift();
+      else if (m.question) enAttente.push(m);
+    }
+    const now = Date.now();
+    const consignes = msgs.some((m) => m.de === 'toi' && !m.question);
+    const derniers = msgs.slice(-12);
+    return h('div', { class: 'bloc echanges' },
+      h('h4', {}, consignes ? tr('Questions et consignes') : tr('Questions')),
+      msgs.length > derniers.length ? h('div', { class: 'meta' }, tr('{n} message(s) plus ancien(s) dans le fil', { n: msgs.length - derniers.length })) : null,
+      derniers.map((m) => h('div', { class: 'echange de-' + m.de + (m.reponse ? ' reponse' : '') },
+        h('div', { class: 'entete' },
+          h('span', { class: 'auteur' }, this.auteurMessage(m)),
+          m.de === 'toi' ? h('span', { class: 'etiquette-msg' }, m.question ? tr('question') : tr('consigne')) : null,
+          h('span', { class: 'heure' }, heure(m.t))),
+        md(m.texte || '', { classe: 'texte', fichier: (c) => this.ouvrirFichier(c, (m.etages || []).find((x) => x !== 'hall') || null) }))),
+      enAttente.map((q) => (now - (q.t || now) < QUESTION_DELAI
+        ? h('div', { class: 'echange patiente', role: 'status' }, h('span', { class: 'points', 'aria-hidden': 'true' }), tr('réponse en cours…'))
+        : h('div', { class: 'echange sans-reponse' }, tr('pas de réponse à la question de {heure} (voir les alertes)', { heure: heure(q.t) })))));
   }
 
   // ---------- réserve d'agents ----------
@@ -1099,6 +1521,7 @@ export class Interface {
       this.jaugeContexte(a),
       h('div', { class: 'boutons' },
         tache ? h('button', { class: 'petit', on: { click: () => (complet ? this.ouvrirFicheDepuis(tache.id) : this.voirTache(tache.id)) } }, tr('Voir {ref}', { ref: tache.ref })) : null,
+        this.boutonPerso(a.prenom || null, a.prenom || null),
         a.etat === 'disponible' ? h('button', { class: 'petit danger', title: tr('L’agent quitte la réserve : sa conversation ne sera plus reprise'), on: { click: () => this.action('/api/equipe/' + encodeURIComponent(a.id) + '/retirer', undefined, tr('Mettre {nom} à la retraite ? Il ne pourra plus être réembauché.', { nom: a.prenom || a.id })) } }, tr('Mettre à la retraite')) : null));
     return corps;
   }
@@ -1123,7 +1546,9 @@ export class Interface {
           const c = this.carteAgent(a, false);
           c.addEventListener('click', (ev) => {
             if (ev.target.closest('button')) return;
-            if (a.etage !== this.etageId) this.allerEtage(a.etage);
+            // un agent en réserve dort en salle de repos : on va là où on le voit
+            const ou = etageVisibleAgent(this.store, a) || a.etage;
+            if (ou !== this.etageId) this.allerEtage(ou);
             this.selectionner(a.etat === 'occupe' && a.tache ? a.tache : 'ag:' + a.id);
           });
           return c;
@@ -1153,74 +1578,123 @@ export class Interface {
     return ok;
   }
 
+  // Carte de question d'un agent : cliquer une option la sélectionne seulement (rien ne part),
+  // cliquer son image l'ouvre en grand, « Envoyer » envoie l'option choisie et/ou le texte libre.
   carteDecision(q) {
     const S = this.store;
     const t = S.taches.get(q.tache);
-    const occupe = { v: false };
+    let occupe = false;
     const avecOptions = !!(q.options && q.options.length);
     const champ = h('textarea', {
       class: 'q-reponse',
       rows: '2',
       maxlength: '4000',
       placeholder: avecOptions ? tr('Précision (facultative)…') : tr('Ta réponse…'),
-      'aria-label': tr('Réponse à la question'),
+      'aria-label': avecOptions ? tr('Précision facultative') : tr('Réponse à la question'),
     });
     champ.value = this.brouillons.get(q.id) || '';
-    const boutons = [];
-    const repondre = async (choix) => {
-      if (occupe.v) return;
+    const valide = (id) => (q.options || []).some((o) => o.id === id);
+    let choix = valide(this.choixDecisions.get(q.id)) ? this.choixDecisions.get(q.id) : null;
+    const etatChoix = h('span', { class: 'q-etat', 'aria-live': 'polite' });
+    const bEnvoyer = h('button', { class: 'ok q-envoyer', type: 'button', title: tr('Envoyer ta réponse (Ctrl+Entrée dans le texte)') }, tr('Envoyer'));
+    const boutonsOptions = [];
+    const libelle = (id) => {
+      const o = (q.options || []).find((x) => x.id === id);
+      return o ? o.libelle || o.id : '';
+    };
+    const maj = () => {
+      const texte = champ.value.trim();
+      for (const { b, carte, o } of boutonsOptions) {
+        const oui = o.id === choix;
+        b.setAttribute('aria-checked', oui ? 'true' : 'false');
+        b.classList.toggle('choisie', oui);
+        if (carte) carte.classList.toggle('choisie', oui);
+        b.disabled = occupe;
+      }
+      bEnvoyer.disabled = occupe || (!choix && !texte);
+      champ.readOnly = occupe;
+      etatChoix.textContent = choix
+        ? tr('Ton choix : {option}', { option: libelle(choix) }) + (texte ? ' ' + tr('+ ta précision') : '')
+        : avecOptions ? (texte ? tr('Réponse libre, sans option') : tr('Choisis une option, puis Envoyer.')) : '';
+      etatChoix.classList.toggle('vide', !choix);
+    };
+    const choisir = (id) => {
+      if (occupe) return;
+      choix = choix === id ? null : id; // un second clic retire le choix
+      if (choix) this.choixDecisions.set(q.id, choix);
+      else this.choixDecisions.delete(q.id);
+      maj();
+    };
+    const envoyerReponse = async () => {
+      if (occupe) return;
       const texte = champ.value.trim();
       if (!choix && !texte) {
         champ.focus();
         this.toast('warn', avecOptions ? tr('Choisis une option ou écris une réponse.') : tr('Écris ta réponse.'));
         return;
       }
-      occupe.v = true;
-      boutons.forEach((b) => (b.disabled = true));
+      occupe = true;
+      maj();
       const corps = {};
       if (choix) corps.choix = choix;
       if (texte) corps.texte = texte;
       const ok = await this.action('/api/decisions/' + encodeURIComponent(q.id), corps);
-      if (ok) this.brouillons.delete(q.id);
-      else {
-        occupe.v = false;
-        boutons.forEach((b) => (b.disabled = false));
+      if (ok) {
+        this.brouillons.delete(q.id);
+        this.choixDecisions.delete(q.id);
+      } else {
+        occupe = false;
+        maj();
       }
     };
-    champ.addEventListener('input', () => this.brouillons.set(q.id, champ.value));
+    champ.addEventListener('input', () => {
+      this.brouillons.set(q.id, champ.value);
+      maj();
+    });
     champ.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
-        repondre(null);
+        envoyerReponse();
       }
     });
+    bEnvoyer.addEventListener('click', envoyerReponse);
     const imagesOptions = (q.options || []).filter((o) => o.image).map((o) => ({ ...o.image, legende: o.image.legende || o.libelle }));
     const options = (q.options || []).map((o) => {
-      const b = h('button', { class: 'option' + (o.image ? ' illustree' : ''), type: 'button', title: tr('Choisir : {option}', { option: o.libelle || o.id }) },
-        o.image ? h('img', { src: o.image.url, alt: '' }) : null,
-        h('span', {}, o.libelle || o.id));
-      b.addEventListener('click', () => repondre(o.id));
-      boutons.push(b);
-      if (!o.image) return b;
-      const loupe = h('button', { class: 'loupe', type: 'button', title: tr('Voir en grand'), 'aria-label': tr('Voir l’image : {option}', { option: o.libelle || o.id }) }, '⤢');
-      loupe.addEventListener('click', (e) => {
+      const nom = o.libelle || o.id;
+      const b = h('button', { class: 'option', type: 'button', role: 'radio', 'aria-checked': 'false', title: tr('Choisir : {option}', { option: nom }) },
+        h('span', { class: 'coche', 'aria-hidden': 'true' }),
+        h('span', { class: 'option-lib' }, nom));
+      b.addEventListener('click', () => choisir(o.id));
+      if (!o.image) {
+        boutonsOptions.push({ b, o, carte: null });
+        return b;
+      }
+      // Option illustrée : l'image entière ouvre la visionneuse, le libellé (ou le cadre) sélectionne.
+      const img = h('img', { src: o.image.url, alt: tr('Image de l’option {option}', { option: nom }), loading: 'lazy' });
+      const bImage = h('button', { class: 'option-image', type: 'button', title: tr('Voir en grand : {option}', { option: nom }) }, img, h('span', { class: 'option-zoom', 'aria-hidden': 'true' }, '⤢'));
+      img.addEventListener('error', () => bImage.classList.add('cassee'));
+      bImage.addEventListener('click', (e) => {
         e.stopPropagation();
         this.visionneuse.ouvrir(imagesOptions, Math.max(0, imagesOptions.findIndex((x) => x.url === o.image.url)));
       });
-      return h('div', { class: 'option-boite' }, b, loupe);
+      const carte = h('div', { class: 'option-carte' }, bImage, b);
+      carte.addEventListener('click', (e) => {
+        if (e.target === carte) choisir(o.id);
+      });
+      boutonsOptions.push({ b, o, carte });
+      return carte;
     });
-    const bRep = h('button', { class: 'ok', type: 'button', title: tr('Envoyer la réponse libre (Ctrl+Entrée)') }, tr('Répondre'));
-    bRep.addEventListener('click', () => repondre(null));
-    boutons.push(bRep);
+    maj();
     return h('div', { class: 'carte-perm carte-question' },
       h('div', { class: 'perm-haut' },
         h('span', { class: 'perm-outil q' }, tr('Question')),
         t ? h('button', { class: 'lien', on: { click: () => this.voirTache(t.id) } }, (S.nom(t) !== t.ref ? S.nom(t) + ' · ' : '') + t.ref + ' · ' + (S.etage(t.etage)?.nom || t.etage)) : null,
         h('span', { class: 'heure' }, heure(q.t))),
-      h('div', { class: 'q-texte' }, q.question || ''),
+      h('div', { class: 'q-texte', id: 'q-texte-' + q.id }, q.question || ''),
       q.images && q.images.length ? vignettes(q.images, (p, i) => this.visionneuse.ouvrir(p, i), 'q-images') : null,
-      options.length ? h('div', { class: 'q-options' + (imagesOptions.length ? ' avec-images' : '') }, options) : null,
-      h('div', { class: 'q-libre' }, champ, bRep));
+      options.length ? h('div', { class: 'q-options' + (imagesOptions.length ? ' avec-images' : ''), role: 'radiogroup', 'aria-labelledby': 'q-texte-' + q.id }, options) : null,
+      h('div', { class: 'q-libre' }, champ),
+      h('div', { class: 'q-pied' }, etatChoix, bEnvoyer));
   }
 
   // Pile des cartes d'action (permissions et questions), mise à jour sans perdre la saisie en cours.
@@ -1257,6 +1731,7 @@ export class Interface {
       if (box.children[i] !== el) box.insertBefore(el, box.children[i] || null);
     });
     for (const k of [...this.brouillons.keys()]) if (!S.decisions.has(k)) this.brouillons.delete(k);
+    for (const k of [...this.choixDecisions.keys()]) if (!S.decisions.has(k)) this.choixDecisions.delete(k);
   }
 
   // Fait apparaître une carte (depuis une notification ou la fiche) et la met en évidence.
@@ -1367,10 +1842,24 @@ export class Interface {
     }
     if (ev.type === 'personnalisation') {
       this.dir.looks.clear();
+      // noms du DG, de Joy ou des agents changés : tout ce qui les affiche suit
+      this.majImmeuble();
+      this.majSaisie();
+      this.majPanneau();
       return;
     }
     this.plan.surEvenement(ev);
     if (ev.type === 'etat') {
+      // Le QG revient dans une nouvelle version (mise à jour) : on recharge la page pour avoir le nouveau site.
+      const version = S.reglages && S.reglages.version;
+      if (this.versionPage && version && version !== this.versionPage) {
+        location.reload();
+        return;
+      }
+      if (version && !this.versionPage) {
+        this.versionPage = version;
+        this.verifierMaj();
+      }
       this.majLangues();
       this.majTout();
       this.notifs.surEvenement(ev);

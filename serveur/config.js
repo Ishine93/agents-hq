@@ -50,7 +50,22 @@ function assurerConfig() {
     perso.onboarding = true;
     ecrireJson(path.join(CONFIG, 'reglages.json'), perso);
   }
+  // 1.0.2 : salle de pause (agents qui attendent) et salle de repos (agents en réserve), juste au-dessus du hall.
+  const fichierEtages = path.join(CONFIG, 'etages.json');
+  const brutEtages = lireJson('config', 'etages.json');
+  const manquants = SALLES_COMMUNES.filter((s) => !brutEtages.etages.some((e) => e.type === s.type));
+  if (manquants.length) {
+    for (const e of brutEtages.etages) if (e.ordre >= 1) e.ordre += manquants.length;
+    manquants.forEach((s, i) => brutEtages.etages.push({ ...s, ordre: 1 + i }));
+    ecrireJson(fichierEtages, brutEtages);
+  }
 }
+
+// Étages communs (sans projet) : le DG n'y envoie jamais de tâche, la scène y place les agents.
+const SALLES_COMMUNES = [
+  { id: 'salle-repos', nom: 'Salle de repos', type: 'repos', projet: null, actif: true, note: 'Les agents en réserve y dorment, prêts à être réembauchés.' },
+  { id: 'salle-pause', nom: 'Salle de pause', type: 'pause', projet: null, actif: true, note: 'Les agents qui attendent leur tour y jouent (billard, baby-foot, télé).' },
+];
 assurerConfig();
 
 function chargerReglages() {
@@ -121,7 +136,13 @@ export function directive(nom) {
     .replaceAll('{RACINES}', r.length ? r.join(', ') : '(aucun dossier racine choisi)')
     .replaceAll('{QG}', RACINE)
     .replaceAll('{UTILISATEUR}', REGLAGES.utilisateur ? `L'utilisateur, ${REGLAGES.utilisateur},` : "L'utilisateur")
-    .replaceAll('{LANGUE}', langueIA());
+    .replaceAll('{LANGUE}', langueIA())
+    .replaceAll(
+      '{GIT}',
+      REGLAGES.gitAuto === true
+        ? "- Git : l'utilisateur autorise les opérations git sans demander (pull, commit, branche, merge, push), quand la mission le demande. Fais des commits clairs et ne pousse que ce que la mission a produit."
+        : "- Git : pas de git push (ni de publication) sans accord de l'utilisateur.",
+    );
   return texte;
 }
 

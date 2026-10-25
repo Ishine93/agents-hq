@@ -11,10 +11,24 @@
   "plafondGlobal": 0,
   "plafondEtage": 0,
   "maxTaches": 12,
-  "dg": { "modele": "opus", "effort": "xhigh", "maxTurns": 30 },
-  "tache": { "maxTurnsDefaut": 80, "timeoutMinDefaut": 30 },
-  "verif": { "maxTurns": 40 },
+  "dg": {
+    "modele": "opus",
+    "effort": "xhigh",
+    "maxTurns": 30
+  },
+  "tache": {
+    "maxTurnsDefaut": 80,
+    "timeoutMinDefaut": 30
+  },
+  "verif": {
+    "maxTurns": 40
+  },
   "attenteDeltaMs": 3000,
   "historiqueDossiers": 30,
-  "dictee": { "modele": "auto" }
+  "dictee": {
+    "modele": "auto"
+  },
+  "dureeBulles": 1,
+  "gitAuto": false,
+  "miseAJourAuto": true
 }

@@ -17,7 +17,7 @@ import { t } from './i18n.js';
 export let DOSSIERS_DIR = path.join(RACINE, 'dossiers');
 const VERSION = (() => {
   try {
-    return JSON.parse(fs.readFileSync(path.join(RACINE, 'package.json'), 'utf8')).version;
+    return JSON.parse(fs.readFileSync(path.join(RACINE, 'package.json'), 'utf8').replace(/^﻿/, '')).version;
   } catch {
     return null;
   }
@@ -106,6 +106,9 @@ export function reglagesPublics() {
     plafondEtage: REGLAGES.plafondEtage,
     recolteAuto: REGLAGES.recolteAuto !== false,
     rojoPortsAuto: !!REGLAGES.rojoPortsAuto,
+    gitAuto: REGLAGES.gitAuto === true,
+    miseAJourAuto: REGLAGES.miseAJourAuto !== false,
+    dureeBulles: Number(REGLAGES.dureeBulles) || 1,
     dg: { modele: REGLAGES.dg.modele, effort: REGLAGES.dg.effort },
     dictee: REGLAGES.dictee || {},
     qg: RACINE,
@@ -115,7 +118,7 @@ export function reglagesPublics() {
 }
 
 // Les étages livrés gardent leur nom traduit tant que tu ne les as pas renommés.
-const NOMS_LIVRES = new Set(['Direction', 'Bac à sable', 'Hall']);
+const NOMS_LIVRES = new Set(['Direction', 'Bac à sable', 'Hall', 'Salle de pause', 'Salle de repos']);
 export const etagesPublics = () =>
   etages().map(({ id, nom, type, ordre, projet, actif, dossiers }) => ({
     id, nom: NOMS_LIVRES.has(nom) ? t(nom) : nom, type, ordre, projet, actif: !!actif, dossiers: dossiers || (projet ? [projet] : []),
@@ -198,7 +201,8 @@ export function changerEtatTache(t, nouvelEtat, extra = {}) {
 }
 
 // `pieces` : images publiques ({id, nom, type, legende, origine, url}) affichées avec le message.
-export function message(dossierId, de, texte, etagesCibles = null, pieces = []) {
+// extra : champs en plus, ex. { nom, tache, reponse: true } pour la réponse d'un agent (de: 'agent').
+export function message(dossierId, de, texte, etagesCibles = null, pieces = [], extra = null) {
   const d = dossierId ? etat.dossiers.get(dossierId) : null;
   const m = {
     id: `M${++compteurMessages}`,
@@ -208,6 +212,7 @@ export function message(dossierId, de, texte, etagesCibles = null, pieces = []) 
     texte,
     pieces,
     t: Date.now(),
+    ...(extra || {}),
   };
   etat.messages.push(m);
   if (etat.messages.length > 500) etat.messages.splice(0, etat.messages.length - 500);

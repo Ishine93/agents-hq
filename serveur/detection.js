@@ -189,7 +189,7 @@ export function modifierEtage(id, { nom, actif, fiche } = {}) {
   const e = brut.etages.find((x) => x.id === id);
   if (!e) throw new Error(t('étage inconnu'));
   if (nom !== undefined) e.nom = String(nom).trim().slice(0, 40) || e.nom;
-  if (actif !== undefined && !['direction', 'hall'].includes(id)) e.actif = !!actif;
+  if (actif !== undefined && !['direction', 'hall', 'salle-pause', 'salle-repos'].includes(id)) e.actif = !!actif;
   if (fiche !== undefined) {
     if (!e.fiche) e.fiche = `${id}.md`;
     fs.writeFileSync(path.join(RACINE, 'config', 'fiches', e.fiche), String(fiche).slice(0, 20000));
@@ -201,7 +201,7 @@ export function modifierEtage(id, { nom, actif, fiche } = {}) {
 
 // Retire un étage de l'immeuble (le projet n'est pas touché).
 export function retirerEtage(id) {
-  if (['direction', 'hall'].includes(id)) throw new Error(t("cet étage fait partie de l'immeuble"));
+  if (['direction', 'hall', 'salle-pause', 'salle-repos'].includes(id)) throw new Error(t("cet étage fait partie de l'immeuble"));
   const brut = lireEtages();
   const i = brut.etages.findIndex((x) => x.id === id);
   if (i < 0) throw new Error(t('étage inconnu'));

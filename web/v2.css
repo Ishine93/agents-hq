@@ -89,6 +89,14 @@ body.redimensionne, body.redimensionne * { cursor: inherit !important; user-sele
 .param-skin-apercu canvas { image-rendering: pixelated; }
 .param-skin-apercu span { font-size: 12px; font-weight: 600; text-align: center; }
 .param-skin-reglages { display: flex; flex-direction: column; gap: 6px; flex: 1; }
+.param-skin-apercu .badge { margin-top: 2px; font-size: 10px; }
+.param-skin.ouvert { flex-wrap: wrap; }
+.param-skin-nom { flex-basis: 100%; display: flex; gap: 8px; align-items: center; padding: 4px 2px 2px; border-top: 1px dashed rgba(255, 255, 255, 0.08); }
+.param-skin-nom small { color: var(--dim); }
+.param-skin-nom .champ { font-weight: 700; width: 200px; }
+.param-skin-ajout { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; min-height: 172px; border-style: dashed; color: var(--dim); font-size: 12px; font-weight: 600; cursor: pointer; }
+.param-skin-ajout:hover { color: var(--texte); border-color: var(--accent); background: rgba(58, 134, 255, 0.08); }
+.param-skin-ajout .plus { font-size: 30px; line-height: 1; }
 .param-skin-reglages small { color: var(--dim); display: block; margin-bottom: 2px; }
 .pastilles { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
 .pastille-couleur { width: 22px; height: 22px; border-radius: 5px; border: 2px solid #0b0d16; padding: 0; }
@@ -198,7 +206,102 @@ body.redimensionne, body.redimensionne * { cursor: inherit !important; user-sele
 .fichiers-produits ul { margin: 0; padding-left: 18px; font-size: 12.5px; }
 .notes-passation summary { cursor: pointer; color: var(--dim); font-size: 12.5px; margin: 6px 0 2px; }
 
+/* =================== v1.0.2 : destination du message, cartes de question, dialogue avec les agents =================== */
+/* destination du message, collée au bouton Envoyer */
+.envoi { display: flex; flex: none; align-items: stretch; }
+.cible-saisie {
+  height: 38px; max-width: 250px; min-width: 120px; padding: 0 6px;
+  border: 2px solid #0b0d16; border-right: 0; border-radius: 8px 0 0 8px;
+  background: #232a45; color: var(--texte); font: inherit; font-size: 12.5px; font-weight: 700;
+  text-overflow: ellipsis; cursor: pointer;
+}
+.cible-saisie:hover { filter: brightness(1.12); }
+.cible-saisie:focus-visible { outline: 2px solid var(--jaune); outline-offset: 1px; }
+.cible-saisie option, .cible-saisie optgroup { background: #1b2033; color: var(--texte); font-weight: 400; }
+.cible-saisie optgroup { color: var(--dim); font-weight: 700; font-style: normal; }
+.cible-saisie.cible-completer { background: #5b3aa0; }
+.cible-saisie.cible-repondre { background: #8a5a00; }
+.cible-saisie.eclair { animation: eclair 1.2s ease-out; }
+.envoi .envoyer { border-radius: 0 8px 8px 0; }
+
+/* bouton Documents sans projet à l'étage */
+#btn-documents.inactif { opacity: 0.45; cursor: not-allowed; }
+
+/* immeuble : nom du DG (modifiable) et salles communes */
+.etage .dg { max-width: 46px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mq.repos { background: #f27fb8; font-size: 9.5px; }
+
+/* fil : messages des agents (réponses à tes questions) */
+.msg.de-agent .texte { background: #fff3df; color: #2a1d06; border-bottom-left-radius: 2px; box-shadow: inset 4px 0 #ff9a1f; }
+.msg.de-agent .auteur { color: #ffc46b; }
+.msg.de-agent .md a, .msg.de-agent .md-fichier { color: #9a4b00; }
+.msg.de-dg.reponse .texte { box-shadow: inset 4px 0 var(--direction, #c9a227); }
+.msg .entete { align-items: baseline; flex-wrap: wrap; }
+.msg .entete .ref-tache { font-size: 11px; margin: 0; }
+.etiquette-msg { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; padding: 0 5px; border-radius: 3px; background: rgba(255, 255, 255, 0.1); color: #c9d2ea; }
+.msg.reponse .etiquette-msg { background: rgba(255, 154, 31, 0.22); color: #ffc46b; }
+
+/* fiches : bouton Personnaliser dans l'en-tête */
+.fiche-entete { flex-wrap: wrap; }
+.fiche-entete .perso { margin-left: auto; padding: 2px 8px; font-size: 11.5px; }
+.agent-carte .boutons .perso { margin-left: auto; }
+
+/* fiches : parler à l'agent ou au DG sans l'interrompre */
+.fiche-dialogue { margin: 10px 0; padding: 8px; border: 1px solid var(--bord-clair); border-radius: 8px; background: rgba(255, 255, 255, 0.025); }
+.fiche-dialogue .dlg-boutons { margin-top: 0; }
+.dlg-bouton.actif { background: var(--accent); }
+.dlg-bouton.inactif { opacity: 0.5; cursor: not-allowed; }
+.dlg-composeur { margin-top: 8px; display: flex; flex-direction: column; gap: 5px; }
+.dlg-entete { font-size: 12px; font-weight: 700; color: #c9d2ea; }
+.dlg-composeur .dlg-champ { width: 100%; max-height: 200px; }
+.dlg-consigne .dlg-champ { border-color: #6a4cc0; }
+.dlg-pied { display: flex; gap: 6px; align-items: center; }
+.dlg-aide { flex: 1; color: var(--dim); font-size: 11.5px; line-height: 1.35; }
+.petit:disabled { opacity: 0.45; cursor: not-allowed; filter: none; }
+.dlg-echanges .bloc { margin: 10px 0 0; }
+.echange { margin: 0 0 8px; }
+.echange .entete { display: flex; gap: 6px; align-items: baseline; font-size: 11px; color: var(--dim); margin-bottom: 2px; }
+.echange .auteur { font-weight: 700; color: var(--texte); }
+.echange .texte { padding: 6px 9px; border-radius: 8px; font-size: 13px; line-height: 1.45; border: 1px solid #0b0d16; }
+.echange.de-toi .texte { background: #22365f; }
+.echange.de-agent .texte { background: #fff3df; color: #2a1d06; box-shadow: inset 4px 0 #ff9a1f; }
+.echange.de-dg .texte { background: #fbfbfd; color: #15151f; box-shadow: inset 4px 0 #c9a227; }
+.echange.de-agent .md a, .echange.de-agent .md-fichier, .echange.de-dg .md a, .echange.de-dg .md-fichier { color: #1a5fd0; }
+.echange.de-agent .auteur { color: #ffc46b; }
+.echange.patiente, .echange.sans-reponse { font-size: 12.5px; font-style: italic; color: var(--dim); display: flex; align-items: center; gap: 6px; }
+.echange.sans-reponse { color: #ffb38a; }
+.echange .points { display: inline-block; width: 22px; height: 8px; background: radial-gradient(circle, var(--dim) 3px, transparent 3.5px) 0 50% / 8px 8px repeat-x; animation: points 1s steps(3) infinite; }
+@keyframes points { from { width: 6px; } to { width: 30px; } }
+
+/* cartes de question : choisir (sélection), voir l'image en grand, puis Envoyer */
+.q-options { margin: 8px 0; }
+.option { display: inline-flex; align-items: center; gap: 7px; text-align: left; cursor: pointer; }
+.option .coche { flex: none; width: 14px; height: 14px; border-radius: 50%; border: 2px solid #c9d2ea; background: transparent; box-shadow: inset 0 0 0 2px transparent; }
+.option.choisie { background: var(--accent); color: #fff; box-shadow: 0 0 0 2px var(--jaune); }
+.option.choisie:hover:not(:disabled) { background: #4f95ff; }
+.option.choisie .coche { border-color: #fff; background: #fff; box-shadow: inset 0 0 0 3px var(--accent); }
+.option:disabled { opacity: 0.6; cursor: default; }
+.q-options.avec-images { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; }
+.q-options.avec-images > .option { width: 100%; }
+.option-carte { display: flex; flex-direction: column; gap: 4px; padding: 4px; border: 2px solid #0b0d16; border-radius: 9px; background: #2a3150; cursor: pointer; }
+.option-carte.choisie { border-color: var(--jaune); background: rgba(58, 134, 255, 0.28); }
+.option-carte .option { width: 100%; padding: 4px 6px; font-size: 12px; }
+.option-image { position: relative; display: block; width: 100%; padding: 0; border: 0; border-radius: 5px; overflow: hidden; background: #0f1322; cursor: zoom-in; }
+.option-image img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; transition: transform 0.15s; }
+.option-image:hover img { transform: scale(1.04); }
+.option-image.cassee img { visibility: hidden; }
+.option-image.cassee::after { content: '—'; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--dim); }
+.option-zoom { position: absolute; top: 4px; right: 4px; width: 22px; height: 22px; border-radius: 5px; background: rgba(10, 12, 20, 0.75); font-size: 13px; line-height: 22px; text-align: center; pointer-events: none; opacity: 0.8; }
+.option-image:hover .option-zoom, .option-image:focus-visible .option-zoom { opacity: 1; background: var(--accent); }
+.q-libre .q-reponse { width: 100%; }
+.q-pied { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.q-etat { flex: 1; min-width: 0; font-size: 12px; font-weight: 700; color: #9fe3b4; overflow-wrap: anywhere; }
+.q-etat.vide { color: var(--dim); font-weight: 400; font-style: italic; }
+.q-envoyer { flex: none; border: 2px solid #0b0d16; border-radius: 6px; padding: 6px 16px; font-weight: 800; }
+.q-envoyer:disabled { opacity: 0.45; cursor: not-allowed; filter: grayscale(0.6); }
+
 @media (max-width: 1400px) {
   .choix-langue select { max-width: 70px; }
   #btn-documents span, #btn-reglages span { display: none; }
+  .cible-saisie { max-width: 180px; }
 }

@@ -70,6 +70,7 @@ Chaque tâche est exécutée par un agent qui ne voit NI la demande, NI les autr
 
 ## Sécurité
 - Jamais de publication, de prix, de Creator Hub, d'envoi, de suppression, d'achat sans `approbation` vrai, et seulement si l'utilisateur l'a demandé.
+{GIT}
 - Les étages inactifs n'existent pas pour toi.
 - Ne recopie jamais d'identifiants ou de jetons.
 

@@ -52,5 +52,9 @@
     "Romy",
     "Samy"
   ],
-  "skins": {}
+  "skins": {},
+  "noms": {
+    "dg": "",
+    "joy": ""
+  }
 }

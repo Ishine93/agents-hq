@@ -272,3 +272,16 @@ Erreurs : statut HTTP 4xx/5xx avec `{erreur: "texte"}`.
 | POST | `/api/conso/limites` | — | relit les limites du forfait de chaque compte (sans tokens) |
 | POST | `/api/dictee/installer` | — | ouvre l'installation de la dictée |
 | POST | `/api/onboarding/terminer` | — | `reglages` |
+
+## Ajouts 1.0.2
+- **Salles communes** : deux étages sans projet, `{"id":"salle-pause","type":"pause"}` (les agents dont la tâche attend y jouent) et `{"id":"salle-repos","type":"repos"}` (les agents de la réserve y dorment). Le DG n'y envoie jamais de tâche ; ils ne se retirent ni ne se désactivent.
+- **Réglages** : `reglages.gitAuto` (booléen : les profils qui écrivent peuvent faire toutes les commandes git, `git push` n'est plus interdit) et `reglages.dureeBulles` (multiplicateur de durée des bulles, 1 = normal).
+- **Personnalisation** : `personnalisation.noms = {dg, joy}` (vide = nom par défaut). Les nouvelles recrues tirent un prénom **au hasard** parmi les prénoms libres de la liste.
+- **Messages** : un message peut porter des champs en plus. Question de l'utilisateur à un agent : `{de: "toi", question: true, tache}` (au DG : `cible: "dg"`). Réponse : `{de: "agent", nom, tache, reponse: true}` (du DG : `{de: "dg", reponse: true, cible: "dg"}`). Consigne directe : `{de: "toi", tache}`.
+
+| Méthode | Route | Corps | Réponse |
+|---|---|---|---|
+| POST | `/api/taches/:id/question` | `{texte}` | `{ok}` tout de suite ; une copie (fork) de la conversation de l'agent répond, sans l'interrompre, par un message dans le fil. 409 si l'agent n'a pas encore commencé (ou en démo) |
+| POST | `/api/dossiers/:id/question-dg` | `{texte}` | idem pour le DG du dossier |
+| POST | `/api/taches/:id/consigne` | `{texte}` | `{ok}` : consigne transmise en direct à l'agent (ou à sa prochaine reprise, selon son état) |
+| POST | `/api/equipe/renommer` | `{ancien, nouveau}` (`ancien` = un prénom, `@dg` ou `@joy`) | personnalisation ; renomme aussi, tout de suite, les agents de la réserve et les tâches en cours qui portent ce nom |

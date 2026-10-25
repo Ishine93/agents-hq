@@ -36,7 +36,50 @@ const DECOR_THEME = {
 // Projets sans décor dédié : ils empruntent celui d'un étage proche.
 const ALIAS_THEME = { unity: 'unreal', godot: 'roblox', comfyui: 'unreal', web: 'atelier3d', python: 'etudes', projet: 'etudes' };
 
+// Sièges : on s'y assoit (collision « siège »), on n'y passe pas.
+const SIEGES = new Set(['chaise', 'fauteuil_dg', 'canape', 'fauteuil', 'canape_tv', 'pouf']);
+
+// Grilles de collision (meubles de plusieurs cases : w × h) et arêtes des cloisons.
+function grilles(meubles, cloisons, autresBloques = []) {
+  const bloque = new Uint8Array(W * H);
+  const siege = new Uint8Array(W * H);
+  for (const it of meubles) {
+    for (let dy = 0; dy < (it.h || 1); dy++) {
+      for (let dx = 0; dx < (it.w || 1); dx++) {
+        const x = it.x + dx;
+        const y = it.y + dy;
+        if (x < 0 || y < 0 || x >= W || y >= H) continue;
+        if (SIEGES.has(it.type)) siege[y * W + x] = 1;
+        bloque[y * W + x] = 1;
+      }
+    }
+  }
+  for (const e of autresBloques) bloque[e.y * W + e.x] = 1;
+  const aretes = new Set();
+  for (const cl of cloisons) aretes.add(cl.x + ',' + cl.y + ',' + cl.cote);
+  return { bloque, siege, aretes };
+}
+
+// Points obligatoires des scènes, sans usage sur les étages partagés (pause, repos) : des cases neutres
+// pour que rien ne casse si un cas imprévu y conduit quand même.
+function spotsNeutres() {
+  return {
+    ascenseur: { apparition: { gx: 0.18, gy: 2.0 }, tuile: { x: 0, y: 2 } },
+    arrivee: [s(1, 2, 'se'), s(2, 3, 'se'), s(1, 3, 'se'), s(2, 2, 'se'), s(1, 1, 'se'), s(0, 3, 'se')],
+    equipe: [],
+    fileDG: [s(2, 4, 'ne'), s(2, 5, 'ne')],
+    visiteurDG: [s(2, 1, 'se'), s(2, 2, 'se')],
+    dg: { siege: s(1, 1, 'se'), tableau: s(2, 1, 'se'), tete: s(1, 2, 'se') },
+    postes: [],
+    machine: { cle: 'machine', chaise: s(1, 3, 'se'), bureau: { x: 0, y: 3 }, insp: s(2, 3, 'se'), file: [s(2, 3, 'se')] },
+    pause: [],
+    reunion: { nord: [], sud: [], est: [], debout: [], tete: s(1, 2, 'se'), table: { x0: 1, y0: 1, x1: 1, y1: 1 } },
+  };
+}
+
 export function construireCarte(type) {
+  if (type === 'pause') return carteSallePause();
+  if (type === 'repos') return carteSalleRepos();
   const theme = DECOR_THEME[type] ? type : DECOR_THEME[ALIAS_THEME[type]] ? ALIAS_THEME[type] : 'etudes';
   const zones = [];
   for (let y = 0; y < H; y++) {
@@ -144,16 +187,7 @@ export function construireCarte(type) {
   for (const y of [6, 8, 9, 10, 11]) c(10, y, 'e');
 
   // --- grilles de collision ---
-  const bloque = new Uint8Array(W * H);
-  const siege = new Uint8Array(W * H);
-  for (const it of meubles) {
-    const i = it.y * W + it.x;
-    if (it.type === 'chaise' || it.type === 'fauteuil_dg' || it.type === 'canape' || it.type === 'fauteuil') siege[i] = 1;
-    bloque[i] = 1;
-  }
-  for (const e of emplacementsServices) bloque[e.y * W + e.x] = 1;
-  const aretes = new Set();
-  for (const cl of cloisons) aretes.add(cl.x + ',' + cl.y + ',' + cl.cote);
+  const { bloque, siege, aretes } = grilles(meubles, cloisons, emplacementsServices);
 
   // --- points de passage ---
   const postes = [];
@@ -189,9 +223,13 @@ export function construireCarte(type) {
       nord: [s(12, 7, 'sw', { assis: true }), s(13, 7, 'sw', { assis: true }), s(14, 7, 'sw', { assis: true })],
       sud: [s(12, 10, 'ne', { assis: true }), s(13, 10, 'ne', { assis: true }), s(14, 10, 'ne', { assis: true })],
       est: [s(15, 9, 'nw', { assis: true })],
+      // plus de monde que de chaises : les suivants restent debout autour de la table
+      debout: [s(11, 8, 'se'), s(11, 9, 'se'), s(13, 6, 'sw'), s(12, 6, 'sw'), s(14, 6, 'sw'), s(13, 11, 'ne'), s(12, 11, 'ne'),
+        s(14, 11, 'ne'), s(15, 7, 'sw'), s(15, 10, 'nw'), s(11, 10, 'se')],
       tete: s(15, 8, 'nw', { assis: true }),
       table: { x0: 12, y0: 8, x1: 14, y1: 9 },
     },
+    tourJoy: [s(3, 5, 'se'), s(8, 4, 'sw'), s(13, 4, 'sw'), s(7, 10, 'ne'), s(4, 10, 'ne'), s(6, 3, 'nw')],
   };
 
   return {
@@ -201,6 +239,190 @@ export function construireCarte(type) {
     tableau: { x0: 4, x1: 7 },
     ascenseur: { y0: 1, y1: 3 },
     horloge: { y: 8.6 },
+    pancarte: { gx: 0, gy: 9.8 },
+  };
+}
+
+// ---------- Salle de pause : les agents qui attendent leur tour y jouent ----------
+function zonePause(x, y) {
+  if (x <= 2 && y <= 3) return 'lobby';
+  if (x <= 2 && y <= 7) return 'cafe';
+  if (x <= 4 && y >= 8) return 'poufs';
+  if (x <= 9 && y <= 4) return 'tele';
+  if (x <= 9) return 'billard';
+  if (y <= 1) return 'arcade';
+  if (y <= 6) return 'babyfoot';
+  return 'pingpong';
+}
+
+function carteSallePause() {
+  const zones = [];
+  for (let y = 0; y < H; y++) {
+    zones.push([]);
+    for (let x = 0; x < W; x++) zones[y].push(zonePause(x, y));
+  }
+  const meubles = [];
+  const m = (type_, x, y, opts = {}) => meubles.push({ type: type_, x, y, ...opts });
+  // hall d'ascenseur et mur du fond
+  m('plante', 0, 0, { variante: 7 });
+  m('plante', 3, 0, { variante: 1 });
+  m('meuble_tv', 5, 0, { part: 'g' });
+  m('meuble_tv', 6, 0, { part: 'd' });
+  m('jukebox', 8, 0);
+  m('arcade', 14, 0, { variante: 0 });
+  m('arcade', 15, 0, { variante: 1 });
+  // salon télé : canapé tourné vers l'écran (mur du fond), table basse, poufs
+  for (let x = 4; x <= 7; x++) m('canape_tv', x, 3, { part: x === 4 ? 'g' : x === 7 ? 'd' : 'm' });
+  m('table_basse', 5, 2, { variante: 'tele' });
+  m('table_basse', 6, 2, { variante: 'tele' });
+  m('pouf', 3, 2, { dir: 'se' });
+  m('pouf', 8, 2, { dir: 'nw' });
+  // jeux (meubles de deux cases)
+  m('billard', 6, 7, { w: 2, h: 1, jeu: 'billard' });
+  m('babyfoot', 11, 4, { w: 2, h: 1, jeu: 'babyfoot' });
+  m('pingpong', 11, 9, { w: 2, h: 1, jeu: 'pingpong' });
+  // coin café (mur gauche)
+  m('machine_cafe', 0, 6, { dir: 'se' });
+  m('distributeur', 0, 7);
+  // coin poufs
+  m('table_basse', 1, 9, { variante: 'poufs' });
+  m('pouf', 1, 8, { dir: 'sw' });
+  m('pouf', 0, 9, { dir: 'se' });
+  m('pouf', 2, 9, { dir: 'nw' });
+  m('pouf', 1, 10, { dir: 'ne' });
+  m('plante', 0, 11, { variante: 5 });
+  m('plante', 15, 6, { variante: 2 });
+  m('plante', 15, 11, { variante: 6 });
+
+  const cloisons = [];
+  const { bloque, siege, aretes } = grilles(meubles, cloisons);
+  // Places de jeu, dans l'ordre où on les remplit : on forme d'abord des duos (billard, baby-foot)
+  // pour qu'un agent seul ne joue pas contre personne.
+  const J = (x, y, dir, activite, extra = {}) => s(x, y, dir, { activite, ...extra });
+  const T = (x, y, dir) => J(x, y, dir, 'tele', { assis: true, centre: [6, 0.5] });
+  const B = (x, y, dir) => J(x, y, dir, 'billard', { table: 'billard', centre: [7, 7.5] });
+  const F = (x, y, dir) => J(x, y, dir, 'babyfoot', { table: 'babyfoot', centre: [12, 4.5] });
+  const Pg = (x, y, dir) => J(x, y, dir, 'pingpong', { table: 'pingpong', centre: [12, 9.5] });
+  const Pf = (x, y, dir) => J(x, y, dir, 'pouf', { assis: true, centre: [1.5, 9.5] });
+  const A = (x, y) => J(x, y, 'ne', 'arcade', { centre: [x + 0.5, 0.5] });
+  const C = (x, y) => J(x, y, 'nw', 'cafe', { cafe: true, centre: [0.5, y + 0.5] });
+  const jeu = [
+    T(5, 3, 'ne'), B(5, 7, 'se'), B(8, 7, 'nw'), F(11, 3, 'sw'), F(11, 5, 'ne'), T(6, 3, 'ne'), A(14, 1),
+    Pf(1, 8, 'sw'), Pf(2, 9, 'nw'), F(12, 3, 'sw'), F(12, 5, 'ne'), Pg(10, 9, 'se'), Pg(13, 9, 'nw'),
+    T(4, 3, 'ne'), T(7, 3, 'ne'), C(1, 6), A(15, 1), B(6, 6, 'sw'), B(7, 8, 'ne'), Pf(0, 9, 'se'), Pf(1, 10, 'ne'),
+    T(3, 2, 'se'), T(8, 2, 'nw'), C(1, 7),
+    // spectateurs (pas juste derrière un joueur : on les verrait l'un sur l'autre)
+    J(9, 6, 'nw', 'regarde', { centre: [7, 7.5] }), J(14, 5, 'nw', 'regarde', { centre: [12, 4.5] }),
+    J(10, 10, 'ne', 'regarde', { centre: [12, 9.5] }), J(4, 8, 'se', 'regarde', { centre: [7, 7.5] }),
+  ];
+  const spots = {
+    ...spotsNeutres(),
+    jeu,
+    tourJoy: [s(3, 4, 'se'), s(9, 4, 'sw'), s(9, 9, 'nw'), s(13, 7, 'sw'), s(4, 9, 'ne'), s(10, 2, 'sw')],
+  };
+  return {
+    W, H, HW, type: 'pause', zones, meubles, cloisons, bloque, siege, aretes, spots, emplacementsServices: [],
+    salon: null,
+    tapis: [{ x0: 3.15, y0: 1.2, x1: 8.85, y1: 4.75, c0: '#4b2f6b', c1: '#7b56a6' }, { x0: 0.15, y0: 7.9, x1: 3.75, y1: 11.1, c0: '#2a6b5a', c1: '#49a88b' }],
+    bureauDG: [],
+    tableau: null,
+    tele: { x0: 4.3, x1: 7.7 },
+    ascenseur: { y0: 1, y1: 3 },
+    horloge: { y: 8.6 },
+    pancarte: { gx: 0, gy: 10.3 },
+  };
+}
+
+// ---------- Salle de repos : les agents en réserve y dorment ----------
+function zoneRepos(x, y) {
+  if (x <= 2 && y <= 4) return 'lobby';
+  if (y <= 1) return 'lits-fond';
+  if (x <= 1) return 'lits-gauche';
+  if (y >= 5 && y <= 6) return 'lits-milieu';
+  if (y >= 9) return 'lits-devant';
+  return 'allee';
+}
+
+function carteSalleRepos() {
+  const zones = [];
+  for (let y = 0; y < H; y++) {
+    zones.push([]);
+    for (let x = 0; x < W; x++) zones[y].push(zoneRepos(x, y));
+  }
+  const meubles = [];
+  const m = (type_, x, y, opts = {}) => meubles.push({ type: type_, x, y, ...opts });
+  const lits = [];
+  // Place d'un dormeur : la case du pied du lit (on y entre), la tête sur l'oreiller.
+  // axe 'y' : tête au fond (mur droit) ; axe 'x' : tête contre le mur gauche.
+  const place = (lit, niveau, z) => {
+    const pied = lit.axe === 'y' ? { x: lit.x, y: lit.y + 1 } : { x: lit.x + 1, y: lit.y };
+    const extra = { couche: { ox: lit.x, oy: lit.y, axe: lit.axe, z, niveau: niveau || 0 } };
+    if (niveau) extra.niveau = niveau;
+    return s(pied.x, pied.y, lit.axe === 'y' ? 'sw' : 'se', extra);
+  };
+  m('plante', 0, 0, { variante: 7 });
+  // lits superposés le long du mur du fond
+  const fond = [];
+  [4, 6, 8, 10, 12, 14].forEach((x, i) => {
+    const l = { type: 'lit_superpose', x, y: 0, w: 1, h: 2, axe: 'y', variante: i };
+    meubles.push(l);
+    fond.push(l);
+  });
+  for (const x of [5, 9, 13]) m('table_chevet', x, 0, { lampe: true });
+  m('plante', 7, 0, { variante: 4, petite: true });
+  m('plante', 11, 0, { variante: 2, petite: true });
+  m('plante', 15, 0, { variante: 6 });
+  // lits superposés contre le mur gauche
+  const gauche = [];
+  [6, 8, 10].forEach((y, i) => {
+    const l = { type: 'lit_superpose', x: 0, y, w: 2, h: 1, axe: 'x', variante: i + 2 };
+    meubles.push(l);
+    gauche.push(l);
+  });
+  m('table_chevet', 0, 7, { lampe: true });
+  m('table_chevet', 0, 9, { lampe: false });
+  m('plante', 0, 11, { variante: 1 });
+  // lits simples au milieu, matelas au sol devant
+  const milieu = [];
+  [5, 7, 9, 11, 13].forEach((x, i) => {
+    const l = { type: 'lit', x, y: 5, w: 1, h: 2, axe: 'y', variante: i };
+    meubles.push(l);
+    milieu.push(l);
+  });
+  const devant = [];
+  [5, 7, 9, 11, 13].forEach((x, i) => {
+    const l = { type: 'futon', x, y: 9, w: 1, h: 2, axe: 'y', variante: i + 1 };
+    meubles.push(l);
+    devant.push(l);
+  });
+  m('lampadaire', 3, 5);
+  m('plante', 15, 5, { variante: 3 });
+  m('plante', 15, 11, { variante: 5 });
+  // ordre de remplissage : lits du fond (bas puis haut), lits du milieu, mur gauche, matelas
+  // hauteurs des matelas : voir MATELAS dans decor.js
+  for (const l of fond) lits.push(place(l, 1, 14), place(l, 2, 48));
+  for (const l of milieu) lits.push(place(l, 0, 14));
+  for (const l of gauche) lits.push(place(l, 1, 14), place(l, 2, 48));
+  for (const l of devant) lits.push(place(l, 0, 6));
+
+  const cloisons = [];
+  const { bloque, siege, aretes } = grilles(meubles, cloisons);
+  const spots = {
+    ...spotsNeutres(),
+    lits,
+    tourJoy: [s(3, 3, 'se'), s(8, 3, 'sw'), s(13, 3, 'sw'), s(8, 8, 'ne'), s(3, 8, 'ne')],
+  };
+  return {
+    W, H, HW, type: 'repos', zones, meubles, cloisons, bloque, siege, aretes, spots, emplacementsServices: [],
+    salon: null,
+    tapis: [{ x0: 3.2, y0: 2.2, x1: 15.8, y1: 4.8, c0: '#3b3270', c1: '#5a4c9a' }, { x0: 3.2, y0: 7.2, x1: 15.8, y1: 8.8, c0: '#3b3270', c1: '#5a4c9a' }],
+    bureauDG: [],
+    tableau: null,
+    nuit: true,
+    lampes: [{ x: 5.5, y: 0.45, z: 32 }, { x: 9.5, y: 0.45, z: 32 }, { x: 13.5, y: 0.45, z: 32 }, { x: 0.45, y: 7.5, z: 32 }, { x: 3.5, y: 5.5, z: 58 }],
+    ascenseur: { y0: 1, y1: 3 },
+    horloge: { y: 7.5 },
+    pancarte: { gx: 0, gy: 9.8 },
   };
 }
 
