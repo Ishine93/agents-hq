@@ -94,6 +94,8 @@ for (const rel of fichiers) {
   const texte = fs.readFileSync(cible, 'utf8');
   for (const [re, quoi] of SECRETS) if (re.test(texte)) problemes.push(`${rel} : ${quoi} (${texte.match(re)[0].slice(0, 40)})`);
   for (const m of personnels) if (texte.toLowerCase().includes(m.toLowerCase())) problemes.push(`${rel} : motif personnel « ${m} »`);
+  // Un accent dans un .bat décale la lecture de cmd après chcp 65001 (« 'tle' n'est pas reconnu… »).
+  if (rel.endsWith('.bat') && /[^\x00-\x7F]/.test(texte)) problemes.push(`${rel} : caractère non ASCII (interdit dans un .bat)`);
 }
 fs.mkdirSync(path.join(DEPOT, 'config', 'fiches'), { recursive: true });
 fs.writeFileSync(path.join(DEPOT, 'config', 'fiches', '.gitkeep'), '');
