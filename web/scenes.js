@@ -2283,6 +2283,15 @@ export class Directeur {
     const plan = carte.tableau ? this.planAffiche() : null;
     let tab = null;
     this.boiteTableau = null;
+    // postes de travail cliquables : le vieil écran montre le code de l'agent assis là (vide sinon)
+    this.boitesOrdis = [];
+    for (const p of carte.spots.postes || []) {
+      if (!p.bureau) continue;
+      const [cx, cy] = versArt(p.bureau.x + 0.5, p.bureau.y + 0.5);
+      let occupant = null;
+      for (const a of this.avatars.values()) if (a.type === 'agent' && a.cat === 'poste' && a.cle === 'poste:' + p.cle) occupant = a;
+      this.boitesOrdis.push({ x0: cx - 22, x1: cx + 22, y0: cy - 44, y1: cy + 4, tacheId: occupant ? occupant.tacheId : null });
+    }
     if (carte.tableau) {
       const etats = {};
       if (plan) for (const pt of plan.taches) etats[pt.ref] = (S.tacheParRef(plan.dossier, pt.ref) || {}).etat || 'planned';
@@ -2618,6 +2627,9 @@ export class Directeur {
     }
     for (const b of this.boitesServices) {
       if (ax >= b.x0 && ax <= b.x1 && ay >= b.y0 && ay <= b.y1) return { type: 'service', serviceId: b.id };
+    }
+    for (const b of this.boitesOrdis || []) {
+      if (ax >= b.x0 && ax <= b.x1 && ay >= b.y0 && ay <= b.y1) return { type: 'ordi', id: 'ordi', tacheId: b.tacheId };
     }
     const tb = this.boiteTableau;
     if (tb && ax >= tb.x0 && ax <= tb.x1 && ay >= tb.y0 && ay <= tb.y1) return { type: 'tableau', id: 'tableau', dossier: tb.dossier, etage: this.etageId };

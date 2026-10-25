@@ -91,7 +91,54 @@ function suiviPensees(surPensee) {
 }
 
 // conso : { dossier, tache, etage, role } pour ranger les tokens consommés (consommation en temps réel).
-export async function executerSession({ prompt, images = [], options, compte, surInit, surOutil, surActivite, surImage, surCommande, surPensee, canal, conso = {} }) {
+// Diff d'un outil d'écriture (Edit, Write…) pour le site : fichier, lignes ajoutées et supprimées, et les
+// morceaux du diff (lignes préfixées « + », « - » ou « » ; tronqués pour que le flux reste léger).
+const MAX_LIGNES_DIFF = 400;
+let compteurModifs = 0;
+export function modificationDe(r, outil, cwd) {
+  let ajouts = 0;
+  let suppressions = 0;
+  let gardees = 0;
+  const morceaux = [];
+  const garder = (lignes) => {
+    const l = lignes.slice(0, Math.max(0, MAX_LIGNES_DIFF - gardees)).map((x) => (x.length > 300 ? x.slice(0, 300) + '…' : x));
+    gardees += l.length;
+    return l;
+  };
+  for (const h of r.structuredPatch) {
+    for (const l of h.lines) {
+      if (l.startsWith('+')) ajouts++;
+      else if (l.startsWith('-')) suppressions++;
+    }
+    if (gardees < MAX_LIGNES_DIFF) {
+      const lignes = garder(h.lines);
+      morceaux.push({ ancien: h.oldStart, nouveau: h.newStart, lignes, tronque: lignes.length < h.lines.length });
+    }
+  }
+  // fichier créé : pas de patch, tout le contenu est un ajout
+  if (!r.structuredPatch.length && r.type === 'create' && typeof r.content === 'string') {
+    const tout = r.content.split('\n');
+    if (tout.length && tout[tout.length - 1] === '') tout.pop();
+    ajouts = tout.length;
+    const lignes = garder(tout.map((l) => '+' + l));
+    morceaux.push({ ancien: 0, nouveau: 1, lignes, tronque: lignes.length < tout.length });
+  }
+  const rel = cwd ? path.relative(cwd, r.filePath) : r.filePath;
+  return {
+    id: `C${Date.now().toString(36)}${(++compteurModifs).toString(36)}`,
+    fichier: r.filePath,
+    rel: !rel || rel.startsWith('..') || path.isAbsolute(rel) ? r.filePath : rel.replace(/\\/g, '/'),
+    outil,
+    type: r.type === 'create' || (r.originalFile === null && !r.structuredPatch.length) ? 'create' : 'update',
+    ajouts,
+    suppressions,
+    morceaux,
+    tronque: gardees >= MAX_LIGNES_DIFF,
+    t: Date.now(),
+  };
+}
+
+export async function executerSession({ prompt, images = [], options, compte, surInit, surOutil, surActivite, surImage, surCommande, surModification, surPensee, canal, conso = {} }) {
   const surFlux = surPensee ? suiviPensees(surPensee) : null;
   const file = [];
   let reveil = null;
@@ -202,6 +249,16 @@ export async function executerSession({ prompt, images = [], options, compte, su
           }
         }
       } else if (m.type === 'user' && !m.parent_tool_use_id) {
+        // Edit / Write / MultiEdit : le résultat structuré porte le diff exact (structuredPatch)
+        const r = m.tool_use_result;
+        if (surModification && r && typeof r === 'object' && Array.isArray(r.structuredPatch) && r.filePath && !r.staged) {
+          const res = (Array.isArray(m.message?.content) ? m.message.content : []).find((b) => b?.type === 'tool_result');
+          try {
+            surModification(modificationDe(r, outilsParId.get(res?.tool_use_id) || 'Edit', options.cwd));
+          } catch (e) {
+            console.error('modification', e.message);
+          }
+        }
         for (const b of Array.isArray(m.message?.content) ? m.message.content : []) {
           if (b?.type !== 'tool_result') continue;
           if (outilsParId.get(b.tool_use_id) === 'Bash') {

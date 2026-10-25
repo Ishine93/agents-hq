@@ -124,7 +124,8 @@ export function demander(tache, outil, input, signal, { suggestions = null, bloc
     technique: e.technique || resumerEntree(outil, input),
     risque: e.risque,
     horsProjet: e.horsProjet,
-    peutToujours: !!suggestions?.length,
+    // « Toujours » est toujours proposé (sauf pour un feu vert de lancement) : il vaut pour cette tâche
+    peutToujours: outil !== 'Lancement',
     t: Date.now(),
   };
   etat.permissions.set(id, permission);
@@ -141,7 +142,7 @@ export function demander(tache, outil, input, signal, { suggestions = null, bloc
     etage: tache.etage,
     actions: [
       { id: 'allow', libelle: tr('Autoriser') },
-      ...(permission.peutToujours ? [{ id: 'allow_session', libelle: tr('Toujours pour cette tâche') }] : []),
+      ...(permission.peutToujours ? [{ id: 'allow_session', libelle: tr('Toujours pour {nom}', { nom: tache.prenom || tache.ref }) }] : []),
       { id: 'deny', libelle: tr('Refuser') },
     ],
   });
@@ -169,12 +170,46 @@ export function refuserPour(tacheIds) {
   for (const [id, a] of attentes) if (tacheIds.has(a.tache.id)) resoudre(id, 'deny', 'Tâche annulée.');
 }
 
+// Outils qui créent ou modifient des fichiers, et le fichier visé.
+const OUTILS_ECRITURE = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
+const fichierVise = (outil, input = {}) => (OUTILS_ECRITURE.has(outil) ? input.file_path || input.notebook_path || null : null);
+const sousDossier = (p, base) => {
+  const r = path.relative(path.resolve(base), path.resolve(p));
+  return !!r && !r.startsWith('..') && !path.isAbsolute(r);
+};
+
+// « Toujours pour {nom} » : la même sorte d'action ne redemande plus rien jusqu'à la fin de la tâche
+// (écrire des fichiers, la même commande, le même site…).
+function sorteAction(outil, input = {}) {
+  if (OUTILS_ECRITURE.has(outil)) return 'fichiers';
+  if (outil === 'Bash') return 'bash:' + String(input.command || '').trim().split(/\s+/)[0];
+  if (outil === 'WebFetch') {
+    try {
+      return 'web:' + new URL(input.url).hostname;
+    } catch {
+      return 'web';
+    }
+  }
+  return outil;
+}
+
 export function canUseToolPour(tache) {
   return async (toolName, input, { signal, suggestions, blockedPath }) => {
+    const fichier = fichierVise(toolName, input);
+    // brouillons dans le dossier temporaire de Windows : rien à demander
+    if (fichier && sousDossier(fichier, os.tmpdir())) return { behavior: 'allow', updatedInput: input };
+    // réglage « Écrire hors des projets sans demander » (coupé par défaut)
+    if (fichier && REGLAGES.ecritureHorsProjet === true) return { behavior: 'allow', updatedInput: input };
+    const sorte = sorteAction(toolName, input);
+    tache.x.toujours = tache.x.toujours || [];
+    if (tache.x.toujours.includes(sorte)) return { behavior: 'allow', updatedInput: input };
     const decision = await demander(tache, toolName, input, signal, { suggestions, blockedPath });
     if (decision === 'allow') return { behavior: 'allow', updatedInput: input };
-    // « Toujours pour cette tâche » : on applique les règles suggérées par Claude Code pour cette session.
-    if (decision === 'allow_session') return { behavior: 'allow', updatedInput: input, updatedPermissions: suggestions || [] };
+    // « Toujours pour {nom} » : retenu pour cette tâche (et les règles suggérées par Claude Code, s'il y en a)
+    if (decision === 'allow_session') {
+      if (!tache.x.toujours.includes(sorte)) tache.x.toujours.push(sorte);
+      return { behavior: 'allow', updatedInput: input, updatedPermissions: suggestions || [] };
+    }
     return { behavior: 'deny', message: decision };
   };
 }

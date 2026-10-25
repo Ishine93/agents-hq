@@ -175,6 +175,14 @@ export function echecLecture(compteId, e) {
 /** Limites telles que gardées (pour les tests). */
 export const limitesDe = (compteId) => etat.limites[compteId];
 
+/** Fable a sa propre fenêtre (semaine) : ce qu'il en reste pour ce compte, ou null si on ne sait pas. */
+export function quotaFable(compteId) {
+  const l = etat.limites[compteId];
+  const f = l && Object.entries(l.fenetres || {}).find(([k, x]) => /fable/i.test(k + ' ' + (x.nom || '')))?.[1];
+  if (!f || f.utilisation == null) return null;
+  return { utilisation: f.utilisation, reste: Math.max(0, Math.round((100 - f.utilisation) * 10) / 10), reinit: f.reinit || null, lu: f.lu || l.maj || null };
+}
+
 const enCours = new Map();
 /** Lit les limites du forfait d'un compte (aucun appel au modèle, ≈ 3 s). */
 export function lireLimites(compteId) {

@@ -59,6 +59,7 @@ export class Etat {
     this.services = new Map();
     this.journauxServices = new Map(); // id -> lignes (journal complet connu du site)
     this.terminaux = new Map(); // tache -> [commande]
+    this.modifications = new Map(); // tache -> [fichier écrit avec son diff] (reçus en direct ou relus à la demande)
     this.actionsService = [];
     // v1.5 : pensées en direct, happiness manager
     this.pensees = new Map(); // cible ('dg' ou id de tâche) -> dernière pensée
@@ -68,6 +69,7 @@ export class Etat {
     this.reglages = { langueInterface: 'fr', langueIA: 'fr', racines: [], onboarding: true, modeTravail: 'auto' };
     this.personnalisation = { prenoms: [], skins: {} };
     this.conso = null;
+    this.miniJeu = { reglages: {}, personnalites: {}, memoires: {} };
   }
 
   // Dossier supprimé sur le serveur : il disparaît de partout (liste, scènes, tableau, fil, notifications).
@@ -75,7 +77,7 @@ export class Etat {
     if (!id) return;
     const taches = new Set([...this.taches.values()].filter((t) => t.dossier === id).map((t) => t.id));
     for (const tid of taches) {
-      for (const m of [this.taches, this.verifs, this.outils, this.fileDepuis, this.transitions, this.terminaux, this.pensees, this.historiquePensees]) m.delete(tid);
+      for (const m of [this.taches, this.verifs, this.outils, this.fileDepuis, this.transitions, this.terminaux, this.modifications, this.pensees, this.historiquePensees]) m.delete(tid);
     }
     for (const [k, p] of this.permissions) if (taches.has(p.tache)) this.permissions.delete(k);
     for (const [k, x] of this.decisions) if (taches.has(x.tache)) this.decisions.delete(k);
@@ -280,6 +282,7 @@ export class Etat {
         (ev.de || []).forEach(parTache);
         break;
       case 'verification':
+      case 'modification':
         parTache(ev.tache);
         break;
       case 'permission':
@@ -495,12 +498,36 @@ export class Etat {
         this.terminaux.set(ev.tache, liste);
         break;
       }
+      case 'navigateur_app':
+        this.navigateurApp = ev;
+        break;
+      // mini-jeu des personnages : réglages, personnalités, mémoires ; répliques en direct
+      case 'mini_jeu':
+        this.miniJeu = { reglages: ev.reglages, personnalites: ev.personnalites, memoires: ev.memoires };
+        break;
+      case 'discussion': {
+        const m = this.miniJeu && this.miniJeu.memoires ? (this.miniJeu.memoires[ev.cle] = this.miniJeu.memoires[ev.cle] || { souvenirs: [], relations: {}, dialogue: [] }) : null;
+        if (m && ev.de !== 'erreur') m.dialogue.push({ t, de: ev.de === 'toi' ? 'toi' : ev.de === 'perso' ? 'perso' : ev.auteur, texte: ev.texte });
+        break;
+      }
+      case 'bavardage':
+        break;
+      case 'modification': {
+        if (!ev.tache || !ev.modification) break;
+        const liste = this.modifications.get(ev.tache) || [];
+        if (!liste.some((x) => x.id === ev.modification.id)) liste.push(ev.modification);
+        if (liste.length > 60) liste.splice(0, liste.length - 60);
+        this.modifications.set(ev.tache, liste);
+        break;
+      }
       default:
         return;
     }
     const resume = this.resumer(ev);
     if (resume) {
-      this.journal.push({ t, texte: resume, etages: this.etagesDe(ev), type: ev.type });
+      // une ligne du journal sur du code écrit garde de quoi ouvrir son diff
+      const lien = ev.type === 'modification' ? { tache: ev.tache, modif: ev.modification.id, ajouts: ev.modification.ajouts, suppressions: ev.modification.suppressions } : {};
+      this.journal.push({ t, texte: resume, etages: this.etagesDe(ev), type: ev.type, ...lien });
       if (this.journal.length > 400) this.journal.shift();
     }
     for (const fn of this.ecouteurs) {
@@ -548,6 +575,7 @@ export class Etat {
     if (ev.reglages && typeof ev.reglages === 'object') this.reglages = { ...this.reglages, ...ev.reglages };
     if (ev.personnalisation && typeof ev.personnalisation === 'object') this.personnalisation = ev.personnalisation;
     if (ev.conso && typeof ev.conso === 'object') this.conso = ev.conso;
+    if (ev.miniJeu && typeof ev.miniJeu === 'object') this.miniJeu = ev.miniJeu;
     // v1.2 : `plans` donne les vraies dépendances par dossier.
     if (ev.plans && typeof ev.plans === 'object') {
       for (const [dossier, taches] of Object.entries(ev.plans)) {
@@ -590,6 +618,12 @@ export class Etat {
         return tr('Dossier {id} : {etat}', { id: ev.dossier.id, etat: libelleDossier(ev.dossier.etat) }) + (ev.dossier.titre ? ' — ' + ev.dossier.titre : '');
       case 'dossier_supprime':
         return tr('Dossier {id} supprimé', { id: ev.dossier });
+      case 'bavardage':
+        return tr('{noms} bavardent', { noms: [...new Set((ev.lignes || []).map((l) => l.nom))].join(' & ') });
+      case 'modification': {
+        const m = ev.modification;
+        return tr('{tache} a {action} {fichier}', { tache: ref(ev.tache), action: m.type === 'create' ? tr('créé') : tr('modifié'), fichier: m.rel });
+      }
       case 'tache': {
         const tra = ev.transition || {};
         return tra.de

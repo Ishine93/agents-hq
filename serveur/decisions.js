@@ -8,7 +8,8 @@ import { t } from './i18n.js';
 let compteur = 0;
 const attentes = new Map(); // id → { resolve, tache, etatAvant, decision }
 
-export function demanderDecision(tache, { question, options = [], pieces = [] }, signal) {
+// brut : la promesse rend l'id de l'option choisie (ou null), pour une question du QG lui-même (pas d'un agent).
+export function demanderDecision(tache, { question, options = [], pieces = [], brut = false }, signal) {
   const id = `Q${++compteur}`;
   const decision = {
     id,
@@ -35,7 +36,7 @@ export function demanderDecision(tache, { question, options = [], pieces = [] },
   });
   message(tache.dossier, 'systeme', t('{ref} te pose une question : {question}', { ref: tache.ref, question }), [tache.etage], decision.images);
   return new Promise((resolve) => {
-    attentes.set(id, { resolve, tache, etatAvant, decision });
+    attentes.set(id, { resolve, tache, etatAvant, decision, brut });
     signal?.addEventListener('abort', () => resoudreDecision(id, null, null), { once: true });
   });
 }
@@ -57,6 +58,10 @@ export function resoudreDecision(id, choix, texte) {
   if (option) affichees.push(t("L'utilisateur a choisi : {libelle}", { libelle: option.libelle }));
   if (texte) affichees.push(t('Il ajoute : {texte}', { texte }));
   if (option || texte) message(a.tache.dossier, 'toi', t('Réponse à {ref} : {reponse}', { ref: a.tache.ref, reponse: affichees.join(' — ') }), [a.tache.etage]);
+  if (a.brut) {
+    a.resolve(option ? option.id : null);
+    return true;
+  }
   a.resolve(parties.length ? parties.join('\n') : "Pas de réponse de l'utilisateur. Fais le choix le plus prudent et signale-le dans ton résumé.");
   return true;
 }

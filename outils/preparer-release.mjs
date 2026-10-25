@@ -33,6 +33,8 @@ const DOSSIERS = [
   ['config/defauts/fiches', () => true],
   ['outils', (f) => /\.(ps1|mjs)$/.test(f)],
   ['docs', (f) => /\.md$/.test(f)],
+  // fenêtre « application » (Electron, installé à la demande dans runtime/navigateur)
+  ['app', (f) => /\.(cjs|json)$/.test(f)],
 ];
 const DEMO = ['bac-a-sable/projet-demo/README.md', 'bac-a-sable/projet-demo/package.json', 'bac-a-sable/projet-demo/src/chemin.js'];
 

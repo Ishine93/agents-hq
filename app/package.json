@@ -1,0 +1,6 @@
+{
+  "name": "qg-des-agents-app",
+  "private": true,
+  "description": "Fenêtre application du QG des agents (Electron, installé à la demande dans runtime/navigateur)",
+  "main": "main.cjs"
+}

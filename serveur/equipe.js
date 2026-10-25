@@ -114,7 +114,13 @@ export function tirerPrenom() {
   // Au hasard parmi les prénoms libres de la liste (Réglages › Équipe).
   const libres = PRENOMS.filter((p) => !pris.has(p));
   const libre = libres.length ? libres[Math.floor(Math.random() * libres.length)] : null;
-  const prenom = libre || `${PRENOMS[equipe.compteur % PRENOMS.length]} ${Math.floor(equipe.compteur / PRENOMS.length) + 2}`;
+  // tous les prénoms pris : « Sacha 2 », « Sacha 3 »… en cherchant un numéro vraiment libre (le compteur seul
+  // donnait le même nom à plusieurs agents, et mélangeait leurs mémoires du mini-jeu)
+  let prenom = libre;
+  for (let n = 2; !prenom; n++) {
+    const essai = `${PRENOMS[Math.floor(Math.random() * PRENOMS.length)]} ${n}`;
+    if (!pris.has(essai)) prenom = essai;
+  }
   reserves.add(prenom);
   return prenom;
 }

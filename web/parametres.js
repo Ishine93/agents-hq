@@ -160,6 +160,42 @@ export class Parametres {
       ligne(t('Tâches en même temps (par étage)'), plafond('plafondEtage')),
       h('h4', {}, t('Divers')),
       ligne(t('Ports Rojo automatiques'), h('label', { class: 'param-case' }, rojo, ' ', t('Donner un port Rojo unique à chaque nouveau jeu Roblox détecté (écrit dans son default.project.json).'))),
+      h('h4', {}, t('Saisie')),
+      ligne(t('Entrée pour envoyer'),
+        h('label', { class: 'param-case' },
+          h('input', { type: 'checkbox', checked: !!R.entreeEnvoie, on: { change: (e) => this.reglage({ entreeEnvoie: e.target.checked }, e.target.checked ? t('Entrée envoie (Maj+Entrée : retour à la ligne).') : t('Ctrl+Entrée envoie.')) } }),
+          ' ', t('Envoyer avec Entrée dans les précisions, réponses, questions, consignes et discussions (Maj+Entrée pour aller à la ligne).')),
+        h('small', { class: 'meta' }, t('Décoché : Ctrl+Entrée envoie, Entrée va à la ligne. Le message principal au DG part toujours avec Entrée.'))),
+      h('h4', {}, t('Navigateur')),
+      R.navigateurApp
+        ? ligne(t('Fenêtre application'),
+          h('label', { class: 'param-case' },
+            h('input', { type: 'checkbox', checked: R.ouvrirEnApp !== false, on: { change: (e) => this.reglage({ ouvrirEnApp: e.target.checked }, e.target.checked ? t('Le QG s’ouvrira dans sa fenêtre application.') : t('Le QG s’ouvrira dans ton navigateur habituel.')) } }),
+            ' ', t('Ouvrir le QG dans sa propre fenêtre, avec le navigateur complet (tous les sites dedans ; tu t’y connectes une fois, tes connexions sont gardées)')),
+          h('small', { class: 'meta' }, t('Décoché : le QG s’ouvre dans ton navigateur habituel ; les vidéos et directs se jouent dans le QG, les autres sites s’ouvrent à côté avec tes connexions habituelles.')))
+        : ligne(t('Navigateur complet'),
+          h('button', { class: 'petit', type: 'button', on: { click: () => this.poster('/api/navigateur/app/installer', {}, t('Installation lancée (≈ 100 Mo).')) } }, t('Installer le navigateur complet')),
+          h('small', { class: 'meta' }, t('Pour afficher TOUS les sites dans le navigateur du QG (Google, Reddit, X…) : le QG s’ouvre alors dans sa propre fenêtre. ≈ 100 Mo, une fois.'))),
+      h('h4', {}, t('Autorisations')),
+      ligne(t('Hors des projets'),
+        h('label', { class: 'param-case' },
+          h('input', { type: 'checkbox', checked: !!R.ecritureHorsProjet, on: { change: (e) => {
+            if (e.target.checked && !window.confirm(t('Les agents pourront créer et modifier des fichiers en dehors des dossiers de tes projets sans te demander. Activer ?'))) {
+              e.target.checked = false;
+              return;
+            }
+            this.reglage({ ecritureHorsProjet: e.target.checked }, e.target.checked ? t('Écriture hors des projets autorisée.') : t('L’écriture hors des projets redemande ton accord.'));
+          } } }),
+          ' ', t('Toujours autoriser la création et la modification de fichiers en dehors des dossiers des projets')),
+        h('small', { class: 'meta' }, t('Décoché (conseillé) : chaque écriture hors projet te demande ton accord, avec « Toujours pour cet agent » pour ne plus être dérangé jusqu’à la fin de sa tâche. Le dossier temporaire de Windows est toujours libre (brouillons des agents).'))),
+      h('h4', {}, t('Garde-fou Fable')),
+      ligne(t('Quota Fable'),
+        h('label', { class: 'param-case' },
+          h('input', { type: 'checkbox', checked: !(R.gardeFable && R.gardeFable.actif === false), on: { change: (e) => this.reglage({ gardeFable: { actif: e.target.checked } }, e.target.checked ? t('Garde-fou Fable activé.') : t('Garde-fou Fable coupé.')) } }),
+          ' ', t('Avant de lancer des tâches sur Fable, vérifier ce qu’il reste de sa semaine'),
+          ' ', h('select', { class: 'champ', on: { change: (e) => this.reglage({ gardeFable: { resteMin: Number(e.target.value) } }, t('Seuil enregistré.')) } },
+            [10, 20, 30, 50, 75].map((n) => h('option', { value: String(n), selected: ((R.gardeFable && R.gardeFable.resteMin) ?? 30) === n ? true : null }, t('demander sous {n} % restants', { n }))))),
+        h('small', { class: 'meta' }, t('Fable a sa propre limite de la semaine. En dessous du seuil, le QG te demande (une fois par plan) s’il faut garder Fable ou passer sur Opus ; sans réponse en 10 min, Opus. Fable épuisé : Opus directement. Le reste du dossier continue pendant ce temps.'))),
       h('h4', {}, t('Vérification')),
       ligne(t('Validation par toi'),
         h('label', { class: 'param-case' },
@@ -378,10 +414,96 @@ export class Parametres {
     const rendreGrille = () => grille.replaceChildren(...persos.map(([id, lib]) => this.carteSkin(id, lib, skins, changer, occupes.has(id))), this.carteAjout(P));
     rendreGrille();
     return [
+      this.blocMiniJeu(),
       h('p', { class: 'meta' }, t('Clique sur un personnage pour changer son nom et son apparence. Un nouveau nom s’applique tout de suite, même à un agent au travail. Les nouvelles recrues prennent un prénom au hasard parmi ceux de cette liste.')),
       h('p', { class: 'meta' }, t('La couleur de chemise des agents indique leur modèle (Opus, Sonnet…) : elle ne change que pour le DG et Joy.')),
       grille,
     ];
+  }
+
+  // Mini-jeu des personnages : discussions, collègues qui entendent, bavardages écrits par l'IA.
+  // Tout se coupe et se règle ici (ça consomme des tokens) ; sans effet sur le travail des agents.
+  blocMiniJeu() {
+    const S = this.store;
+    const mj = (S.miniJeu && S.miniJeu.reglages) || {};
+    const regler = async (k, v, ok) => {
+      await this.reglage({ miniJeu: { [k]: v } }, ok);
+      setTimeout(() => this.rendre(), 150);
+    };
+    const caseMj = (k, libelle) => h('label', { class: 'param-case' },
+      h('input', { type: 'checkbox', checked: mj[k] !== false, on: { change: (e) => regler(k, e.target.checked) } }), ' ', libelle);
+    const frequence = h('select', { class: 'champ', disabled: mj.bavardages === false ? true : null, on: { change: (e) => regler('bavardagesMinutes', Number(e.target.value)) } },
+      [2, 5, 10, 15, 30, 60, 120].map((n) => h('option', { value: String(n), selected: Number(mj.bavardagesMinutes || 10) === n ? true : null },
+        n < 60 ? t('toutes les {n} min', { n }) : n === 60 ? t('toutes les heures') : t('toutes les 2 h'))));
+    const modele = (k, defaut) => h('select', { class: 'champ', on: { change: (e) => regler(k, e.target.value) } },
+      [['haiku', 'Haiku (' + t('le moins cher') + ')'], ['sonnet', 'Sonnet'], ['opus', 'Opus (' + t('le plus cher') + ')']].map(([v, l]) => h('option', { value: v, selected: (mj[k] || defaut) === v ? true : null }, l)));
+    return h('div', { class: 'bloc param-minijeu' },
+      h('h4', {}, '🎭 ' + t('Mini-jeu des personnages')),
+      h('p', { class: 'meta' }, t('Discute avec un agent, le DG ou Joy (bouton « Discuter » de sa fiche) : chacun a sa personnalité et sa mémoire, ses collègues présents entendent et réagissent, des amitiés et des rivalités naissent. Juste pour le plaisir : aucun effet sur le travail. Chaque réplique consomme un peu de ton forfait.')),
+      caseMj('actif', t('Activer le mini-jeu')),
+      mj.actif === false ? null : [
+        caseMj('ecoute', t('Les collègues présents dans la pièce entendent les discussions')),
+        h('div', { class: 'param-ligne' }, caseMj('bavardages', t('Bavardages écrits par l’IA entre collègues')), frequence),
+        h('small', { class: 'meta' }, t('Seulement quand le QG est ouvert et que deux collègues au moins sont au même étage. Sinon, les bavardages tout prêts (gratuits) continuent.')),
+        h('div', { class: 'param-ligne' }, h('span', {}, t('Modèle des discussions')), modele('modeleDiscussion', 'sonnet'), h('span', {}, t('Modèle des bavardages')), modele('modeleBavardage', 'haiku')),
+        h('div', { class: 'boutons' },
+          h('button', { class: 'petit', type: 'button', on: { click: async () => {
+            const r = await this.poster('/api/personnages/bavarder', {});
+            if (r) this.ui.toast('info', t('{noms} bavardent (regarde leur étage).', { noms: [...new Set(r.lignes.map((l) => l.nom))].join(' & ') }));
+          } } }, '💬 ' + t('Faire bavarder maintenant')),
+          h('button', { class: 'petit', type: 'button', on: { click: async () => {
+            if (!window.confirm(t('Remettre à zéro ce que tous les personnages pensent les uns des autres ?'))) return;
+            await this.poster('/api/personnages/oublier', { relations: true }, t('Relations remises à zéro.'));
+            this.rendre();
+          } } }, t('Réinitialiser toutes les relations')),
+          h('button', { class: 'petit danger', type: 'button', on: { click: async () => {
+            if (!window.confirm(t('Effacer la mémoire de tous les personnages (souvenirs, relations, discussions) ? Leurs personnalités sont gardées.'))) return;
+            await this.poster('/api/personnages/oublier', { tout: true }, t('Mémoires effacées.'));
+            this.rendre();
+          } } }, t('Effacer toutes les mémoires'))),
+      ]);
+  }
+
+  // Personnalité et mémoire d'un personnage, dans sa carte (mini-jeu).
+  blocPersonnage(id, lib) {
+    const S = this.store;
+    const mj = S.miniJeu || {};
+    if (mj.reglages && mj.reglages.actif === false) return null;
+    const perso = (mj.personnalites || {})[id] || '';
+    const mem = (mj.memoires || {})[id] || { souvenirs: [], relations: {}, dialogue: [] };
+    const nomDe = (k) => (k === '@dg' ? S.nomDg() : k === '@joy' ? S.nomJoy() : k);
+    const champ = h('textarea', { class: 'champ', rows: '3', maxlength: '600', placeholder: t('Vide : {nom} s’invente un caractère à sa première discussion.', { nom: lib }) });
+    champ.value = perso;
+    champ.addEventListener('change', async () => {
+      await this.poster('/api/personnages/personnalite', { cle: id, texte: champ.value }, t('Personnalité enregistrée.'));
+    });
+    const oublier = async (corps, ok) => {
+      await this.poster('/api/personnages/oublier', { cle: id, ...corps }, ok);
+      this.rendre();
+    };
+    const relations = Object.entries(mem.relations || {});
+    return h('div', { class: 'param-perso' },
+      h('small', {}, t('Personnalité (mini-jeu)')), champ,
+      h('div', { class: 'boutons' },
+        h('button', { class: 'petit', type: 'button', on: { click: () => this.ui.discussions.ouvrir(id) } }, '🗨 ' + t('Discuter')),
+        h('button', { class: 'petit', type: 'button', title: t('Revenir à la personnalité de départ'), on: { click: async () => {
+          await this.poster('/api/personnages/personnalite', { cle: id, texte: '' }, t('Personnalité de départ remise.'));
+          setTimeout(() => this.rendre(), 150);
+        } } }, t('Personnalité de départ'))),
+      h('details', { class: 'param-memoire', open: relations.length || mem.souvenirs.length ? true : null },
+        h('summary', {}, t('Mémoire : {s} souvenir(s), {r} relation(s), {d} réplique(s)', { s: mem.souvenirs.length, r: relations.length, d: mem.dialogue.length })),
+        relations.length ? h('ul', { class: 'mem-relations' }, relations.map(([k, r]) => h('li', {},
+          h('span', { class: 'mem-affinite ' + (r.affinite > 0 ? 'plus' : r.affinite < 0 ? 'moins' : '') }, (r.affinite > 0 ? '+' : '') + r.affinite),
+          ' ', h('b', {}, nomDe(k)), r.note ? ' — ' + r.note : '',
+          h('button', { class: 'mem-x', type: 'button', title: t('Oublier ce que {nom} pense de {autre}', { nom: lib, autre: nomDe(k) }), on: { click: () => oublier({ relation: k }) } }, '×')))) : null,
+        mem.souvenirs.length ? h('ul', { class: 'mem-souvenirs' }, mem.souvenirs.slice().reverse().map((x) => h('li', {},
+          h('span', { class: 'mem-source' }, x.source === 'entendu' ? '👂' : x.source === 'bavardage' ? '💬' : '🗨'), ' ', x.texte,
+          h('button', { class: 'mem-x', type: 'button', title: t('Oublier ce souvenir'), on: { click: () => oublier({ souvenir: x.id }) } }, '×')))) : h('div', { class: 'meta' }, t('Aucun souvenir pour l’instant.')),
+        h('div', { class: 'boutons' },
+          relations.length ? h('button', { class: 'petit', type: 'button', on: { click: () => oublier({ relations: true }, t('Relations de {nom} remises à zéro.', { nom: lib })) } }, t('Remettre ses relations à zéro')) : null,
+          h('button', { class: 'petit danger', type: 'button', on: { click: () => {
+            if (window.confirm(t('Effacer toute la mémoire de {nom} (souvenirs, relations, discussions) ?', { nom: lib }))) oublier({}, t('Mémoire de {nom} effacée.', { nom: lib }));
+          } } }, t('Effacer sa mémoire')))));
   }
 
   async renommer(ancien, nouveau) {
@@ -469,6 +591,8 @@ export class Parametres {
       special ? h('div', {}, h('small', {}, t('Chemise')), pastilles('chemise', ['#2a2d3a', '#ffd23f', '#e3342f', '#2f6fde', '#3fd36b', '#b07cff', '#f06a2a', '#ffffff'], L.chemise)) : null,
       h('label', { class: 'param-case' }, h('input', { type: 'checkbox', checked: !!L.lunettes, on: { change: (e) => regler('lunettes', e.target.checked) } }), ' ', t('Lunettes')),
       skin ? h('button', { class: 'petit', type: 'button', on: { click: () => { delete skins[id]; changer(); } } }, t('Revenir au hasard')) : null));
+    const bp = this.blocPersonnage(id, lib);
+    if (bp) carte.append(bp);
     return carte;
   }
 

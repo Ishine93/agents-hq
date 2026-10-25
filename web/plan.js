@@ -6,6 +6,7 @@ import { libelleEtat, libelleDossier } from './etat.js';
 import { modele } from './sprites.js';
 import { COULEUR_ETAT } from './decor.js';
 import { t as tr } from './i18n.js';
+import { Fenetre } from './fenetres.js';
 
 const SVG = 'http://www.w3.org/2000/svg';
 const CW = 216; // carte
@@ -39,28 +40,21 @@ export class PlanDossier {
   }
 
   construire() {
-    const fond = el('div', 'plan-fond');
-    fond.hidden = true;
-    const boite = el('div', 'plan-boite');
-    boite.setAttribute('role', 'dialog');
-    boite.setAttribute('aria-modal', 'true');
-    const tete = el('div', 'plan-tete');
-    this.titre = el('div', 'plan-titre');
-    this.sous = el('div', 'plan-sous');
-    const zoom = el('div', 'plan-zoom');
-    const bMoins = el('button', 'petit', '−');
-    const bNiveau = el('button', 'petit', tr('{n} %', { n: 100 }));
-    const bPlus = el('button', 'petit', '+');
+    const bMoins = el('button', 'fen-b', '−');
+    const bNiveau = el('button', 'fen-b fen-niveau', tr('{n} %', { n: 100 }));
+    const bPlus = el('button', 'fen-b', '+');
     for (const b of [bMoins, bNiveau, bPlus]) b.type = 'button';
     bMoins.addEventListener('click', () => this.zoomer(1 / 1.2));
     bPlus.addEventListener('click', () => this.zoomer(1.2));
     bNiveau.addEventListener('click', () => this.zoomer(0));
     this.bNiveau = bNiveau;
-    zoom.append(bMoins, bNiveau, bPlus);
-    const fermer = el('button', 'plan-fermer', '×');
-    fermer.type = 'button';
-    fermer.addEventListener('click', () => this.fermer());
-    this.bFermer = fermer;
+    // fenêtre flottante (déplaçable, redimensionnable) ; le zoom est celui du graphe, dans la barre de titre
+    this.fen = new Fenetre({ cle: 'plan', titre: tr('Plan du dossier'), classe: 'fen-plan', largeur: 900, hauteur: 560, min: [420, 260], coin: 'haut-gauche', zoomable: false, outils: [bMoins, bNiveau, bPlus], surFermer: () => {
+      this.dossier = null;
+      this.etage = null;
+    } });
+    this.titre = el('div', 'plan-titre');
+    this.sous = el('div', 'plan-sous');
     const blocTitre = el('div', 'plan-entete');
     // ouvert depuis le tableau blanc d'un étage : choix du dossier que ce tableau affiche
     this.choix = el('label', 'plan-choix');
@@ -70,51 +64,39 @@ export class PlanDossier {
     this.choix.append(this.choixLib, this.choixListe);
     this.choix.hidden = true;
     blocTitre.append(this.titre, this.sous, this.choix);
-    tete.append(blocTitre, zoom, fermer);
     this.scroll = el('div', 'plan-scroll');
     this.taille = el('div', 'plan-taille');
     this.contenu = el('div', 'plan-contenu');
     this.taille.append(this.contenu);
     this.scroll.append(this.taille);
     const pied = el('div', 'plan-pied');
-    boite.append(tete, this.scroll, pied);
-    fond.append(boite);
-    fond.addEventListener('pointerdown', (e) => {
-      if (e.target === fond) this.fermer();
-    });
-    window.addEventListener('keydown', (e) => {
-      if (this.fond.hidden) return;
-      if (e.key === 'Escape') {
-        e.stopImmediatePropagation();
-        this.fermer();
-      } else if ((e.key === '+' || e.key === '=') && !e.ctrlKey) this.zoomer(1.2);
+    this.fen.corps.append(blocTitre, this.scroll, pied);
+    // + et − zooment le graphe quand on est dans la fenêtre du plan
+    this.fen.el.addEventListener('keydown', (e) => {
+      if (e.target.closest('input, select, textarea')) return;
+      if ((e.key === '+' || e.key === '=') && !e.ctrlKey) this.zoomer(1.2);
       else if (e.key === '-' && !e.ctrlKey) this.zoomer(1 / 1.2);
-    }, true);
+    });
     this.scroll.addEventListener('wheel', (e) => {
       if (!e.ctrlKey) return;
       e.preventDefault();
       this.zoomer(e.deltaY < 0 ? 1.1 : 1 / 1.1, e);
     }, { passive: false });
-    document.body.appendChild(fond);
-    this.fond = fond;
-    this.fixes = { boite, bMoins, bPlus, pied };
+    this.fixes = { bMoins, bPlus, pied };
     this.textesFixes();
   }
 
   // Textes fixes du cadre, remis à chaque ouverture (la langue peut changer).
   textesFixes() {
-    const { boite, bMoins, bPlus, pied } = this.fixes;
-    boite.setAttribute('aria-label', tr('Plan du dossier'));
+    const { bMoins, bPlus, pied } = this.fixes;
     bMoins.title = tr('Dézoomer');
     bPlus.title = tr('Zoomer');
     this.bNiveau.title = tr('Taille normale');
-    this.bFermer.title = tr('Fermer (Échap)');
-    this.bFermer.setAttribute('aria-label', tr('Fermer le plan'));
     pied.textContent = tr('Clic sur une carte : fiche de la tâche · Ctrl + molette : zoom · Échap : fermer');
   }
 
   get ouvert() {
-    return !this.fond.hidden;
+    return this.fen.ouvert;
   }
 
   // Sans dossier : le plan le plus récent. etage : ouvert depuis le tableau blanc de cet étage.
@@ -135,15 +117,12 @@ export class PlanDossier {
     this.majChoix();
     this.sig = '';
     this.textesFixes();
-    this.fond.hidden = false;
+    this.fen.ouvrir();
     this.maj();
-    this.bFermer.focus({ preventScroll: true });
   }
 
   fermer() {
-    this.fond.hidden = true;
-    this.dossier = null;
-    this.etage = null;
+    this.fen.fermer();
   }
 
   // Liste des dossiers que le tableau de l'étage peut afficher (ceux dont le plan le concerne ; tous pour
@@ -218,6 +197,7 @@ export class PlanDossier {
     const p = S.plans.get(id);
     const d = S.dossiers.get(id);
     this.titre.textContent = tr('Plan du dossier {id}', { id }) + (d && (d.titre || d.texte) ? ' — ' + (d.titre || d.texte) : '');
+    this.fen.definirTitre(tr('Plan du dossier {id}', { id }));
     const lignes = p ? p.taches.map((pt) => ({ pt, t: S.tacheParRef(id, pt.ref) })) : [];
     const faites = lignes.filter(({ t }) => t && t.etat === 'done').length;
     this.sous.textContent = (d ? libelleDossier(d.etat) : '') + (lignes.length ? (d ? ' · ' : '') + tr('{faites}/{total} tâche(s) terminée(s)', { faites, total: lignes.length }) : '');

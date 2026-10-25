@@ -6,7 +6,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { RACINE, REGLAGES } from './config.js';
-import { etat, abonner, instantane, chargerHistorique, appliquerEvenement, DOSSIERS_DIR, sauver, utiliserDossiers, emettre, modelesPublics, mcpPublic, alerte, comptesPublics } from './bus.js';
+import { etat, abonner, instantane, chargerHistorique, appliquerEvenement, DOSSIERS_DIR, sauver, utiliserDossiers, emettre, modelesPublics, mcpPublic, alerte, comptesPublics, modificationsDe } from './bus.js';
 import { decouvrir, decouverteEnCache } from './decouverte.js';
 import { changerMode } from './mcp.js';
 import { resoudreDecision } from './decisions.js';
@@ -24,6 +24,8 @@ import * as dg from './dg.js';
 import * as taches from './taches.js';
 import { creerSimulation } from './simulation.js';
 import { routesReglages, ajouterEtages } from './api-reglages.js';
+import { routesNavigateur, etatApp, ouvrirApp } from './navigateur.js';
+import { discuter, definirPersonnalite, oublier, bavarder, demarrerBavardages, utiliserDemo } from './personnages.js';
 import { surChangement as surConso, consoPublique, demarrerSuiviLimites, surLimitesLues } from './conso.js';
 import { t as tr } from './i18n.js';
 import { questionTache, questionDg } from './questions.js';
@@ -168,9 +170,17 @@ async function api(req, res, chemin) {
     return json(res, 200, { lignes: journauxService(etageId, type, 400) });
   }
   if (req.method === 'GET' && (m = chemin.match(/^\/api\/pieces\/(D\d+)\/([^/]+)$/))) return servirPiece(res, m[1], m[2]);
+  // code écrit par un agent (diffs), y compris après un redémarrage (relu dans le journal du dossier)
+  if (req.method === 'GET' && (m = chemin.match(/^\/api\/taches\/(D\d+-T\d+)\/modifications$/))) return json(res, 200, { modifications: modificationsDe(m[1]) });
   if (req.method === 'GET' || !REPLAY) {
     const url = new URL(req.url, 'http://127.0.0.1');
     if (await routesReglages(req, res, chemin, { json, lireBrut, lireCorps, url, demo: DEMO })) return;
+    // navigateur du QG : vérifier qu'un site s'affiche dans la page, ou l'ouvrir dans une fenêtre avec ta session
+    if (chemin.startsWith('/api/navigateur/')) {
+      const corps = req.method === 'POST' ? await lireCorps(req, 16 * 1024) : {};
+      const lien = `http://${HOTE}:${PORT}/?jeton=${JETON}`;
+      if (await routesNavigateur(req, res, chemin, { json, url, corps, lien, publier: () => emettre('navigateur_app', etatApp()) })) return;
+    }
   }
   if (req.method !== 'POST') return json(res, 405, { erreur: tr('méthode non permise') });
 
@@ -251,6 +261,23 @@ async function api(req, res, chemin) {
     changerMode(cible, String(corps.id), String(corps.nom), String(corps.mode));
     emettre('mcp', { mcp: mcpPublic(), modeles: modelesPublics() });
     return json(res, 200, mcpPublic());
+  }
+  // mini-jeu des personnages : discussion, personnalité, mémoire (aucun effet sur le travail)
+  if (chemin === '/api/personnages/discuter') {
+    discuter(String(corps.cle || ''), corps.texte).catch(() => null); // la réponse arrive par le flux (« discussion »)
+    return json(res, 200, { ok: true });
+  }
+  if (chemin === '/api/personnages/personnalite') {
+    definirPersonnalite(String(corps.cle || '').slice(0, 30), corps.texte);
+    return json(res, 200, { ok: true });
+  }
+  if (chemin === '/api/personnages/oublier') {
+    oublier({ cle: corps.cle || null, souvenir: corps.souvenir || null, relation: corps.relation || null, tout: corps.tout === true, relations: corps.relations === true });
+    return json(res, 200, { ok: true });
+  }
+  if (chemin === '/api/personnages/bavarder') {
+    const r = await bavarder({ force: true });
+    return r ? json(res, 200, r) : json(res, 409, { erreur: tr('Personne à faire bavarder : il faut au moins deux collègues au même étage.') });
   }
   if ((m = chemin.match(/^\/api\/dossiers\/(D\d+)\/(repondre|completer|annuler|supprimer)$/))) {
     const d = etat.dossiers.get(m[1]);
@@ -350,10 +377,14 @@ serveur.listen(PORT, HOTE, () => {
   console.log(`QG des agents — ${DEMO ? 'MODE DÉMO (aucune session Claude)' : REPLAY ? `REPLAY ${REPLAY} ×${VITESSE}` : 'mode réel'}`);
   console.log(`Ouvre : ${lien}`);
   for (const c of comptes) console.log(`  ${c.nom} : ${compteConnecte(c) ? 'connecté' : 'non connecté (Réglages › Comptes, ou ajouter-un-compte.bat)'}`);
-  if (OUVRIR) spawn('cmd.exe', ['/c', 'start', '', lien], { detached: true, stdio: 'ignore' }).unref();
+  // fenêtre application du QG (navigateur complet) si elle est installée, sinon le navigateur habituel
+  if (OUVRIR && !(REGLAGES.ouvrirEnApp !== false && ouvrirApp(lien))) spawn('cmd.exe', ['/c', 'start', '', lien], { detached: true, stdio: 'ignore' }).unref();
   if (REPLAY) lancerReplay();
   else ordo.reprendreDossiers(); // dossiers interrompus par un arrêt : ils repartent
   if (!REPLAY) prechargerDictee();
+  // mini-jeu : en démo, des répliques toutes prêtes (aucun token)
+  utiliserDemo(DEMO);
+  if (!REPLAY) demarrerBavardages();
   if (!DEMO && !REPLAY) {
     // En pause sur une limite d'usage : relecture toutes les 5 min, pour reprendre dès qu'il y a de la marge.
     demarrerSuiviLimites({ urgent: () => !!etat.ordonnanceur?.pause?.limite });

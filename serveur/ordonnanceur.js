@@ -11,7 +11,8 @@ import { promptProduction, promptRework } from './taches.js';
 import { ERREURS_FATALES } from './session.js';
 import { sauverPiecesUtilisateur, piecePublique } from './pieces.js';
 import { notifier, notificationResolue } from './notifications.js';
-import { enregistrerReemploi, surLimitesLues, oublierDossier as oublierDossierConso } from './conso.js';
+import { enregistrerReemploi, surLimitesLues, oublierDossier as oublierDossierConso, quotaFable, lireLimites } from './conso.js';
+import { demanderDecision } from './decisions.js';
 import { recruter, reembaucher, occuper, liberer, agent as agentEquipe, tirerPrenom, libererPrenom } from './equipe.js';
 import { t as tr } from './i18n.js';
 
@@ -198,6 +199,7 @@ function verificationEffective(v) {
 }
 
 function ajouterTaches(d, liste) {
+  const nouvelles = [];
   for (const p0 of liste) {
     const p = { ...p0, verification: verificationEffective(p0.verification) };
     const t = {
@@ -250,7 +252,9 @@ function ajouterTaches(d, liste) {
       })(),
     };
     majTache(t, null);
+    nouvelles.push(t);
   }
+  gardeFable(d, nouvelles).catch((e) => console.error('garde Fable', e.message));
   d.etages = [...new Set(tachesDe(d).map((t) => t.etage))];
   majDossier(d);
   emettre('plan', {
@@ -259,6 +263,57 @@ function ajouterTaches(d, liste) {
       .sort((a, b) => numRef(a) - numRef(b))
       .map((t) => ({ ref: t.ref, titre: t.titre, etage: t.etage, deps: t.x.deps.map((x) => x.ref), modele: t.modele, effort: t.effort })),
   }, d.id);
+}
+
+// ---------------------------------------------------------------- garde-fou Fable
+// Fable a sa propre limite (semaine). Quand le DG prévoit des tâches sur Fable et qu'il en reste peu,
+// on te demande (une seule fois pour tout le plan) s'il faut le garder ou passer sur Opus ; sans réponse,
+// elles passent sur Opus au bout de quelques minutes. Fable épuisé : Opus directement. Le reste du plan
+// continue pendant ce temps : un dossier n'est jamais bloqué par Fable.
+const ATTENTE_FABLE_MS = Number(process.env.QG_ATTENTE_FABLE_MS) || 10 * 60 * 1000; // (réglable pour les tests)
+const estFable = (t) => /fable/i.test(t.modele || '');
+
+function basculerOpus(t, raison) {
+  if (!estFable(t)) return;
+  t.x.modeleAvant = t.modele;
+  t.modele = 'opus';
+  majTache(t);
+  message(t.dossier, 'systeme', tr('{ref} passe de Fable à Opus : {raison}.', { ref: t.ref, raison }), [t.etage]);
+}
+
+async function gardeFable(d, taches) {
+  const g = REGLAGES.gardeFable || {};
+  const fable = taches.filter(estFable);
+  if (!fable.length || g.actif === false) return;
+  for (const t of fable) t.x.gardeFable = 'attente';
+  let q = quotaFable(d.compte);
+  if (!q || Date.now() - (q.lu || 0) > 5 * 60 * 1000) {
+    await lireLimites(d.compte).catch(() => null);
+    q = quotaFable(d.compte);
+  }
+  const liberer = (opus, raison) => {
+    for (const t of fable) {
+      if (opus && !TERMINAUX.has(t.etat)) basculerOpus(t, raison);
+      t.x.gardeFable = 'ok';
+    }
+    tick();
+  };
+  if (!q) return liberer(false); // quota inconnu (démo, clé API…) : on ne bloque rien
+  if (q.reste <= 0) return liberer(true, tr('Fable est épuisé pour cette semaine'));
+  const seuil = g.resteMin ?? 30;
+  if (q.reste >= seuil) return liberer(false);
+  const refs = fable.map((t) => t.ref).join(', ');
+  const quand = q.reinit ? new Date(q.reinit).toLocaleString(REGLAGES.langueInterface === 'en' ? 'en-GB' : 'fr-FR', { weekday: 'long', hour: '2-digit', minute: '2-digit' }) : '—';
+  const ctrl = new AbortController();
+  const minuterie = setTimeout(() => ctrl.abort(), ATTENTE_FABLE_MS);
+  const choix = await demanderDecision(fable[0], {
+    question: tr('Le DG a prévu {n} tâche(s) sur Fable ({refs}). Il te reste environ {reste} % de ta semaine Fable (remise à zéro {quand}). On garde Fable ? Sans réponse dans {min} min, elles passent sur Opus.', { n: fable.length, refs, reste: q.reste, quand, min: ATTENTE_FABLE_MS / 60000 }),
+    options: [{ libelle: tr('Garder Fable') }, { libelle: tr('Passer sur Opus') }],
+    brut: true,
+  }, ctrl.signal);
+  clearTimeout(minuterie);
+  if (choix === 'O1') liberer(false);
+  else liberer(true, choix === 'O2' ? tr('ton choix (il restait {reste} % de Fable)', { reste: q.reste }) : tr('pas de réponse, il ne restait que {reste} % de Fable', { reste: q.reste }));
 }
 
 export function repondre(d, texte, pieces = []) {
@@ -387,6 +442,8 @@ export function tick() {
         if (t.etat !== 'waiting' || t.attend.join() !== manque.join() || t.motifFile !== motif) changerEtatTache(t, 'waiting', { attend: manque, motifFile: motif });
         continue;
       }
+      if (t.x.gardeFable === 'attente') continue;
+      if (estFable(t) && REGLAGES.gardeFable?.actif !== false && (quotaFable(d.compte)?.reste ?? 100) <= 0) basculerOpus(t, tr('Fable est épuisé pour cette semaine'));
       if (!t.x.approuvee) {
         demanderApprobation(t);
         continue;
@@ -637,6 +694,24 @@ function gererEchec(t, d, r, phase) {
     alerte('erreur', tr('Lance connexion-compte-{n}.bat puis clique sur Reprendre.', { n: c }), d.id);
     t.x.reprise = repriseDe(t, phase, r.echec);
     changerEtatTache(t, 'queued', { motifFile: 'compte à vérifier' });
+    return;
+  }
+  if ((r.erreur === 'rate_limit' || r.limite) && estFable(t) && REGLAGES.gardeFable?.actif !== false) {
+    // limite de Fable (sa fenêtre à lui) : on relit les limites ; si c'est bien Fable qui est épuisé, la
+    // tâche repart sur Opus, dans sa propre conversation, sans mettre le QG en pause
+    lireLimites(d.compte).catch(() => null).finally(() => {
+      const q = quotaFable(d.compte);
+      if (q && q.reste <= 0) {
+        basculerOpus(t, tr('Fable est épuisé pour cette semaine'));
+        t.x.reprise = repriseDe(t, phase, "limite d'usage de Fable");
+        changerEtatTache(t, 'ready', { motifFile: null });
+        tick();
+      } else {
+        pauseGlobale(tr("Limite d'usage atteinte"), finLimite(r.limite), { limite: true, compte: d.compte });
+        t.x.reprise = repriseDe(t, phase, "limite d'usage");
+        changerEtatTache(t, 'queued', { motifFile: "limite d'usage" });
+      }
+    });
     return;
   }
   if (r.erreur === 'rate_limit' || r.limite) {

@@ -13,6 +13,7 @@ import { consoPublique, consoTaches, lireLimites } from './conso.js';
 import { decouvrir } from './decouverte.js';
 import { zones } from './permissions.js';
 import { confierValidationsEnAttente } from './ordonnanceur.js';
+import { renommerMemoire, miniJeuPublic } from './personnages.js';
 import { t } from './i18n.js';
 
 const publierComptes = () => emettre('comptes', comptesPublics());
@@ -200,7 +201,21 @@ export async function routesReglages(req, res, chemin, ctx) {
       if (typeof corps.utilisateur === 'string') patch.utilisateur = corps.utilisateur.trim().slice(0, 40);
       if (['auto', 'prudent'].includes(corps.modeTravail)) patch.modeTravail = corps.modeTravail;
       for (const k of ['plafondGlobal', 'plafondEtage']) if (Number.isInteger(corps[k]) && corps[k] >= 0 && corps[k] <= 64) patch[k] = corps[k];
-      for (const k of ['recolteAuto', 'rojoPortsAuto', 'gitAuto', 'miseAJourAuto', 'validationUtilisateur']) if (typeof corps[k] === 'boolean') patch[k] = corps[k];
+      for (const k of ['recolteAuto', 'rojoPortsAuto', 'gitAuto', 'miseAJourAuto', 'validationUtilisateur', 'ouvrirEnApp', 'entreeEnvoie', 'ecritureHorsProjet']) if (typeof corps[k] === 'boolean') patch[k] = corps[k];
+      if (corps.gardeFable && typeof corps.gardeFable === 'object') {
+        const g = {};
+        if (typeof corps.gardeFable.actif === 'boolean') g.actif = corps.gardeFable.actif;
+        if (Number.isFinite(corps.gardeFable.resteMin) && corps.gardeFable.resteMin >= 0 && corps.gardeFable.resteMin <= 100) g.resteMin = Math.round(corps.gardeFable.resteMin);
+        patch.gardeFable = g;
+      }
+      if (corps.miniJeu && typeof corps.miniJeu === 'object') {
+        const mj = corps.miniJeu;
+        const p = {};
+        for (const k of ['actif', 'ecoute', 'bavardages']) if (typeof mj[k] === 'boolean') p[k] = mj[k];
+        if (Number.isFinite(mj.bavardagesMinutes) && mj.bavardagesMinutes >= 1 && mj.bavardagesMinutes <= 240) p.bavardagesMinutes = Math.round(mj.bavardagesMinutes);
+        for (const k of ['modeleDiscussion', 'modeleBavardage']) if (['haiku', 'sonnet', 'opus'].includes(mj[k])) p[k] = mj[k];
+        patch.miniJeu = p;
+      }
       if (typeof corps.dureeBulles === 'number' && corps.dureeBulles >= 0.5 && corps.dureeBulles <= 5) patch.dureeBulles = corps.dureeBulles;
       if (corps.dg && typeof corps.dg === 'object') {
         patch.dg = {};
@@ -213,6 +228,7 @@ export async function routesReglages(req, res, chemin, ctx) {
       // plus de validation par toi : ce qui attendait ta validation passe à un vérificateur IA
       if (patch.validationUtilisateur === false) confierValidationsEnAttente();
       publierReglages();
+      if (patch.miniJeu) emettre('mini_jeu', miniJeuPublic());
       return json(res, 200, reglagesPublics()), true;
     }
     if (chemin === '/api/racines') {
@@ -264,7 +280,13 @@ export async function routesReglages(req, res, chemin, ctx) {
 
     // --- équipe, happiness manager, consommation
     if (chemin === '/api/personnalisation') return json(res, 200, modifierPersonnalisation(corps)), true;
-    if (chemin === '/api/equipe/renommer') return json(res, 200, renommerPersonnage(String(corps.ancien || ''), corps.nouveau)), true;
+    if (chemin === '/api/equipe/renommer') {
+      const ancien = String(corps.ancien || '');
+      const r = renommerPersonnage(ancien, corps.nouveau);
+      // le personnage garde sa personnalité et sa mémoire du mini-jeu sous son nouveau nom
+      if (!ancien.startsWith('@')) renommerMemoire(ancien, String(corps.nouveau || '').replace(/s+/g, ' ').trim().slice(0, 24));
+      return json(res, 200, r), true;
+    }
     if (chemin === '/api/bonheur/stock') return json(res, 200, remplacerStock(corps)), true;
     if (chemin === '/api/conso/limites') {
       await Promise.all(comptesPublics().comptes.filter((c) => c.connecte).map((c) => lireLimites(c.id).catch(() => null)));

@@ -9,6 +9,11 @@ import { Notifs } from './notifs.js';
 import { Dictee } from './dictee.js';
 import { ConsoleService, rendreTerminal, libelleService } from './consoles.js';
 import { PlanDossier } from './plan.js';
+import { rendreModifications, chargerModifications, EcranRetro, compteLignes } from './code.js';
+import { Navigateur } from './navigateur.js';
+import { Fenetre } from './fenetres.js';
+import { Discussions } from './discussion.js';
+import { brancherDemandes } from './demandes.js';
 import { carteDemandes, grouperPermissions, clePermissions } from './permis.js';
 import { etageJoy, etageVisibleTache, etageVisibleAgent } from './scenes.js';
 import { md } from './markdown.js';
@@ -124,14 +129,56 @@ export class Interface {
     return this.dgPerso() || (majuscule ? tr('Le DG') : tr('le DG'));
   }
 
-  // « Personnaliser » : Réglages › Équipe, ouverts sur ce personnage ('@dg', '@joy' ou le prénom de l'agent).
+  // « Personnaliser » : Réglages › Équipe, ouverts sur ce personnage ('@dg', '@joy' ou le prénom de l'agent),
+  // et « Discuter » : le mini-jeu, une discussion pour rire (sans effet sur son travail).
   boutonPerso(id, nom, titre = null) {
-    return h('button', {
+    const perso = h('button', {
       class: 'petit perso',
       type: 'button',
       title: titre || (nom ? tr('Changer le nom et l’apparence de {nom}', { nom }) : tr('Changer le nom et l’apparence')),
       on: { click: () => this.parametres.ouvrir('equipe', id || undefined) },
     }, '🎨 ' + tr('Personnaliser'));
+    const mj = this.store.miniJeu && this.store.miniJeu.reglages;
+    if (!id || (mj && mj.actif === false)) return perso;
+    return [perso, h('button', {
+      class: 'petit perso',
+      type: 'button',
+      title: tr('Discuter avec {nom} (mini-jeu : ses collègues dans la pièce entendent ; aucun effet sur son travail)', { nom: nom || id }),
+      on: { click: () => this.discussions.ouvrir(id) },
+    }, '🗨 ' + tr('Discuter'))];
+  }
+
+  // Avatar d'un personnage sur l'étage affiché (pour ses bulles de discussion et de bavardage).
+  avatarPerso(ev) {
+    const d = this.dir;
+    if (ev.cle === '@dg' && ev.de !== 'reaction') return d.avatars.has('dg') ? 'dg' : null;
+    if (ev.cle === '@joy' && ev.de !== 'reaction') return d.avatars.has('joy') ? 'joy' : null;
+    if (ev.tache && d.avatars.has(ev.tache)) return ev.tache;
+    if (ev.agent) for (const [id, a] of d.avatars) if (a.agentId === ev.agent && a.type !== 'fantome') return id;
+    return null;
+  }
+
+  // Réplique du mini-jeu en bulle au-dessus du personnage, le temps de la lire.
+  bullePerso(ev) {
+    const id = this.avatarPerso(ev);
+    if (!id) return;
+    const duree = Math.min(9000, 2600 + String(ev.texte || '').length * 45) * this.dir.mult();
+    this.dir.dire(id, { texte: ev.texte, max: 160, lignes: 4 }, duree, { phrase: true, force: true, parle: true });
+  }
+
+  // Bavardage écrit par l'IA : les répliques en bulles, l'une après l'autre, sur l'étage affiché.
+  jouerBavardage(ev) {
+    if (!ev.lignes || ev.etage !== this.dir.etageId) return;
+    const m = this.dir.mult();
+    let decal = 0;
+    for (const l of ev.lignes) {
+      const id = this.avatarPerso(l);
+      const duree = Math.min(8000, 2400 + String(l.texte).length * 40) * m;
+      if (id) setTimeout(() => this.dir.dire(id, { texte: l.texte, max: 150, lignes: 3 }, duree, { phrase: true, force: true, parle: true }), decal);
+      decal += duree * 0.8;
+    }
+    // pas de bavardage tout prêt par-dessus
+    this.dir.prochainBavardage = Date.now() + decal + 6000;
   }
 
   init() {
@@ -165,6 +212,11 @@ export class Interface {
     this.visionneuse = new Visionneuse();
     this.console = new ConsoleService(this.store, this);
     this.plan = new PlanDossier(this.store, this);
+    this.ecran = new EcranRetro(this.store, this);
+    this.navigateur = new Navigateur(this);
+    this.discussions = new Discussions(this);
+    this.majPoigneeDemandes = brancherDemandes();
+    this.modifsOuvertes = new Set();
     this.lecteur = new Lecteur(this.store);
     this.conso = new Conso(this.store, this);
     this.parametres = new Parametres(this.store, this);
@@ -241,6 +293,11 @@ export class Interface {
       }
       if (av.type === 'service') {
         this.console.ouvrir(av.serviceId);
+        return;
+      }
+      if (av.type === 'ordi') {
+        // le code de l'agent assis à ce poste (écran vide si personne n'y est)
+        this.ecran.ouvrir({ tacheId: av.tacheId });
         return;
       }
       if (av.type === 'tableau') {
@@ -946,10 +1003,51 @@ export class Interface {
     const enBas = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
     const liste = S.journal.slice(-250);
     remplir(box, ...(liste.length ? liste.map((j) =>
-      h('div', { class: 'jl j-' + j.type },
+      h('div', { class: 'jl j-' + j.type, title: j.modif ? tr('Voir le code écrit') : null, on: j.modif ? { click: () => this.voirCode(j.tache, j.modif) } : null },
         h('span', { class: 'heure' }, heure(j.t, true)),
-        h('span', { class: 'texte' }, j.texte))) : [h('div', { class: 'vide' }, tr('Journal vide.'))]));
+        h('span', { class: 'texte' }, j.texte),
+        j.modif ? compteLignes(j.ajouts, j.suppressions) : null)) : [h('div', { class: 'vide' }, tr('Journal vide.'))]));
     if (enBas) box.scrollTop = box.scrollHeight;
+  }
+
+  // Terminal d'un agent dans une fenêtre flottante (une par agent), mis à jour en direct.
+  ouvrirTerminal(tacheId) {
+    const S = this.store;
+    this.terminauxFlottants = this.terminauxFlottants || new Map();
+    let f = this.terminauxFlottants.get(tacheId);
+    if (!f) {
+      const t = S.taches.get(tacheId);
+      f = new Fenetre({ cle: 'terminal', titre: '⌨ ' + tr('Terminal — {nom}', { nom: t ? S.nom(t) + ' · ' + t.ref : tacheId }), classe: 'fen-terminal', largeur: 640, hauteur: 380, coin: 'haut-droite',
+        surFermer: () => {
+          this.terminauxFlottants.delete(tacheId);
+          f.el.remove();
+        } });
+      f.term = h('div', { class: 'terminal' });
+      f.corps.append(f.term);
+      // plusieurs terminaux : chacun un peu décalé pour qu'on les voie tous
+      const n = this.terminauxFlottants.size;
+      if (n) f.el.style.top = f.el.offsetTop + n * 28 + 'px';
+      this.terminauxFlottants.set(tacheId, f);
+    }
+    f.ouvrir();
+    this.majTerminalFlottant(tacheId);
+  }
+
+  majTerminalFlottant(tacheId) {
+    const f = this.terminauxFlottants && this.terminauxFlottants.get(tacheId);
+    if (f) rendreTerminal(f.term, this.store, tacheId, this.sortiesOuvertes);
+  }
+
+  // Fiche de la tâche, onglet « Code », sur cette modification dépliée.
+  voirCode(tacheId, modifId) {
+    if (!this.store.taches.has(tacheId)) return;
+    this.voirTache(tacheId);
+    this.ficheOnglet = 'code';
+    if (modifId) {
+      this.modifsOuvertes.add(modifId);
+      this.modifsOuvertes.delete('ferme:' + modifId);
+    }
+    this.majFiche();
   }
 
   voirTache(id, opts = {}) {
@@ -1160,13 +1258,40 @@ export class Interface {
     const enCoursCmd = (S.terminaux.get(t.id) || []).some((c) => c.enCours);
     const sousOnglets = h('div', { class: 'sous-onglets', role: 'tablist' },
       h('button', { class: this.ficheOnglet === 'infos' ? 'actif' : '', role: 'tab', on: { click: () => { this.ficheOnglet = 'infos'; this.majFiche(); } } }, tr('Infos')),
+      h('button', { class: this.ficheOnglet === 'code' ? 'actif' : '', role: 'tab', on: { click: () => { this.ficheOnglet = 'code'; this.majFiche(); } } }, tr('Code'), t.lignes ? [' ', compteLignes(t.lignes.ajouts, t.lignes.suppressions)] : null),
       h('button', { class: this.ficheOnglet === 'terminal' ? 'actif' : '', role: 'tab', on: { click: () => { this.ficheOnglet = 'terminal'; this.majFiche(); } } }, tr('Terminal') + (nbCmd ? ' (' + nbCmd + ')' : '') + (enCoursCmd ? ' ⏳' : '')));
+    if (this.ficheOnglet === 'code') {
+      const nomT = S.nom(t);
+      const entete = h('div', { class: 'fiche-entete', style: { borderColor: modele(t.modele).c } },
+        h('span', { class: 'ref', style: { background: modele(t.modele).c } }, nomT),
+        h('span', { class: 'titre' }, (nomT !== t.ref ? '— ' + t.ref + ' · ' : '') + (t.titre || '')),
+        h('button', { class: 'petit', type: 'button', title: tr('Voir son code s’écrire sur le vieil écran'), on: { click: () => this.ecran.ouvrir({ tacheId: t.id }) } }, '🖥 ' + tr('Écran')));
+      const zoneCode = h('div', { class: 'code-agent' });
+      remplir(box, this.boutonRetour(), entete, sousOnglets, zoneCode);
+      const basculer = (id, ouvert) => {
+        if (ouvert) {
+          this.modifsOuvertes.delete(id);
+          this.modifsOuvertes.add('ferme:' + id);
+        } else {
+          this.modifsOuvertes.add(id);
+          this.modifsOuvertes.delete('ferme:' + id);
+        }
+        this.majFiche();
+      };
+      rendreModifications(zoneCode, S, t, this.modifsOuvertes, basculer);
+      // historique d'avant l'ouverture de la page (ou d'avant un redémarrage) : relu une fois au serveur
+      chargerModifications(S, t.id).then((nouveau) => {
+        if (nouveau && this.fiche === t.id && this.ficheOnglet === 'code') this.majFiche();
+      });
+      return;
+    }
     if (this.ficheOnglet === 'terminal') {
       const term = $('#terminal-agent') || h('div', { id: 'terminal-agent', class: 'terminal' });
       const nomT = S.nom(t);
       const entete = h('div', { class: 'fiche-entete', style: { borderColor: modele(t.modele).c } },
         h('span', { class: 'ref', style: { background: modele(t.modele).c } }, nomT),
-        h('span', { class: 'titre' }, (nomT !== t.ref ? '— ' + t.ref + ' · ' : '') + (t.titre || '')));
+        h('span', { class: 'titre' }, (nomT !== t.ref ? '— ' + t.ref + ' · ' : '') + (t.titre || '')),
+        h('button', { class: 'petit', type: 'button', title: tr('Ouvrir ce terminal dans une fenêtre que tu peux placer où tu veux'), on: { click: () => this.ouvrirTerminal(t.id) } }, '⧉ ' + tr('Fenêtre')));
       remplir(box, this.boutonRetour(), entete, sousOnglets, term);
       rendreTerminal(term, S, t.id, this.sortiesOuvertes);
       return;
@@ -1214,6 +1339,9 @@ export class Interface {
         t.motifFile ? [h('dt', {}, tr('File')), h('dd', {}, t.motifFile)] : null,
         h('dt', {}, tr('Vérification')), h('dd', {}, t.verif ? t.verif.mode + (t.verif.modele ? ' (' + t.verif.modele + ')' : '') + (v && v.verdict ? ' — ' + tr('dernier verdict : {verdict}', { verdict: v.verdict }) : '') : '—'),
         h('dt', {}, tr('Tentative')), h('dd', {}, String(t.tentative || 1)),
+        t.lignes ? [h('dt', {}, tr('Code')), h('dd', {},
+          h('button', { class: 'lien', on: { click: () => { this.ficheOnglet = 'code'; this.majFiche(); } } }, compteLignes(t.lignes.ajouts, t.lignes.suppressions)),
+          ' ' + tr('dans {n} fichier(s)', { n: t.lignes.fichiers || 0 }))] : null,
         dos && dos.dg && dos.dg.modele ? [h('dt', {}, tr('DG du dossier')), h('dd', {}, S.nomModele(dos.dg.modele, dos.compte) + (dos.dg.effort ? ' · ' + dos.dg.effort : ''))] : null,
         t.agent ? [h('dt', {}, tr('Agent')), h('dd', {},
           h('button', { class: 'lien', on: { click: () => this.ouvrirFicheDepuis('ag:' + t.agent) } }, agent && agent.prenom ? agent.prenom + ' (' + t.agent + ')' : t.agent),
@@ -1396,7 +1524,7 @@ export class Interface {
     };
     champ.addEventListener('input', maj);
     champ.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      if (this.toucheEnvoi(e)) {
         e.preventDefault();
         go();
       } else if (e.key === 'Escape') {
@@ -1409,6 +1537,14 @@ export class Interface {
     bAnnuler.addEventListener('click', fermer);
     this.composeurs.set(k, c);
     return c;
+  }
+
+// Touche d'envoi d'un champ de texte : Ctrl+Entrée toujours ; Entrée seule si l'option « Entrée pour
+  // envoyer » est cochée (Réglages › Général), Maj+Entrée faisant alors un retour à la ligne.
+  toucheEnvoi(e) {
+    if (e.key !== 'Enter' || e.isComposing) return false;
+    if (e.ctrlKey || e.metaKey) return true;
+    return !e.shiftKey && !!(this.store.reglages && this.store.reglages.entreeEnvoie);
   }
 
   async envoyerDialogue(cle, type, texte) {
@@ -1657,7 +1793,7 @@ export class Interface {
       maj();
     });
     champ.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      if (this.toucheEnvoi(e)) {
         e.preventDefault();
         envoyerReponse();
       }
@@ -1735,6 +1871,7 @@ export class Interface {
       const el = this.cartes.get(v.cle);
       if (box.children[i] !== el) box.insertBefore(el, box.children[i] || null);
     });
+    this.majPoigneeDemandes(voulues.length);
     for (const k of [...this.brouillons.keys()]) if (!S.decisions.has(k)) this.brouillons.delete(k);
     for (const k of [...this.choixDecisions.keys()]) if (!S.decisions.has(k)) this.choixDecisions.delete(k);
   }
@@ -1854,6 +1991,12 @@ export class Interface {
       return;
     }
     this.plan.surEvenement(ev);
+    this.ecran.surEvenement(ev);
+    this.navigateur.surEvenement(ev);
+    this.discussions.surEvenement(ev);
+    if (ev.type === 'discussion' && (ev.de === 'perso' || ev.de === 'reaction')) this.bullePerso(ev);
+    if (ev.type === 'bavardage') this.jouerBavardage(ev);
+    if (ev.type === 'modification' && this.onglet === 'fiche' && this.fiche === ev.tache && this.ficheOnglet === 'code') this.majFiche();
     if (ev.type === 'etat') {
       // Le QG revient dans une nouvelle version (mise à jour) : on recharge la page pour avoir le nouveau site.
       const version = S.reglages && S.reglages.version;
@@ -1918,6 +2061,7 @@ export class Interface {
         if (ev.type === 'service' && this.onglet === 'fil') this.majFil();
         break;
       case 'commande':
+        if (this.terminauxFlottants && this.terminauxFlottants.has(ev.tache)) this.majTerminalFlottant(ev.tache);
         if (this.onglet === 'fiche' && this.fiche === ev.tache && this.ficheOnglet === 'terminal') this.majFiche();
         break;
       case 'ordonnanceur':
@@ -1944,7 +2088,7 @@ export class Interface {
     if (ev.type !== 'activite' && ev.type !== 'service_log' && ev.type !== 'commande') {
       this.majImmeuble();
       this.majNav();
-      if (this.onglet !== 'fil' && !(this.onglet === 'fiche' && this.ficheOnglet === 'terminal' && ev.type === 'outil')) this.majPanneau();
+      if (this.onglet !== 'fil' && !(this.onglet === 'fiche' && ['terminal', 'code'].includes(this.ficheOnglet) && (ev.type === 'outil' || ev.type === 'modification'))) this.majPanneau();
     }
   }
 

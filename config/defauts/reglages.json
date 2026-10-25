@@ -31,5 +31,20 @@
   "dureeBulles": 1,
   "gitAuto": false,
   "validationUtilisateur": false,
-  "miseAJourAuto": true
+  "miseAJourAuto": true,
+  "gardeFable": {
+    "actif": true,
+    "resteMin": 30
+  },
+  "entreeEnvoie": false,
+  "ouvrirEnApp": true,
+  "miniJeu": {
+    "actif": true,
+    "ecoute": true,
+    "bavardages": true,
+    "bavardagesMinutes": 10,
+    "modeleDiscussion": "sonnet",
+    "modeleBavardage": "haiku"
+  },
+  "ecritureHorsProjet": false
 }

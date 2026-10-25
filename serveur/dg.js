@@ -8,6 +8,17 @@ import { resumePourDg } from './mcp.js';
 import { blocsImages } from './pieces.js';
 import { resumeEquipePourDg } from './equipe.js';
 import { pensee } from './bus.js';
+import { quotaFable } from './conso.js';
+
+// Fable a sa propre limite de la semaine : le DG sait ce qu'il en reste pour ne pas bloquer un dossier.
+function noteFable(compteId) {
+  if (!modelesPour(compteId).includes('fable')) return [];
+  const q = quotaFable(compteId);
+  if (!q) return [];
+  const seuil = (REGLAGES.gardeFable && REGLAGES.gardeFable.resteMin) ?? 30;
+  const quand = q.reinit ? new Date(q.reinit).toLocaleString('fr-FR', { weekday: 'long', hour: '2-digit', minute: '2-digit' }) : 'bientôt';
+  return [`QUOTA FABLE : il reste environ ${q.reste} % de la semaine Fable pour ce compte (remise à zéro ${quand}). Fable a sa propre limite : ${q.reste < seuil ? `c'est peu, réserve-le aux tâches qui en ont vraiment besoin (le serveur demandera confirmation à l'utilisateur avant de lancer une tâche Fable, et passe sur Opus si Fable est épuisé).` : `garde-le pour les tâches qui en profitent vraiment.`}`];
+}
 
 // Alias = dernière version de chaque famille. Les versions précises disponibles pour le compte
 // (Opus 5, Fable 5, Opus 4.x, Sonnet 5…) viennent de la découverte et sont ajoutées à l'énumération.
@@ -213,6 +224,7 @@ export async function planifier(dossier, { reponse = null, erreurs = null, piece
       registre(),
       '',
       `MODÈLES DISPONIBLES POUR CE COMPTE : ${listeModeles(dossier.compte)}. Utilise les alias (dernière version) sauf si l'utilisateur demande une version précise.`,
+      ...noteFable(dossier.compte),
       '',
       `OUTILS MCP : ${resumePourDg(dossier.compte)} Une tâche qui doit s'en servir ne peut pas être en profil lecture.`,
       '',

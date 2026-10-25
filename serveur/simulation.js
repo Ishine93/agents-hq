@@ -2,6 +2,42 @@
 // Sert à tester l'ordonnanceur, les permissions et le site sans consommer de quota.
 import { etagesActifs } from './config.js';
 import { t as tr } from './i18n.js';
+import { modification } from './bus.js';
+import { modificationDe } from './session.js';
+
+// Code « écrit » par les agents simulés : de vrais diffs (lignes + et −) pour l'onglet Code et le vieil écran.
+const CODES = {
+  'src/Shared/Config.luau': {
+    avant: ['local Config = {}', '', 'Config.VitesseEnnemi = 12', 'Config.VaguesMax = 10', 'Config.DelaiVague = 8', '', 'return Config'],
+    apres: ['local Config = {}', '', '-- réglages calibrés sur le bench du pathfinding', 'Config.VitesseEnnemi = 14', 'Config.VaguesMax = 12', 'Config.EnnemisMax = 20', 'Config.DelaiVague = 6', '', 'return Config'],
+  },
+  'src/Client/HUD.luau': {
+    avant: ['local HUD = {}', '', 'function HUD.afficherVague(n)', '	print("Vague " .. n)', 'end', '', 'return HUD'],
+    apres: ['local HUD = {}', 'local TweenService = game:GetService("TweenService")', '', 'function HUD.afficherVague(n, total)', '	local texte = string.format("Vague %d / %d", n, total)', '	HUD.Titre.Text = texte', '	TweenService:Create(HUD.Titre, TweenInfo.new(0.4), { TextTransparency = 0 }):Play()', 'end', '', 'return HUD'],
+  },
+  'bench/resultats.json': {
+    avant: null,
+    apres: ['{', '  "pathfinding": {', '    "chemins": 500,', '    "moyenneMs": 1.8,', '    "pireMs": 6.2', '  },', '  "date": "simulation"', '}'],
+  },
+};
+function patchSimule(avant, apres) {
+  // diff minimal : préfixe et suffixe communs, le milieu remplacé (suffit pour la démo)
+  let d = 0;
+  while (d < avant.length && d < apres.length && avant[d] === apres[d]) d++;
+  let f = 0;
+  while (f < avant.length - d && f < apres.length - d && avant[avant.length - 1 - f] === apres[apres.length - 1 - f]) f++;
+  const ctx = Math.max(0, d - 2);
+  const lignes = [...avant.slice(ctx, d).map((l) => ' ' + l), ...avant.slice(d, avant.length - f).map((l) => '-' + l), ...apres.slice(d, apres.length - f).map((l) => '+' + l), ...avant.slice(avant.length - f, avant.length - f + 2).map((l) => ' ' + l)];
+  return [{ oldStart: ctx + 1, oldLines: avant.length - f - ctx, newStart: ctx + 1, newLines: apres.length - f - ctx, lines: lignes }];
+}
+function ecrireSimule(t, d, nom, chemin) {
+  const c = CODES[chemin];
+  if (!c || t.x.profil === 'lecture' || t.etage === 'direction') return;
+  const r = c.avant
+    ? { filePath: chemin, originalFile: c.avant.join('\n'), structuredPatch: patchSimule(c.avant, c.apres), type: 'update' }
+    : { filePath: chemin, originalFile: null, structuredPatch: [], type: 'create', content: c.apres.join('\n') + '\n' };
+  modification(t, d.id, modificationDe(r, nom, null));
+}
 
 const attendre = (ms, signal) =>
   new Promise((resolve, reject) => {
@@ -101,6 +137,7 @@ export function creerSimulation() {
           await attendre(2200 + ((i * 937) % 1800), signal);
           const [nom, cible] = OUTILS[(i + t.ref.charCodeAt(1)) % OUTILS.length];
           ctx.surOutil(nom, tr(cible));
+          if (nom === 'Edit' || nom === 'Write') ecrireSimule(t, d, nom, cible);
           if (i === 1 && t.ref === 'T3' && t.etat !== 'rework') {
             const res = await ctx.canUseTool('Bash', { command: 'npm install --save-dev luau-test-kit' }, { signal });
             ctx.surOutil('Bash', res.behavior === 'allow' ? tr('npm install (autorisé)') : tr('autre approche'));

@@ -123,7 +123,10 @@ export function carteDemandes(S, perms, opts = {}) {
     boutons.append(b);
   };
   bouton('ok', n > 1 ? tr('Tout autoriser') : tr('Autoriser'), 'allow', n > 1 ? tr('Autoriser les {n} demandes', { n }) : null);
-  if (g.every((p) => p.peutToujours)) bouton('toujours', tr('Toujours pour cette tâche'), 'allow_session', tr('Autoriser ce genre d’action jusqu’à la fin de la tâche'));
+  if (g.every((p) => p.peutToujours)) {
+    const qui = t && (t.prenom || t.ref);
+    bouton('toujours', qui ? tr('Toujours pour {nom}', { nom: qui }) : tr('Toujours pour cette tâche'), 'allow_session', tr('Autoriser ce genre d’action (écrire des fichiers, la même commande, le même site) jusqu’à la fin de sa tâche'));
+  }
   bouton('danger', n > 1 ? tr('Tout refuser') : tr('Refuser'), 'deny');
   racine.append(boutons);
   return racine;

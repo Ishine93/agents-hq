@@ -33,6 +33,7 @@
     <div class="actions-haut">
       <button id="btn-conso" class="conso-bouton" type="button" data-t-aria="Consommation" aria-label="Consommation"></button>
       <button id="btn-documents" class="discret" type="button" data-t-title="Les fichiers .md de cet étage, mis en forme" title="Les fichiers .md de cet étage, mis en forme">📄 <span data-t>Documents</span></button>
+      <button id="btn-navigateur" class="discret" type="button" data-t-title="Un navigateur dans le QG : vidéos, directs, sites" title="Un navigateur dans le QG : vidéos, directs, sites">🌐 <span data-t>Navigateur</span></button>
       <div class="cloche-boite">
         <button id="btn-cloche" class="cloche" aria-haspopup="true" aria-expanded="false" data-t-title="Notifications" title="Notifications">
           <span class="icone-cloche" aria-hidden="true"></span>
@@ -70,7 +71,10 @@
     </div>
   </aside>
 
-  <div id="cartes-permission" aria-live="assertive"></div>
+  <div id="demandes-boite">
+    <div id="demandes-poignee" hidden></div>
+    <div id="cartes-permission" aria-live="assertive"></div>
+  </div>
 
   <aside id="panneau">
     <button id="btn-panneau" class="languette" data-t-title="Replier le panneau" title="Replier le panneau">›</button>

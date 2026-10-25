@@ -1,7 +1,7 @@
 // Exécution d'une tâche (session productrice) et de sa vérification (session vérificateur).
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
-import { message, commande, pensee } from './bus.js';
+import { message, commande, pensee, modification } from './bus.js';
 import { dossierPieces, sauverCapture, piecePublique } from './pieces.js';
 import { serveurQg, OUTILS_QG } from './outils-qg.js';
 import { REGLAGES, directive, etage as trouverEtage } from './config.js';
@@ -149,6 +149,7 @@ export async function produire(t, dossier, ctx) {
     surOutil: ctx.surOutil,
     surActivite: ctx.surActivite,
     surCommande: (c) => commande(t.id, dossier.id, c),
+    surModification: (mod) => modification(t, dossier.id, mod),
     surPensee: (p) => pensee(t.id, dossier.id, p),
     canal: ctx.canal,
     // Toute image reçue par l'agent dans le résultat d'un outil (capture Studio, rendu…) s'affiche dans le site.

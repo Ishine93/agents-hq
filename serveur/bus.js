@@ -13,6 +13,7 @@ import { agentsPublics, personnalisation } from './equipe.js';
 import { bonheurPublic } from './bonheur.js';
 import { consoPublique } from './conso.js';
 import { t } from './i18n.js';
+import { appInstallee } from './navigateur.js';
 
 export let DOSSIERS_DIR = path.join(RACINE, 'dossiers');
 const VERSION = (() => {
@@ -42,6 +43,7 @@ export const etat = {
   notifications: new Map(), // actions qui t'attendent (permission, question, validation…)
   services: new Map(), // serveurs longs du sous-sol (rojo serve…)
   terminaux: new Map(), // tacheId → dernières commandes Bash de l'agent (avec leur sortie)
+  modifications: new Map(), // tacheId → derniers fichiers écrits par l'agent, avec leur diff
   pensees: new Map(), // cible ('dg' ou tacheId) → dernière pensée en direct
   messages: [],
   dg: { etat: 'libre', dossier: null, etage: 'direction', action: null },
@@ -58,6 +60,10 @@ export const nbClients = () => clients.size;
 // Dossiers supprimés (voir effacerDossier) : un événement tardif (session qui se termine…) ne doit ni les
 // faire réapparaître à l'écran, ni recréer leur dossier sur le disque.
 const supprimes = new Set();
+
+// État du mini-jeu des personnages (personnages.js le fournit : pas d'import circulaire).
+let fournisseurMiniJeu = () => null;
+export const fournirMiniJeu = (fn) => (fournisseurMiniJeu = fn);
 
 export function emettre(type, donnees = {}, dossierId = null) {
   if (dossierId && supprimes.has(dossierId)) return null;
@@ -113,6 +119,11 @@ export function reglagesPublics() {
     rojoPortsAuto: !!REGLAGES.rojoPortsAuto,
     gitAuto: REGLAGES.gitAuto === true,
     validationUtilisateur: REGLAGES.validationUtilisateur === true,
+    ouvrirEnApp: REGLAGES.ouvrirEnApp !== false,
+    entreeEnvoie: REGLAGES.entreeEnvoie === true,
+    ecritureHorsProjet: REGLAGES.ecritureHorsProjet === true,
+    gardeFable: { actif: REGLAGES.gardeFable?.actif !== false, resteMin: REGLAGES.gardeFable?.resteMin ?? 30 },
+    navigateurApp: appInstallee(),
     miseAJourAuto: REGLAGES.miseAJourAuto !== false,
     dureeBulles: Number(REGLAGES.dureeBulles) || 1,
     dg: { modele: REGLAGES.dg.modele, effort: REGLAGES.dg.effort },
@@ -185,6 +196,7 @@ export function instantane() {
     messages: etat.messages.slice(-200),
     dg: etat.dg,
     ordonnanceur: etat.ordonnanceur,
+    miniJeu: fournisseurMiniJeu(),
   };
 }
 
@@ -252,6 +264,43 @@ export function commande(tacheId, dossierId, c) {
   emettre('commande', { tache: tacheId, commande: c }, dossierId);
 }
 
+// Code écrit par un agent (Edit, Write…) : le diff part en direct au site et dans le journal du dossier ;
+// la tâche garde le total des lignes ajoutées et supprimées.
+export function modification(t, dossierId, mod) {
+  const liste = etat.modifications.get(t.id) || [];
+  liste.push(mod);
+  if (liste.length > 60) liste.splice(0, liste.length - 60);
+  etat.modifications.set(t.id, liste);
+  const fichiers = new Set([...(t.x.fichiersTouches || []), mod.fichier]);
+  t.x.fichiersTouches = [...fichiers];
+  const l = t.lignes || { ajouts: 0, suppressions: 0, fichiers: 0 };
+  t.lignes = { ajouts: l.ajouts + mod.ajouts, suppressions: l.suppressions + mod.suppressions, fichiers: fichiers.size };
+  emettre('modification', { tache: t.id, modification: mod }, dossierId);
+  majTache(t);
+}
+
+// Modifications d'une tâche : celles en mémoire, sinon relues dans le journal du dossier (après un redémarrage).
+export function modificationsDe(tacheId) {
+  if (etat.modifications.has(tacheId)) return etat.modifications.get(tacheId);
+  const dossierId = String(tacheId).split('-')[0];
+  const f = path.join(DOSSIERS_DIR, dossierId, 'events.jsonl');
+  const liste = [];
+  try {
+    for (const ligne of fs.readFileSync(f, 'utf8').split('\n')) {
+      if (!ligne.includes('"modification"') || !ligne.includes(tacheId)) continue;
+      try {
+        const ev = JSON.parse(ligne);
+        if (ev.type === 'modification' && ev.tache === tacheId && ev.modification) liste.push(ev.modification);
+      } catch {
+        /* ligne abîmée */
+      }
+    }
+  } catch {
+    /* pas de journal */
+  }
+  return liste.slice(-60);
+}
+
 export function alerte(niveau, texte, dossierId = null) {
   emettre('alerte', { niveau, texte }, dossierId);
 }
@@ -289,6 +338,7 @@ export function effacerDossier(id) {
   for (const tid of taches) {
     etat.taches.delete(tid);
     etat.terminaux.delete(tid);
+    etat.modifications.delete(tid);
     etat.pensees.delete(tid);
   }
   for (const [k, p] of etat.permissions) if (taches.has(p.tache)) etat.permissions.delete(k);
