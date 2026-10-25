@@ -142,15 +142,46 @@ export async function executerSession({ prompt, images = [], options, compte, su
   });
   const outilsParId = new Map();
   const meta = { role: 'autre', ...conso, compte: compte || trouverCompte(null)?.id };
-  // Un appel au modèle arrive en plusieurs messages (un par bloc), dont l'usage grandit : on ne compte que l'écart.
+  // Consommation. Le message assistant n'a que l'usage du début de l'appel (quelques tokens écrits) ;
+  // l'usage final arrive dans le flux (message_delta) et, pour tout le tour, dans le message result.
+  // On garde le maximum vu pour chaque appel et on n'enregistre que l'écart ; au result, on complète
+  // ce qui manque au tour (sessions sans flux partiel).
+  const CHAMPS = ['input_tokens', 'output_tokens', 'cache_read_input_tokens', 'cache_creation_input_tokens'];
   const appelsVus = new Map();
+  let tour = {};
+  let appelCourant = null;
+  let modeleCourant = null;
+  let contexteDernier = 0;
   let coutVu = 0;
+  const compter = (id, u, modele, principal = true) => {
+    if (!id || !u) return;
+    const avant = appelsVus.get(id);
+    const max = {};
+    const delta = {};
+    for (const k of CHAMPS) {
+      max[k] = Math.max(avant?.[k] || 0, u[k] || 0);
+      delta[k] = max[k] - (avant?.[k] || 0);
+      tour[k] = (tour[k] || 0) + delta[k];
+    }
+    appelsVus.set(id, max);
+    if (modele && principal) modeleCourant = modele;
+    if (principal) contexteDernier = CHAMPS.reduce((s, k) => s + max[k], 0);
+    enregistrerAppel(meta, delta, modele || modeleCourant, !avant);
+    signalerActivite();
+  };
   const sortie = { result: null, sessionId: options.resume || null, init: null, erreur: null, limite: null, exception: null };
   try {
     for await (const m of q) {
       if (m.session_id && !sortie.sessionId) sortie.sessionId = m.session_id;
       if (m.type === 'stream_event') {
-        surFlux?.(m.event || {});
+        const ev = m.event || {};
+        if (!m.parent_tool_use_id) {
+          if (ev.type === 'message_start' && ev.message) {
+            appelCourant = ev.message.id;
+            compter(appelCourant, ev.message.usage, ev.message.model);
+          } else if (ev.type === 'message_delta' && ev.usage) compter(appelCourant, ev.usage, null);
+        }
+        surFlux?.(ev);
         continue;
       }
       if (m.type === 'system' && m.subtype === 'init') {
@@ -159,20 +190,8 @@ export async function executerSession({ prompt, images = [], options, compte, su
         surInit?.(m);
       } else if (m.type === 'assistant') {
         if (m.error) sortie.erreur = m.error;
-        const idAppel = m.message?.id;
-        if (idAppel && m.message.usage) {
-          const avant = appelsVus.get(idAppel) || {};
-          const u = m.message.usage;
-          const max = {};
-          const delta = {};
-          for (const k of ['input_tokens', 'output_tokens', 'cache_read_input_tokens', 'cache_creation_input_tokens']) {
-            max[k] = Math.max(avant[k] || 0, u[k] || 0);
-            delta[k] = max[k] - (avant[k] || 0);
-          }
-          appelsVus.set(idAppel, max);
-          enregistrerAppel(meta, delta, m.message.model, !avant.input_tokens && !avant.output_tokens);
-          signalerActivite();
-        }
+        // Les sous-agents d'un agent (outil Task) n'ont pas de flux partiel : leur usage vient d'ici.
+        compter(m.message?.id, m.message?.usage, m.message?.model, !m.parent_tool_use_id);
         if (m.parent_tool_use_id) continue;
         surActivite?.();
         for (const b of m.message?.content || []) {
@@ -202,14 +221,25 @@ export async function executerSession({ prompt, images = [], options, compte, su
           enregistrerCout(meta, m.total_cost_usd >= coutVu ? m.total_cost_usd - coutVu : m.total_cost_usd);
           coutVu = m.total_cost_usd;
         }
+        // m.usage = total du tour (tous ses appels) : ce qui n'a pas encore été vu est ajouté maintenant.
+        if (m.usage) {
+          const manque = {};
+          let reste = 0;
+          for (const k of CHAMPS) {
+            manque[k] = Math.max(0, (m.usage[k] || 0) - (tour[k] || 0));
+            reste += manque[k];
+          }
+          if (reste) enregistrerAppel(meta, manque, modeleCourant, false);
+        }
+        tour = {};
         if (interruptions > 0) {
           interruptions -= 1; // fin du tour interrompu : le complément arrive au tour suivant
           continue;
         }
         sortie.result = m;
-        // Taille du contexte au dernier tour (sert à décider si un agent de la réserve est trop chargé).
-        const u = m.usage || {};
-        sortie.contexte = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.output_tokens || 0);
+        // Taille du contexte au dernier appel (sert à décider si un agent de la réserve est trop chargé).
+        // m.usage additionne tous les appels du tour : il surestimait le contexte.
+        sortie.contexte = contexteDernier;
         if (!file.length) terminerEntree();
       }
     }

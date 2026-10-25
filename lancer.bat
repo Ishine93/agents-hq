@@ -2,7 +2,8 @@
 chcp 65001 >nul
 cd /d "%~dp0"
 title QG des agents
-rem Premier lancement (ou dossier copié sans ses dépendances) : on installe d'abord.
+rem Premier lancement (ou dossier copie sans ses dependances) : on installe d'abord.
+rem Pas d'accents dans les .bat : apres chcp 65001, cmd relirait la suite du fichier decalee.
 if not exist "%~dp0runtime\node\node.exe" goto installer
 if not exist "%~dp0node_modules\@anthropic-ai\claude-agent-sdk\package.json" goto installer
 goto lancer

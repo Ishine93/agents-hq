@@ -7,7 +7,8 @@ import { query } from '@anthropic-ai/claude-agent-sdk';
 import { RACINE } from './config.js';
 import { chargerComptes, compteConnecte, envPour, trouverCompte } from './comptes.js';
 
-const FICHIER = path.join(RACINE, 'runtime', 'conso.json');
+// QG_CONSO_FICHIER : pour les tests (ne pas mélanger leurs appels à ta vraie consommation).
+const FICHIER = process.env.QG_CONSO_FICHIER || path.join(RACINE, 'runtime', 'conso.json');
 const JOURS_GARDES = 31;
 const vide = () => ({ entree: 0, sortie: 0, cacheLu: 0, cacheEcrit: 0, cout: 0, appels: 0 });
 

@@ -111,7 +111,9 @@ export function promptRework(verdict) {
 function optionsProduction(t, dossier, ctx, captures) {
   const e = trouverEtage(t.etage);
   const profil = optionsProfil(t.x.profil);
-  const mcp = optionsMcp(t.etage, dossier.compte, t.x.profil.startsWith('lecture'));
+  // Haiku ne sait pas différer les outils : les connecteurs claude.ai du compte ajouteraient leurs définitions
+  // complètes à chaque appel (mesuré : ~470 000 tokens par appel sur un compte Team). Une tâche Haiku s'en passe.
+  const mcp = optionsMcp(t.etage, dossier.compte, t.x.profil.startsWith('lecture') || /haiku/i.test(t.modele || ''));
   const repPieces = dossierPieces(dossier.id);
   return {
     model: t.modele,
