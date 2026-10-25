@@ -1,0 +1,20 @@
+{
+  "note": "Valeurs par défaut du QG. Tes propres réglages sont dans config/reglages.json (modifiables depuis le site : Réglages).",
+  "hote": "127.0.0.1",
+  "port": 4747,
+  "langueInterface": "fr",
+  "langueIA": "fr",
+  "utilisateur": "",
+  "racines": [],
+  "modeTravail": "auto",
+  "onboarding": false,
+  "plafondGlobal": 0,
+  "plafondEtage": 0,
+  "maxTaches": 12,
+  "dg": { "modele": "opus", "effort": "xhigh", "maxTurns": 30 },
+  "tache": { "maxTurnsDefaut": 80, "timeoutMinDefaut": 30 },
+  "verif": { "maxTurns": 40 },
+  "attenteDeltaMs": 3000,
+  "historiqueDossiers": 30,
+  "dictee": { "modele": "auto" }
+}

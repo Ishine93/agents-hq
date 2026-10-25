@@ -1,0 +1,21 @@
+{
+  "name": "qg-des-agents",
+  "version": "1.0.0",
+  "private": true,
+  "description": "QG des agents : un immeuble d'agents Claude en pixel art, où un DG découpe tes demandes en tâches confiées à des sessions Claude Code",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node serveur/index.js",
+    "demo": "node serveur/index.js --demo --port 4748",
+    "traductions": "node outils/traductions.mjs",
+    "release": "node outils/preparer-release.mjs"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "0.3.310",
+    "zod": "4.6.7"
+  }
+}

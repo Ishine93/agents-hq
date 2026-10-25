@@ -1,0 +1,208 @@
+{
+  "toujoursRefuse": [
+    "Bash(git push)",
+    "Bash(git push *)",
+    "Bash(npm publish *)",
+    "Bash(rojo upload *)",
+    "Bash(rojo serve)",
+    "Bash(rojo serve *)",
+    "Bash(shutdown *)",
+    "Bash(reg *)",
+    "Bash(setx *)",
+    "Read(//c/Users/*/.claude/.credentials.json)",
+    "Read({COMPTES})",
+    "Read({HOME}/.claude/.credentials.json)",
+    "Read({QG}/runtime/jeton.txt)",
+    "Read({QG}/config/*.json)",
+    "Edit({QG}/config/**)",
+    "Write({QG}/config/**)",
+    "NotebookEdit({QG}/config/**)",
+    "Edit({QG}/serveur/**)",
+    "Write({QG}/serveur/**)",
+    "NotebookEdit({QG}/serveur/**)",
+    "Edit({QG}/web/**)",
+    "Write({QG}/web/**)",
+    "NotebookEdit({QG}/web/**)",
+    "Edit({QG}/runtime/**)",
+    "Write({QG}/runtime/**)",
+    "NotebookEdit({QG}/runtime/**)",
+    "Edit({QG}/docs/**)",
+    "Write({QG}/docs/**)",
+    "NotebookEdit({QG}/docs/**)",
+    "Edit({QG}/tests/**)",
+    "Write({QG}/tests/**)",
+    "NotebookEdit({QG}/tests/**)",
+    "Edit({QG}/outils/**)",
+    "Write({QG}/outils/**)",
+    "NotebookEdit({QG}/outils/**)",
+    "Edit({QG}/*)",
+    "Edit({QG}/node_modules/**)",
+    "Write({QG}/*)",
+    "Write({QG}/node_modules/**)",
+    "NotebookEdit({QG}/*)",
+    "NotebookEdit({QG}/node_modules/**)"
+  ],
+  "profils": {
+    "lecture": {
+      "mode": "dontAsk",
+      "outils": [
+        "Read",
+        "Glob",
+        "Grep",
+        "WebSearch",
+        "WebFetch"
+      ],
+      "autorises": [
+        "Read",
+        "Glob",
+        "Grep",
+        "WebSearch",
+        "WebFetch"
+      ]
+    },
+    "edition": {
+      "mode": "auto",
+      "outils": [
+        "Read",
+        "Glob",
+        "Grep",
+        "Edit",
+        "Write",
+        "NotebookEdit",
+        "Bash",
+        "TodoWrite",
+        "WebSearch",
+        "WebFetch"
+      ],
+      "autorises": [
+        "Read",
+        "Glob",
+        "Grep",
+        "WebSearch",
+        "WebFetch",
+        "Edit({ZONES})",
+        "Write({ZONES})",
+        "NotebookEdit({ZONES})"
+      ]
+    },
+    "edition+tests": {
+      "mode": "auto",
+      "outils": [
+        "Read",
+        "Glob",
+        "Grep",
+        "Edit",
+        "Write",
+        "NotebookEdit",
+        "Bash",
+        "TodoWrite",
+        "WebSearch",
+        "WebFetch"
+      ],
+      "autorises": [
+        "Read",
+        "Glob",
+        "Grep",
+        "WebSearch",
+        "WebFetch",
+        "Edit({ZONES})",
+        "Write({ZONES})",
+        "NotebookEdit({ZONES})"
+      ]
+    },
+    "ops": {
+      "mode": "auto",
+      "outils": [
+        "Read",
+        "Glob",
+        "Grep",
+        "Edit",
+        "Write",
+        "NotebookEdit",
+        "Bash",
+        "TodoWrite",
+        "WebSearch",
+        "WebFetch"
+      ],
+      "autorises": [
+        "Read",
+        "Glob",
+        "Grep",
+        "WebSearch",
+        "WebFetch",
+        "Edit({ZONES})",
+        "Write({ZONES})",
+        "NotebookEdit({ZONES})"
+      ]
+    },
+    "lecture+tests": {
+      "mode": "dontAsk",
+      "outils": [
+        "Read",
+        "Glob",
+        "Grep",
+        "Bash",
+        "WebSearch",
+        "WebFetch"
+      ],
+      "autorises": [
+        "Read",
+        "Glob",
+        "Grep",
+        "Bash(git status)",
+        "Bash(git status *)",
+        "Bash(git diff)",
+        "Bash(git diff *)",
+        "Bash(git log *)",
+        "Bash(ls)",
+        "Bash(ls *)",
+        "Bash(rojo build *)",
+        "Bash(selene *)",
+        "Bash(stylua --check *)",
+        "Bash(node --test)",
+        "Bash(node --test *)",
+        "Bash(npm test)",
+        "Bash(npm test *)",
+        "Bash(python tools/*)",
+        "Bash(python -m pytest *)",
+        "WebSearch",
+        "WebFetch"
+      ]
+    },
+    "verif": {
+      "mode": "dontAsk",
+      "outils": [
+        "Read",
+        "Glob",
+        "Grep",
+        "Bash",
+        "WebSearch",
+        "WebFetch"
+      ],
+      "autorises": [
+        "Read",
+        "Glob",
+        "Grep",
+        "Bash(git status)",
+        "Bash(git status *)",
+        "Bash(git diff)",
+        "Bash(git diff *)",
+        "Bash(git log *)",
+        "Bash(ls)",
+        "Bash(ls *)",
+        "Bash(rojo build *)",
+        "Bash(selene *)",
+        "Bash(stylua --check *)",
+        "Bash(node --test)",
+        "Bash(node --test *)",
+        "Bash(npm test)",
+        "Bash(npm test *)",
+        "Bash(python tools/*)",
+        "Bash(python -m pytest *)",
+        "WebSearch",
+        "WebFetch"
+      ]
+    }
+  },
+  "note": "Profils de permissions. {ZONES} = tes dossiers racines et les dossiers des étages (écriture libre), {QG} = le dossier du QG (protégé), {COMPTES} = les dossiers de connexion des comptes Claude (illisibles pour les agents). Le serveur ajoute une règle « demander » pour toute écriture hors des zones. En mode prudent (Réglages), le mode auto est remplacé par une demande pour chaque action non couverte."
+}

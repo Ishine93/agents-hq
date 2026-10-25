@@ -1,0 +1,22 @@
+# Données personnelles et de travail : jamais publiées.
+runtime/
+dossiers/
+dossiers-demo/
+node_modules/
+config/*.json
+config/*.md
+config/*.txt
+config/fiches/*
+!config/fiches/.gitkeep
+config/personnalisation.json
+bac-a-sable/*
+!bac-a-sable/projet-demo/
+bac-a-sable/projet-demo/*
+!bac-a-sable/projet-demo/README.md
+!bac-a-sable/projet-demo/package.json
+!bac-a-sable/projet-demo/src/
+web-next/
+tests/
+SPEC.md
+*.bak
+*.tmp

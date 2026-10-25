@@ -1,0 +1,11 @@
+{
+  "name": "projet-demo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Petit projet de test pour le QG des agents (bac à sable).",
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "bench": "node bench/bench.js"
+  }
+}

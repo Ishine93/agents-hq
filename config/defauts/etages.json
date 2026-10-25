@@ -1,0 +1,10 @@
+{
+  "etages": [
+    { "id": "direction", "nom": "Direction", "type": "direction", "ordre": 2, "projet": null, "actif": true,
+      "note": "Bureau du DG. Seules les tâches de synthèse transversale (lecture seule) s'y déroulent." },
+    { "id": "bac", "nom": "Bac à sable", "type": "bac", "ordre": 1, "projet": "{QG}\\bac-a-sable\\projet-demo", "actif": true,
+      "fiche": "bac.md", "mcp": [] },
+    { "id": "hall", "nom": "Hall", "type": "hall", "ordre": 0, "projet": null, "actif": false,
+      "note": "Accueil et fil global. Aucune tâche ne s'y déroule." }
+  ]
+}

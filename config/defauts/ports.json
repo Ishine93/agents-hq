@@ -1,0 +1,5 @@
+{
+  "note": "Registre des ports Rojo : un port par jeu. Le QG lance toujours « rojo serve --port <port> » et attribue le prochain port libre à tout nouveau jeu Rojo détecté. 'projet' = le port est aussi écrit dans default.project.json ; 'qg' = seulement imposé par le QG.",
+  "base": 34872,
+  "jeux": {}
+}

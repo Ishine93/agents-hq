@@ -1,0 +1,3 @@
+QG des agents, DG, Claude, Claude Code, Opus, Sonnet, Haiku, Fable, agent, sous-agent, MCP, bac à sable, bench, refacto,
+Roblox, Roblox Studio, Rojo, Luau, Unreal Engine, Blueprint, Blender, Unity, Godot, ComfyUI, Python, Node, npm, GitHub,
+gameplay, playtest, GDD, prompt, workflow

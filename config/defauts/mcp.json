@@ -1,0 +1,5 @@
+{
+  "note": "MCP par compte (connecteurs claude.ai) et par étage (.mcp.json du projet). Modes : off, demander (chaque appel lève la main), auto (sans demander). 'defaut' s'applique aux connecteurs sans réglage ; 'perso' liste les connecteurs personnels (\"*\" = tous). Modifiable depuis le site.",
+  "comptes": {},
+  "etages": {}
+}

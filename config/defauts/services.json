@@ -1,0 +1,14 @@
+{
+  "note": "Serveurs longs que le QG sait lancer et surveiller (au sous-sol). Un agent les démarre avec l'outil mcp__qg__service_demarrer ; ils survivent à la fin de sa tâche.",
+  "services": {
+    "rojo": {
+      "nom": "Rojo serve",
+      "types": ["roblox"],
+      "exe": "rojo",
+      "args": ["serve"],
+      "portArg": "--port",
+      "port": { "fichier": "default.project.json", "cle": "servePort", "defaut": 34872 },
+      "pret": "listening|Visit http|localhost:\\d+|Rojo server"
+    }
+  }
+}

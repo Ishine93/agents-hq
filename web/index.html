@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>QG des agents</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="v2.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' shape-rendering='crispEdges'%3E%3Crect x='3' y='2' width='10' height='13' fill='%232f6fde'/%3E%3Crect x='5' y='4' width='2' height='2' fill='%23ffe14d'/%3E%3Crect x='9' y='4' width='2' height='2' fill='%23ffe14d'/%3E%3Crect x='5' y='8' width='2' height='2' fill='%23ffe14d'/%3E%3Crect x='9' y='8' width='2' height='2' fill='%2315151f'/%3E%3Crect x='7' y='12' width='2' height='3' fill='%2315151f'/%3E%3C/svg%3E">
+</head>
+<body>
+  <canvas id="scene" data-t-aria="Vue isométrique de l'étage" aria-label="Vue isométrique de l'étage"></canvas>
+
+  <div id="attente" class="attente">
+    <div class="boite"><div class="spin"></div><p id="attente-texte" data-t>Connexion au QG…</p></div>
+  </div>
+
+  <header id="haut">
+    <div class="marque">
+      <span class="logo" aria-hidden="true"></span>
+      <span class="nom" data-t>QG des agents</span>
+      <span id="statut" class="statut"></span>
+      <label class="choix-langue" data-t-title="Langue de l’interface" title="Langue de l’interface">
+        <span aria-hidden="true">🌐</span>
+        <select id="choix-langue" data-t-aria="Langue de l’interface" aria-label="Langue de l’interface"></select>
+      </label>
+      <label class="choix-langue" data-t-title="Langue des IA : le DG et les agents réfléchissent et répondent dans cette langue" title="Langue des IA : le DG et les agents réfléchissent et répondent dans cette langue">
+        <span aria-hidden="true">🤖</span>
+        <select id="choix-langue-ia" data-t-aria="Langue des IA" aria-label="Langue des IA"></select>
+      </label>
+    </div>
+    <div id="alertes" aria-live="polite"></div>
+    <div class="actions-haut">
+      <button id="btn-conso" class="conso-bouton" type="button" data-t-aria="Consommation" aria-label="Consommation"></button>
+      <button id="btn-documents" class="discret" type="button" data-t-title="Les fichiers .md de cet étage, mis en forme" title="Les fichiers .md de cet étage, mis en forme">📄 <span data-t>Documents</span></button>
+      <div class="cloche-boite">
+        <button id="btn-cloche" class="cloche" aria-haspopup="true" aria-expanded="false" data-t-title="Notifications" title="Notifications">
+          <span class="icone-cloche" aria-hidden="true"></span>
+          <span id="cloche-nombre" class="cloche-nombre" hidden></span>
+        </button>
+        <div id="menu-notifs" class="menu-notifs" role="menu" hidden></div>
+      </div>
+      <button id="btn-reglages" class="discret" type="button" data-t-title="Réglages : comptes, dossiers, connecteurs, équipe, blagues…" title="Réglages">⚙ <span data-t>Réglages</span></button>
+      <button id="btn-recentrer" class="discret" data-t-title="Recentrer la vue (double-clic sur la scène)" title="Recentrer la vue (double-clic sur la scène)" data-t>Recentrer</button>
+      <button id="btn-urgence" class="urgence" data-t-title="Arrêt d'urgence : tout s'arrête" title="Arrêt d'urgence : tout s'arrête" data-t>Arrêt d'urgence</button>
+    </div>
+  </header>
+
+  <div id="bandeau-pause" hidden>
+    <span class="icone-pause" aria-hidden="true"></span>
+    <span id="pause-texte"></span>
+    <button id="btn-reprendre" data-t>Reprendre</button>
+  </div>
+
+  <aside id="immeuble" data-t-aria="Vue globale de l'immeuble" aria-label="Vue globale de l'immeuble">
+    <div class="titre-bloc">
+      <span data-t>Immeuble</span>
+      <button id="btn-immeuble" class="discret mini" data-t-title="Réduire / agrandir" title="Réduire / agrandir">≡</button>
+    </div>
+    <div class="coupe-boite">
+      <div id="gaine"><div id="cabine" hidden></div></div>
+      <div id="coupe"></div>
+    </div>
+    <div class="legende">
+      <span><i class="mq vert"></i><span data-t>en cours</span></span>
+      <span><i class="mq bleu"></i><span data-t>attente</span></span>
+      <span><i class="mq orange"></i><span data-t>main levée</span></span>
+      <span><i class="mq violet"></i><span data-t>vérif</span></span>
+      <span><i class="mq rouge"></i><span data-t>échec</span></span>
+    </div>
+  </aside>
+
+  <div id="cartes-permission" aria-live="assertive"></div>
+
+  <aside id="panneau">
+    <button id="btn-panneau" class="languette" data-t-title="Replier le panneau" title="Replier le panneau">›</button>
+    <nav id="onglets" role="tablist">
+      <button data-onglet="fil" class="actif" role="tab" data-t>Fil</button>
+      <button data-onglet="dossiers" role="tab" data-t>Dossiers</button>
+      <button data-onglet="journal" role="tab" data-t>Journal</button>
+      <button data-onglet="fiche" role="tab" data-t-title="Fiche de l’agent sélectionné" title="Fiche de l’agent sélectionné" data-t>Fiche</button>
+      <button data-onglet="equipe" role="tab" data-t>Équipe</button>
+    </nav>
+    <section id="vue-fil" class="vue"></section>
+    <section id="vue-dossiers" class="vue" hidden></section>
+    <section id="vue-journal" class="vue" hidden></section>
+    <section id="vue-fiche" class="vue" hidden></section>
+    <section id="vue-equipe" class="vue" hidden></section>
+  </aside>
+
+  <footer id="barre">
+    <div class="nav-etage">
+      <button id="etage-bas" class="fleche" data-t-title="Étage inférieur (Page suivante)" title="Étage inférieur (Page suivante)">◀</button>
+      <div class="etage-courant">
+        <span id="etage-ordre" class="pastille"></span>
+        <span id="etage-nom">—</span>
+      </div>
+      <button id="etage-haut" class="fleche" data-t-title="Étage supérieur (Page précédente)" title="Étage supérieur (Page précédente)">▶</button>
+      <button id="btn-suivre" class="suivre" aria-pressed="false" data-t-title="Sauter automatiquement à l'étage d'un événement important (main levée, échec, question)" title="Sauter automatiquement à l'étage d'un événement important (main levée, échec, question)" data-t>Suivre</button>
+    </div>
+    <div class="zone-saisie">
+      <div id="au-dessus" hidden>
+        <div id="question-dg" hidden></div>
+        <div id="mode-saisie" class="puce-mode" hidden>
+          <span id="mode-texte"></span>
+          <button id="mode-annuler" type="button" data-t-aria="Annuler ce mode" aria-label="Annuler ce mode">×</button>
+        </div>
+        <div id="jointes" class="jointes" hidden></div>
+      </div>
+      <textarea id="saisie" rows="1" maxlength="20000" data-t-placeholder="Écrire au DG…" placeholder="Écrire au DG…" data-t-aria="Message au DG" aria-label="Message au DG"></textarea>
+    </div>
+    <button id="btn-joindre" class="outil-saisie" type="button" data-t-title="Joindre des images (png, jpg, webp, gif ; 10 au plus, 15 Mo chacune). Tu peux aussi coller (Ctrl+V) ou glisser-déposer." title="Joindre des images" data-t-aria="Joindre des images" aria-label="Joindre des images">📎</button>
+    <input id="fichier-joindre" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden>
+    <button id="btn-dictee" class="outil-saisie dictee" type="button" data-t-aria="Dicter" aria-label="Dicter"><span class="micro" aria-hidden="true">🎤</span><span class="etiquette"></span></button>
+    <div id="comptes" role="group" data-t-aria="Compte Claude" aria-label="Compte Claude"></div>
+    <div id="reglage-dg" class="reglage-dg" hidden>
+      <span class="lib" data-t>DG :</span>
+      <select id="dg-modele" data-t-aria="Modèle du DG pour cette demande" aria-label="Modèle du DG pour cette demande"></select>
+      <span class="sep">·</span>
+      <select id="dg-effort" data-t-aria="Effort du DG pour cette demande" aria-label="Effort du DG pour cette demande"></select>
+    </div>
+    <button id="btn-envoyer" class="envoyer" data-t>Envoyer</button>
+    <button id="btn-rejouer" class="outil-saisie" data-t-title="Rejouer la maquette depuis le début" title="Rejouer la maquette depuis le début" data-t-aria="Rejouer la maquette" aria-label="Rejouer la maquette" hidden>↻</button>
+  </footer>
+
+  <div id="depot" class="depot" hidden><div class="depot-boite"><span data-t>Dépose tes images ici</span><br><small data-t>png, jpg, webp ou gif — 10 au plus, 15 Mo chacune</small></div></div>
+
+  <script type="module" src="main.js"></script>
+</body>
+</html>
