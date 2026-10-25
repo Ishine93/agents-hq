@@ -27,7 +27,7 @@ import { routesReglages, ajouterEtages } from './api-reglages.js';
 import { surChangement as surConso, consoPublique, demarrerSuiviLimites } from './conso.js';
 import { t as tr } from './i18n.js';
 import { questionTache, questionDg } from './questions.js';
-import { verifierMaj, lancerMaj, majAuLancement } from './maj.js';
+import { verifierMaj, lancerMaj, majAuLancement, CODE_MISE_A_JOUR } from './maj.js';
 
 const alerteQuestion = (dossierId, e) => alerte('erreur', tr('Question sans réponse : {raison}', { raison: e.message }), dossierId);
 
@@ -299,7 +299,8 @@ async function api(req, res, chemin) {
     try {
       const m = await verifierMaj({ forcer: true });
       if (!m.disponible) return json(res, 409, { erreur: tr('Tu as déjà la dernière version ({version}).', { version: m.actuelle }) });
-      lancerMaj(arreter);
+      // code 42 : lancer.bat ferme sa fenêtre tout de suite (la mise à jour relance le QG dans une autre)
+      lancerMaj(() => arreter(CODE_MISE_A_JOUR));
       return json(res, 200, { ok: true, version: m.derniere });
     } catch (e) {
       return json(res, 409, { erreur: e.message });
@@ -376,7 +377,8 @@ function lancerReplay() {
 }
 
 let arretEnCours = false;
-function arreter() {
+// (en gestionnaire de signal, le premier argument est le nom du signal : on quitte alors avec 0)
+function arreter(code) {
   if (arretEnCours) return;
   arretEnCours = true;
   // 1) on enregistre l'état tel quel (les tâches en cours seront reprises au prochain démarrage),
@@ -391,7 +393,7 @@ function arreter() {
   ordo.arreterSessions();
   arreterTout(); // les serveurs du sous-sol lancés par le QG s'arrêtent avec lui
   console.log('Arrêt : état enregistré, les dossiers en cours reprendront au prochain lancement.');
-  setTimeout(() => process.exit(0), 1500);
+  setTimeout(() => process.exit(typeof code === 'number' ? code : 0), 1500);
 }
 process.on('SIGINT', arreter); // Ctrl+C dans la fenêtre
 process.on('SIGTERM', arreter);

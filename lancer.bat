@@ -18,9 +18,14 @@ if errorlevel 1 (
 
 :lancer
 echo Le QG s'ouvre dans ton navigateur. Laisse cette fenetre ouverte : la fermer arrete le QG.
-"%~dp0runtime\node\node.exe" serveur\index.js %*
-rem Code 42 : une mise a jour a ete lancee au demarrage, elle relancera le QG dans une autre fenetre.
-if "%errorlevel%"=="42" exit /b 0
-echo.
-echo Le QG est arrete. Tu peux fermer cette fenetre.
-pause
+rem Le bloc ci-dessous est lu en entier avant de lancer le QG : si une mise a jour remplace ce fichier
+rem pendant que le QG tourne, cette fenetre ne relit pas la suite a une position decalee.
+rem Code 42 : une mise a jour a ete lancee, elle relance le QG dans une autre fenetre.
+(
+  "%~dp0runtime\node\node.exe" serveur\index.js %*
+  if errorlevel 42 if not errorlevel 43 exit /b 0
+  echo.
+  echo Le QG est arrete. Tu peux fermer cette fenetre.
+  pause
+  exit /b 0
+)
