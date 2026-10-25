@@ -90,4 +90,6 @@ Tout se règle dans le site, sans toucher aux fichiers :
 Everything is configured in the app (⚙ Settings): accounts, project folders and floors, MCP connectors, agent names and skins, the happiness manager's jokes (Excel import/export), dictation. Runs locally only (`127.0.0.1`), no telemetry. The agents run Claude Code with your own account: follow Anthropic's terms of use.
 
 ## Licence
-MIT — voir [LICENSE](LICENSE).
+[PolyForm Noncommercial 1.0.0](LICENSE) : gratuit pour un usage personnel, associatif, éducatif ou de recherche, modifications comprises. **Pas d'usage commercial** (vente, revente, service payant, usage en entreprise) sans l'accord de l'auteur.
+
+*English: free for personal and other noncommercial use, including changes; no commercial use without the author's permission. See [LICENSE](LICENSE).*

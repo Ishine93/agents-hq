@@ -1,9 +1,9 @@
 {
-  "name": "qg-des-agents",
+  "name": "agents-hq",
   "version": "1.0.0",
   "private": true,
   "description": "QG des agents : un immeuble d'agents Claude en pixel art, où un DG découpe tes demandes en tâches confiées à des sessions Claude Code",
-  "license": "MIT",
+  "license": "PolyForm-Noncommercial-1.0.0",
   "type": "module",
   "engines": {
     "node": ">=24"

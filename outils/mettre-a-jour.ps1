@@ -7,7 +7,7 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-$Depot = 'Ishine93/qg-des-agents'
+$Depot = 'Ishine93/agents-hq'
 $QG = Split-Path -Parent $PSScriptRoot
 $Tmp = Join-Path $QG 'runtime\mise-a-jour'
 

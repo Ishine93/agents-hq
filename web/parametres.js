@@ -21,7 +21,7 @@ export const TYPES_PROJET = {
   projet: 'Projet', direction: 'Direction', bac: 'Bac à sable', hall: 'Hall', serveur: 'Serveurs', atelier3d: 'Atelier 3D', etudes: 'Études',
 };
 const COIFFURES = 6;
-export const DEPOT_GITHUB = 'https://github.com/Ishine93/qg-des-agents';
+export const DEPOT_GITHUB = 'https://github.com/Ishine93/agents-hq';
 
 const champ = (attrs) => h('input', { class: 'champ', ...attrs });
 const ligne = (lib, ...contenu) => h('div', { class: 'param-ligne' }, h('label', { class: 'param-lib' }, lib), h('div', { class: 'param-val' }, ...contenu));
