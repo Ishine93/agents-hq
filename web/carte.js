@@ -80,6 +80,7 @@ function spotsNeutres() {
 export function construireCarte(type) {
   if (type === 'pause') return carteSallePause();
   if (type === 'repos') return carteSalleRepos();
+  if (type === 'direction') return carteDirection();
   const theme = DECOR_THEME[type] ? type : DECOR_THEME[ALIAS_THEME[type]] ? ALIAS_THEME[type] : 'etudes';
   const zones = [];
   for (let y = 0; y < H; y++) {
@@ -243,6 +244,164 @@ export function construireCarte(type) {
   };
 }
 
+// ---------- Direction : le bureau du DG (et pas un open space comme les autres étages) ----------
+// Accueil près de l'ascenseur ; grand bureau du DG (baies vitrées, tableau blanc, salon privé) ; deux bureaux
+// d'assistants (dont la « salle des marchés ») ; salle du conseil contre le mur gauche ; salon-bar ; un îlot
+// de 4 postes pour les tâches de synthèse.
+function zoneDirection(x, y) {
+  if (x <= 2 && y <= 4) return 'lobby';
+  if (x >= 3 && x <= 10 && y <= 4) return 'dg';
+  if (x >= 11 && x <= 12 && y <= 3) return 'bureau1';
+  if (x >= 13 && y <= 3) return 'machine';
+  if (x <= 4 && y >= 6) return 'reunion';
+  if (x >= 6 && x <= 10 && y >= 6) return 'pause';
+  return 'open';
+}
+
+function carteDirection() {
+  const zones = [];
+  for (let y = 0; y < H; y++) {
+    zones.push([]);
+    for (let x = 0; x < W; x++) zones[y].push(zoneDirection(x, y));
+  }
+  const meubles = [];
+  const m = (type_, x, y, opts = {}) => meubles.push({ type: type_, x, y, ...opts });
+
+  // --- accueil ---
+  m('plante', 0, 0, { variante: 7 });
+  m('accueil', 2, 0, { part: 'a' });
+  m('accueil', 2, 1, { part: 'b' });
+  m('plante', 0, 4, { variante: 3 });
+
+  // --- grand bureau du DG ---
+  m('etagere', 3, 0);
+  m('plante', 4, 0, { variante: 1, petite: true });
+  m('trophee', 6, 0);
+  m('etagere', 10, 0);
+  m('bureau_dg', 4, 2, { part: 'g', lampe: true });
+  m('bureau_dg', 5, 2, { part: 'm' });
+  m('bureau_dg', 6, 2, { part: 'd', telephone: true });
+  m('fauteuil_dg', 5, 1, { dir: 'sw' });
+  m('globe', 3, 3);
+  // salon privé du DG
+  m('plante', 8, 2, { variante: 2 });
+  m('canape', 8, 3, { part: 'a', dir: 'se' });
+  m('canape', 8, 4, { part: 'b', dir: 'se' });
+  m('table_basse', 9, 3, {});
+  m('table_basse', 9, 4, {});
+  m('fauteuil', 10, 3, { dir: 'nw' });
+  m('fauteuil', 10, 4, { dir: 'nw' });
+  m('lampadaire', 10, 2);
+
+  // --- bureaux des assistants ---
+  m('bureau', 11, 2, { cote: 'n', conn: {} });
+  m('chaise', 11, 1, { dir: 'sw' });
+  m('plante', 12, 0, { variante: 4 });
+  m('plante', 13, 0, { variante: 6, petite: true });
+  m('poste_machine', 14, 0, { part: 'g', theme: 'direction' });
+  m('poste_machine', 15, 0, { part: 'd', theme: 'direction' });
+  m('chaise', 14, 1, { dir: 'ne' });
+
+  // --- salle du conseil ---
+  for (let x = 1; x <= 3; x++) {
+    for (let y = 8; y <= 9; y++) m('table_reunion', x, y, { conn: { w: x > 1, e: x < 3, n: y > 8, s: y < 9 } });
+    m('chaise', x, 7, { dir: 'sw' });
+    m('chaise', x, 10, { dir: 'ne' });
+  }
+  m('chaise', 4, 8, { dir: 'nw', variante: 'dg' });
+  m('chaise', 4, 9, { dir: 'nw' });
+  m('etagere', 0, 6, { mur: 'gauche' });
+  m('etagere', 0, 11, { mur: 'gauche' });
+  m('plante', 5, 11, { variante: 5 });
+
+  // --- salon-bar ---
+  m('lampadaire', 6, 7);
+  m('canape', 6, 8, { part: 'a', dir: 'se', equipe: true });
+  m('canape', 6, 9, { part: 'b', dir: 'se', equipe: true });
+  m('table_basse', 7, 8, { variante: 'equipe' });
+  m('table_basse', 7, 9, {});
+  m('fauteuil', 8, 8, { dir: 'nw' });
+  m('fauteuil', 8, 9, { dir: 'nw' });
+  m('plante', 6, 11, { variante: 2 });
+  m('machine_cafe', 10, 6, { dir: 'se' });
+  m('fontaine', 10, 7);
+  m('plante', 10, 11, { variante: 6 });
+
+  // --- îlot des postes (tâches de synthèse) ---
+  for (const x of [12, 13]) {
+    m('bureau', x, 7, { cote: 'n', conn: { w: x > 12, e: x < 13, s: true } });
+    m('bureau', x, 8, { cote: 's', conn: { w: x > 12, e: x < 13, n: true } });
+    m('chaise', x, 6, { dir: 'sw' });
+    m('chaise', x, 9, { dir: 'ne' });
+  }
+  m('plante', 15, 6, { variante: 1 });
+  m('plante', 15, 11, { variante: 3 });
+
+  // --- cloisons vitrées ---
+  const cloisons = [];
+  const c = (x, y, cote) => cloisons.push({ x, y, cote });
+  for (let y = 0; y <= 4; y++) {
+    if (y <= 3) c(2, y, 'e'); // accueil | bureau du DG (on entre par le couloir)
+    c(10, y, 'e'); // bureau du DG | assistants
+  }
+  for (let x = 3; x <= 10; x++) if (x !== 5 && x !== 6) c(x, 4, 's'); // porte du DG en 5-6
+  for (let y = 0; y <= 3; y++) c(12, y, 'e');
+  for (const x of [11, 13, 15]) c(x, 3, 's'); // portes des assistants en 12 et 14
+  // salle du conseil : deux portes sur sa droite, côté nord (6-7) et côté sud (10-11)
+  for (let x = 0; x <= 4; x++) c(x, 5, 's');
+  for (const y of [8, 9]) c(4, y, 'e');
+
+  const { bloque, siege, aretes } = grilles(meubles, cloisons);
+
+  const postes = [{ cle: 'bureau1', chaise: s(11, 1, 'sw', { assis: true }), bureau: { x: 11, y: 2 }, insp: s(12, 1, 'nw'), ferme: true }];
+  for (const x of [12, 13]) {
+    postes.push({ cle: 'ilot-n' + x, chaise: s(x, 6, 'sw', { assis: true }), bureau: { x, y: 7 }, insp: s(x, 5, 'sw'), ferme: false });
+    postes.push({ cle: 'ilot-s' + x, chaise: s(x, 9, 'ne', { assis: true }), bureau: { x, y: 8 }, insp: s(x, 10, 'ne'), ferme: false });
+  }
+
+  const spots = {
+    ascenseur: { apparition: { gx: 0.18, gy: 2.0 }, tuile: { x: 0, y: 2 } },
+    arrivee: [s(1, 2, 'se'), s(1, 3, 'se'), s(2, 3, 'se'), s(2, 2, 'se'), s(1, 1, 'se'), s(1, 4, 'se'), s(2, 4, 'se'), s(0, 3, 'se'),
+      s(3, 5, 'se'), s(4, 5, 'se')],
+    // réserve : le salon-bar
+    equipe: [s(6, 8, 'se', { assis: true }), s(6, 9, 'se', { assis: true }), s(8, 8, 'nw', { assis: true }), s(8, 9, 'nw', { assis: true }),
+      s(7, 7, 'sw', { lire: true }), s(7, 10, 'ne', { lire: true }), s(9, 8, 'nw'), s(9, 9, 'nw'), s(8, 10, 'ne'), s(9, 7, 'sw'),
+      s(8, 7, 'sw'), s(9, 10, 'ne')],
+    fileDG: [s(5, 5, 'ne'), s(6, 5, 'ne'), s(5, 6, 'ne'), s(5, 7, 'ne'), s(5, 8, 'ne'), s(5, 9, 'ne'), s(5, 10, 'ne')],
+    visiteurDG: [s(5, 3, 'ne'), s(4, 3, 'ne'), s(6, 3, 'ne'), s(7, 3, 'nw')],
+    dg: { siege: s(5, 1, 'sw', { assis: true }), tableau: s(9, 1, 'ne'), tete: s(4, 8, 'nw', { assis: true }) },
+    postes,
+    machine: {
+      cle: 'machine', chaise: s(14, 1, 'ne', { assis: true }), bureau: { x: 14, y: 0 }, insp: s(15, 1, 'nw'),
+      file: [s(14, 3, 'ne'), s(15, 3, 'ne'), s(14, 4, 'ne'), s(15, 4, 'ne'), s(13, 4, 'se')],
+    },
+    pause: [s(11, 6, 'nw', { cafe: true }), s(11, 7, 'nw'), s(9, 6, 'se'), s(11, 8, 'nw'), s(10, 8, 'nw'), s(10, 9, 'nw'), s(9, 11, 'ne'),
+      s(7, 11, 'ne'), s(11, 10, 'nw'), s(8, 11, 'ne')],
+    reunion: {
+      nord: [s(1, 7, 'sw', { assis: true }), s(2, 7, 'sw', { assis: true }), s(3, 7, 'sw', { assis: true })],
+      sud: [s(1, 10, 'ne', { assis: true }), s(2, 10, 'ne', { assis: true }), s(3, 10, 'ne', { assis: true })],
+      est: [s(4, 9, 'nw', { assis: true })],
+      debout: [s(1, 6, 'sw'), s(2, 6, 'sw'), s(3, 6, 'sw'), s(1, 11, 'ne'), s(2, 11, 'ne'), s(3, 11, 'ne'), s(4, 7, 'sw'), s(4, 10, 'nw'),
+        s(4, 6, 'sw'), s(4, 11, 'nw')],
+      tete: s(4, 8, 'nw', { assis: true }),
+      table: { x0: 1, y0: 8, x1: 3, y1: 9 },
+    },
+    tourJoy: [s(3, 5, 'se'), s(8, 5, 'sw'), s(12, 4, 'sw'), s(9, 10, 'ne'), s(5, 10, 'ne'), s(14, 10, 'nw')],
+  };
+
+  return {
+    W, H, HW, type: 'direction', zones, meubles, cloisons, bloque, siege, aretes, spots, emplacementsServices: [],
+    salon: { x0: 6, y0: 7, x1: 10, y1: 11 },
+    // tapis : bureau du DG (rouge et or)
+    tapis: [{ x0: 3.3, y0: 1.3, x1: 7.7, y1: 4.6, c0: '#c9a227', c1: '#8c2433' }],
+    bureauDG: [{ x: 4, y: 2 }, { x: 5, y: 2 }, { x: 6, y: 2 }],
+    tableau: { x0: 7, x1: 10 },
+    ascenseur: { y0: 1, y1: 3 },
+    horloge: { y: 6.4 },
+    pancarte: { gx: 0, gy: 11.3 },
+  };
+}
+
 // ---------- Salle de pause : les agents qui attendent leur tour y jouent ----------
 function zonePause(x, y) {
   if (x <= 2 && y <= 3) return 'lobby';
@@ -290,7 +449,7 @@ function carteSallePause() {
   m('pouf', 0, 9, { dir: 'se' });
   m('pouf', 2, 9, { dir: 'nw' });
   m('pouf', 1, 10, { dir: 'ne' });
-  m('plante', 0, 11, { variante: 5 });
+  m('plante', 0, 8, { variante: 5 }); // (pas en 0,11 : le pouf de gauche n'aurait plus d'accès)
   m('plante', 15, 6, { variante: 2 });
   m('plante', 15, 11, { variante: 6 });
 

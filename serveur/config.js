@@ -96,10 +96,31 @@ export function racines() {
   });
 }
 
-export const FICHIER_ETAGES = path.join(CONFIG, 'etages.json');
+export let FICHIER_ETAGES = path.join(CONFIG, 'etages.json');
+let societeDemo = null;
+
+// Démo : un immeuble fictif à elle (dossiers-demo/etages.json, copié de config/defauts/etages-demo.json),
+// pour ne jamais toucher à tes étages ni à tes projets. Ses « projets » sont des dossiers vides de
+// dossiers-demo/societe (un fichier Rojo pour les jeux Roblox : leurs serveurs, simulés, vont au sous-sol).
+export function utiliserImmeubleDemo(dossierDemo, { neuf = false } = {}) {
+  societeDemo = path.join(dossierDemo, 'societe');
+  FICHIER_ETAGES = path.join(dossierDemo, 'etages.json');
+  if (neuf || !fs.existsSync(FICHIER_ETAGES)) {
+    fs.mkdirSync(dossierDemo, { recursive: true });
+    const brut = fs.readFileSync(path.join(DEFAUTS, 'etages-demo.json'), 'utf8').replaceAll('{DEMO}', societeDemo.replace(/\\/g, '\\\\'));
+    fs.writeFileSync(FICHIER_ETAGES, brut);
+  }
+  for (const e of JSON.parse(fs.readFileSync(FICHIER_ETAGES, 'utf8')).etages) {
+    if (!e.projet) continue;
+    fs.mkdirSync(e.projet, { recursive: true });
+    const rojo = path.join(e.projet, 'default.project.json');
+    if (e.type === 'roblox' && e.portRojo && !fs.existsSync(rojo)) fs.writeFileSync(rojo, JSON.stringify({ name: e.id, servePort: e.portRojo, tree: { $className: 'DataModel' } }, null, 2));
+  }
+}
 
 export function etages() {
-  const liste = lireJson('config', 'etages.json').etages;
+  const liste = JSON.parse(fs.readFileSync(FICHIER_ETAGES, 'utf8')).etages;
+  if (societeDemo) return liste;
   // La Direction (bureau du DG) couvre toutes les racines.
   const r = racines();
   for (const e of liste) {

@@ -14,6 +14,7 @@ import { bonheurPublic } from './bonheur.js';
 import { consoPublique } from './conso.js';
 import { t } from './i18n.js';
 import { appInstallee } from './navigateur.js';
+import { listeSkills } from './skills.js';
 
 export let DOSSIERS_DIR = path.join(RACINE, 'dossiers');
 const VERSION = (() => {
@@ -130,12 +131,13 @@ export function reglagesPublics() {
     dictee: REGLAGES.dictee || {},
     qg: RACINE,
     version: VERSION,
+    demo: process.argv.includes('--demo'),
     claudeCodeLocal: fs.existsSync(path.join(os.homedir(), '.claude', '.credentials.json')),
   };
 }
 
 // Les étages livrés gardent leur nom traduit tant que tu ne les as pas renommés.
-const NOMS_LIVRES = new Set(['Direction', 'Bac à sable', 'Hall', 'Salle de pause', 'Salle de repos']);
+const NOMS_LIVRES = new Set(['Direction', 'Bac à sable', 'Hall', 'Salle de pause', 'Salle de repos', 'Sous-sol serveurs', "Bureau d'études", 'Atelier 3D', 'Studio vidéo']);
 export const etagesPublics = () =>
   etages().map(({ id, nom, type, ordre, projet, actif, dossiers }) => ({
     id, nom: NOMS_LIVRES.has(nom) ? t(nom) : nom, type, ordre, projet, actif: !!actif, dossiers: dossiers || (projet ? [projet] : []),
@@ -197,6 +199,7 @@ export function instantane() {
     dg: etat.dg,
     ordonnanceur: etat.ordonnanceur,
     miniJeu: fournisseurMiniJeu(),
+    skills: listeSkills(),
   };
 }
 

@@ -91,8 +91,7 @@ const COUL_SERVICE = { actif: '#3ddc5a', demarrage: '#ffb02e', erreur: '#ff3b3b'
 const PHRASE_DELAI = 6000; // au plus une phrase toutes les 6 s par avatar
 const PENSEE_VIE = 15000; // une pensée sans nouvelles depuis 15 s disparaît
 const MAX_BULLES_PIECE = 3;
-const JOY_PERIODE = 60000; // Joy change d'étage au plus une fois par minute
-const JOY_ENTRE_BLAGUES = 30000;
+const JOY_ENTRE_BLAGUES = 20000;
 
 function fmtNombre(n) {
   return String(Math.round(n || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
@@ -122,50 +121,63 @@ const etape = (x, y, dir) => ({ x, y, dir });
 // Tournée de Joy quand personne ne se repose sur l'étage (repli si la carte n'en propose pas).
 const JOY_TOUR = [etape(3, 5, 'se'), etape(8, 4, 'sw'), etape(13, 4, 'sw'), etape(7, 10, 'ne'), etape(4, 10, 'ne'), etape(6, 3, 'nw')];
 
-// Étage de Joy, le happiness manager : choisi pour tout l'immeuble (même réponse pour chaque vue),
-// de préférence là où des agents attendent (la salle de pause), et stable pendant une minute.
-// Jamais au sous-sol ni dans la salle de repos : on n'y réveille personne.
-let cacheJoy = { periode: -1, etage: null };
+// Étage de Joy, le happiness manager : choisi pour tout l'immeuble (même réponse pour chaque vue).
+// Joy fait le tour des étages où il y a du monde (au travail, en attente en salle de pause…), au prorata :
+// plus d'agents, plus de chances d'y aller et plus longtemps. Le DG compte peu : Joy passe le voir
+// rarement, le temps d'une blague. Jamais au sous-sol ni dans la salle de repos : on n'y réveille personne.
+const JOY_SEJOUR = { min: 15000, parPersonne: 5000, max: 45000, dg: 12000 };
+const JOY_POIDS_DG = 0.35;
+const ACTIFS_JOY = new Set(['briefing', 'running', 'rework', 'verifying']);
+let cacheJoy = { etage: null, jusqua: 0 };
 let joyForcee = null;
 // Débogage : impose l'étage de Joy (null pour revenir au choix automatique).
 export function forcerEtageJoy(id) {
   joyForcee = id || null;
 }
+// Combien de personnes Joy trouverait sur chaque étage (le DG pour un tiers de personne).
+function mondeParEtage(S, etages) {
+  const monde = new Map(etages.map((e) => [e.id, 0]));
+  const ajouter = (id, n) => {
+    if (monde.has(id)) monde.set(id, monde.get(id) + n);
+  };
+  for (const t of S.taches.values()) {
+    if (!S.dossierActif(t.dossier)) continue;
+    // une tâche qui attend ta permission : on ne la dérange pas
+    if (ACTIFS_JOY.has(t.etat) || EN_ATTENTE.has(t.etat)) ajouter(etageVisibleTache(S, t), 1);
+  }
+  if (S.dg && S.dg.etage) ajouter(S.dg.etage, JOY_POIDS_DG);
+  return monde;
+}
 export function etageJoy(S, now = Date.now()) {
   const etages = (S.etages || []).filter((e) => e && e.id && e.type !== 'serveur' && e.type !== 'repos');
   if (!etages.length) return null;
   if (joyForcee && etages.some((e) => e.id === joyForcee)) return joyForcee;
-  const periode = Math.floor(now / JOY_PERIODE);
-  if (cacheJoy.periode === periode && etages.some((e) => e.id === cacheJoy.etage)) return cacheJoy.etage;
-  const score = new Map(etages.map((e) => [e.id, 0]));
-  const ajouter = (id, n) => {
-    if (score.has(id)) score.set(id, score.get(id) + n);
-  };
-  for (const t of S.taches.values()) {
-    if (!S.dossierActif(t.dossier)) continue;
-    if (t.etat === 'waiting' || estBloquee(t)) ajouter(etageVisibleTache(S, t), 2);
-    else if (EN_ATTENTE.has(t.etat)) ajouter(etageVisibleTache(S, t), 1);
-    else if (t.etat === 'permission') ajouter(t.etage, -3);
-  }
-  for (const a of S.equipe.values()) if (a.etat === 'disponible') ajouter(etageVisibleAgent(S, a), 1);
-  const cands = etages.filter((e) => score.get(e.id) >= 1);
-  const h = hacher('joy' + periode);
+  const monde = mondeParEtage(S, etages);
+  const cands = etages.filter((e) => monde.get(e.id) > 0);
+  const ici = cacheJoy.etage && etages.some((e) => e.id === cacheJoy.etage);
+  // on reste jusqu'à la fin du séjour, sauf si l'étage s'est vidé alors qu'il y a du monde ailleurs
+  if (ici && now < cacheJoy.jusqua && (monde.get(cacheJoy.etage) > 0 || !cands.length)) return cacheJoy.etage;
   let choix;
   if (cands.length) {
-    // tirage pondéré, en changeant d'étage quand on a le choix
+    // tirage au prorata du monde, en changeant d'étage quand on a le choix
     const pool = cands.length > 1 ? cands.filter((e) => e.id !== cacheJoy.etage) : cands;
-    const total = pool.reduce((n, e) => n + score.get(e.id), 0);
-    let r = ((h % 1000) / 1000) * total;
+    const total = pool.reduce((n, e) => n + monde.get(e.id), 0);
+    let r = Math.random() * total;
     choix = pool[pool.length - 1];
     for (const e of pool) {
-      r -= score.get(e.id);
+      r -= monde.get(e.id);
       if (r < 0) {
         choix = e;
         break;
       }
     }
-  } else choix = etages[h % etages.length];
-  cacheJoy = { periode, etage: choix.id };
+  } else {
+    // personne nulle part : la salle de pause, sinon un étage au hasard
+    choix = etages.find((e) => e.type === 'pause') || etages[Math.floor(Math.random() * etages.length)];
+  }
+  const n = monde.get(choix.id) || 0;
+  const duree = n < 1 && n > 0 ? JOY_SEJOUR.dg : Math.min(JOY_SEJOUR.max, JOY_SEJOUR.min + Math.floor(n) * JOY_SEJOUR.parPersonne);
+  cacheJoy = { etage: choix.id, jusqua: now + duree * (0.85 + Math.random() * 0.3) };
   return choix.id;
 }
 
@@ -633,14 +645,26 @@ export class Directeur {
     if (etageJoy(this.store, now) !== this.etageId) return { cat: 'depart' };
     // pendant une blague, elle ne bouge pas
     if (this.joyActe && now < this.joyActe.fin && av.spot && av.cat === 'joy') return { cat: 'joy', spot: av.spot, cle: av.cle, centre: av.centre };
+    // elle passe voir une personne, puis une autre : joueurs, agents à leur poste, et parfois le DG
+    const p = this.personneVueParJoy(now);
+    if (p) {
+      const centre = [p.gx, p.gy];
+      if (p.id === 'dg') {
+        // devant le bureau du DG, comme un visiteur
+        const v = (sp.visiteurDG || []).find((x) => this.libre(x, av));
+        if (v) {
+          this.resa.set(cle(v), av.id);
+          return { cat: 'joy', spot: v, cle: 'joy:' + cle(v), centre };
+        }
+      }
+      // debout, sur une case libre près d'elle (jamais sur un siège ni à la place de quelqu'un)
+      const sp0 = this.deboutLibre(av, centre, { rayon: 3, garder: 1.6 });
+      if (sp0) return { cat: 'joy', spot: sp0, cle: 'joy:' + cle(sp0), centre };
+    }
     const g = this.groupePrefere();
     if (g) {
-      // salle de pause : elle passe voir un joueur, puis un autre (sinon elle restait plantée au même endroit)
-      const j = this.estPause() ? this.joueurVuParJoy(now) : null;
-      const centre = j ? [j.gx, j.gy] : g.centre;
-      // debout, sur une case libre près du groupe (jamais sur un siège ni à la place de quelqu'un)
-      const sp0 = this.deboutLibre(av, centre, j ? { rayon: 3, garder: 1.6 } : { rayon: 4.5, garder: 2.5 });
-      if (sp0) return { cat: 'joy', spot: sp0, cle: 'joy:' + cle(sp0), centre };
+      const sp0 = this.deboutLibre(av, g.centre, { rayon: 4.5, garder: 2.5 });
+      if (sp0) return { cat: 'joy', spot: sp0, cle: 'joy:' + cle(sp0), centre: g.centre };
     }
     // tournée : un arrêt toutes les 15 s
     const arrets = sp.tourJoy && sp.tourJoy.length ? sp.tourJoy : JOY_TOUR;
@@ -656,24 +680,55 @@ export class Directeur {
     return { cat: 'joy', spot: av.spot || tour[0], cle: av.cle || 'joy:' + cle(tour[0]), centre: null };
   }
 
-  // Joueur que Joy est en train de voir (salle de pause) : le même pendant 20 à 30 s, puis un autre.
-  joueurVuParJoy(now) {
-    const tous = [...this.oisifs().values()].flat();
+  // Agents au travail à leur poste (pas ceux qui attendent ta permission : on ne les dérange pas).
+  auTravail() {
+    const S = this.store;
+    return [...this.avatars.values()].filter((a) => a.type === 'agent' && a.arrive && a.alpha > 0.9 && !a.chemin.length
+      && (a.cat === 'poste' || a.cat === 'machine') && (S.taches.get(a.tacheId) || {}).etat !== 'permission');
+  }
+
+  // Le DG, s'il est à son bureau sur cet étage.
+  dgPourJoy() {
+    const dg = this.avatars.get('dg');
+    return dg && dg.arrive && dg.alpha > 0.9 && !dg.chemin.length && this.store.dg.etage === this.etageId ? dg : null;
+  }
+
+  // Personne que Joy est en train de voir : la même pendant 20 à 30 s, puis une autre. Le DG de temps en
+  // temps seulement (ou s'il est seul), le temps d'une blague.
+  personneVueParJoy(now) {
+    const gens = [...this.oisifs().values()].flat();
+    for (const a of this.auTravail()) if (!gens.includes(a)) gens.push(a);
+    const dg = this.dgPourJoy();
+    const tous = dg ? [...gens, dg] : gens;
     if (!tous.length) return null;
     const v = this.joyVisite;
     const actuel = v && tous.find((a) => a.id === v.id);
     if (actuel && now < v.jusqua) return actuel;
-    const autres = tous.filter((a) => !v || a.id !== v.id);
-    const choix = (autres.length ? autres : tous)[Math.floor(Math.random() * (autres.length || tous.length))];
-    this.joyVisite = { id: choix.id, jusqua: now + JOY_VISITE[0] + Math.random() * (JOY_VISITE[1] - JOY_VISITE[0]) };
+    let choix;
+    if (dg && (!gens.length || (Math.random() < 0.15 && (!v || v.id !== 'dg')))) choix = dg;
+    else {
+      const autres = gens.filter((a) => !v || a.id !== v.id);
+      const pool = autres.length ? autres : gens;
+      choix = pool[Math.floor(Math.random() * pool.length)];
+    }
+    const duree = choix === dg ? 14000 : JOY_VISITE[0] + Math.random() * (JOY_VISITE[1] - JOY_VISITE[0]);
+    this.joyVisite = { id: choix.id, jusqua: now + duree };
+    // nouvelle personne : la blague vient vite (le temps d'arriver)
+    this.joyProchain = Math.min(this.joyProchain, now + 3000);
     return choix;
   }
 
   publicJoy(j, large = false) {
     const z = this.zoneDe(j);
+    const dist = (a) => Math.hypot(a.gx - j.gx, a.gy - j.gy);
     // salle de pause : tous les joueurs à portée de voix, quel que soit leur coin
     const g = this.estPause() ? [...this.oisifs().values()].flat() : this.oisifs().get(z) || [];
-    const proches = g.filter((a) => Math.hypot(a.gx - j.gx, a.gy - j.gy) < 5);
+    const proches = g.filter((a) => dist(a) < 5);
+    // et les collègues au travail juste à côté, et le DG si elle est devant son bureau
+    for (const a of this.auTravail()) if (dist(a) < 3.5 && !proches.includes(a)) proches.push(a);
+    const dg = this.dgPourJoy();
+    if (dg && dist(dg) < 3.5) proches.push(dg);
+    proches.sort((a, b) => dist(a) - dist(b));
     if (proches.length || !large) return proches;
     // à la demande : les collègues les plus proches, même au travail
     return [...this.avatars.values()]

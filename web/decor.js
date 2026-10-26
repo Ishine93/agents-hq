@@ -54,7 +54,7 @@ const THEMES = {
   },
   direction: {
     sols: { def: ['parquet', '#a96b3b'], bureau1: ['parquet', '#b27647'], bureau2: ['parquet', '#b27647'], machine: ['parquet', '#9a6036'],
-      pause: ['lino', '#ebe3cf'], reunion: ['parquet', '#9d6034'], dg: ['moquette', '#7c2130'] },
+      pause: ['moquette', '#22325e'], reunion: ['parquet', '#8a5530'], dg: ['parquet', '#7a4a2a'], lobby: ['marbre', '#ece6da'] },
     mur: 'boiseries', dalle: '#4a2a14', bureau: '#7a4a2a', chaise: '#5a2a1a', canape: '#6b1f2a', canapeEquipe: '#2a4a6b', table: '#6e3f20',
   },
   hall: {
@@ -363,6 +363,9 @@ function murPlat(typeTheme, longueur, cote, etage) {
   if (typeTheme === 'pause' || typeTheme === 'repos') {
     if (cote === 'droite') decorMurDroitDetente(g, typeTheme, longueur);
     else decorMurGaucheDetente(g, typeTheme, longueur, etage);
+  } else if (typeTheme === 'direction') {
+    if (cote === 'droite') decorMurDroitDirection(g);
+    else decorMurGaucheDirection(g, etage);
   } else if (cote === 'droite') decorMurDroit(g, typeTheme, longueur);
   else decorMurGauche(g, typeTheme, longueur, etage);
   return c;
@@ -537,6 +540,46 @@ function decorMurDroit(g, typeTheme, longueur) {
   fenetre(g, 11 * 32 + 12, 14, 72, 38, typeTheme);
   // coin machine : affiche du thème
   affiche(g, 14 * 32 + 6, 14, 52, 34, typeTheme);
+}
+
+// Direction : baies vitrées derrière le bureau du DG (le tableau blanc est à leur droite, dessiné à part),
+// fenêtre du bureau de l'assistant, enseigne au-dessus de la salle des marchés.
+function decorMurDroitDirection(g) {
+  enseigneQG(g);
+  fenetre(g, 4 * 32 + 4, 8, 46, 50, 'direction');
+  fenetre(g, 5 * 32 + 18, 8, 46, 50, 'direction');
+  // applique dorée au-dessus du tableau blanc
+  g.fillStyle = '#c9a227';
+  g.fillRect(8 * 32 + 8, 4, 64, 3);
+  g.fillStyle = '#fff3c4';
+  g.fillRect(8 * 32 + 14, 7, 52, 1);
+  fenetre(g, 11 * 32 + 10, 14, 44, 38, 'direction');
+  affiche(g, 14 * 32 + 6, 12, 52, 34, 'direction');
+}
+
+// Direction, mur gauche : grand écran de la salle du conseil (résultats en hausse).
+function decorMurGaucheDirection(g, etage) {
+  const c = (gy) => (H - gy) * 32;
+  plaqueEtage(g, etage);
+  const x0 = Math.round(c(10.7));
+  const x1 = Math.round(c(7.3));
+  const w = x1 - x0;
+  const y = 10;
+  const h = 46;
+  cadre(g, x0, y, w, h, '#15151f', '#0e1530');
+  const titre = enseigne('RESULTATS', 'RESULTS');
+  g.drawImage(texteCanvas(titre, '#f4d35e'), x0 + 6, y + 4);
+  const base = y + h - 6;
+  const n = 7;
+  const pas = Math.floor((w - 16) / n);
+  const cols = ['#2f6fde', '#3aa655', '#f6c21c'];
+  for (let i = 0; i < n; i++) {
+    const bh = Math.round((h - 22) * (0.25 + i * 0.11));
+    g.fillStyle = cols[i % cols.length];
+    g.fillRect(x0 + 8 + i * pas, base - bh, pas - 4, bh);
+  }
+  g.fillStyle = '#ffffff';
+  for (let i = 0; i < w - 20; i++) g.fillRect(x0 + 10 + i, base - 4 - Math.round((h - 24) * Math.pow(i / (w - 20), 1.6)), 1, 1);
 }
 
 // Plaque du nom de l'étage (mur gauche, à côté de l'ascenseur).
@@ -731,12 +774,7 @@ export function construireCouche(carte, etage) {
       g.drawImage(tuile(carte.type, carte.zones[y][x], x, y), tx, ty);
     }
   }
-  // tapis du bureau du DG à la Direction
   const P0 = projeteur(OX, OY);
-  if (carte.type === 'direction') {
-    poly(g, [P0(3.25, 0.4), P0(6.8, 0.4), P0(6.8, 3.6), P0(3.25, 3.6)], '#c9a227');
-    poly(g, [P0(3.4, 0.55), P0(6.65, 0.55), P0(6.65, 3.45), P0(3.4, 3.45)], '#8c2433');
-  }
   // tapis des étages de détente (salon télé, coin poufs, allées de la salle de repos)
   for (const tp of carte.tapis || []) {
     poly(g, [P0(tp.x0, tp.y0), P0(tp.x1, tp.y0), P0(tp.x1, tp.y1), P0(tp.x0, tp.y1)], tp.c0);
@@ -747,7 +785,7 @@ export function construireCouche(carte, etage) {
   // tapis du salon de l'équipe (réserve d'agents)
   if (carte.salon) {
     const sl = carte.salon;
-    const coul = { roblox: ['#7a2f8f', '#b155c9'], unreal: ['#123a52', '#1f6f8a'], direction: ['#5b3418', '#c9a227'], serveur: ['#2b4a3a', '#3d6a52'], bac: ['#1d1d1d', '#f5c400'] }[carte.type] || ['#6b3a2a', '#c27a4a'];
+    const coul = { roblox: ['#7a2f8f', '#b155c9'], unreal: ['#123a52', '#1f6f8a'], direction: ['#c9a227', '#2a3d6e'], serveur: ['#2b4a3a', '#3d6a52'], bac: ['#1d1d1d', '#f5c400'] }[carte.type] || ['#6b3a2a', '#c27a4a'];
     poly(g, [P0(sl.x0 + 0.08, sl.y0 + 0.08), P0(sl.x1 - 0.1, sl.y0 + 0.08), P0(sl.x1 - 0.1, sl.y1 - 0.12), P0(sl.x0 + 0.08, sl.y1 - 0.12)], coul[0]);
     poly(g, [P0(sl.x0 + 0.22, sl.y0 + 0.22), P0(sl.x1 - 0.24, sl.y0 + 0.22), P0(sl.x1 - 0.24, sl.y1 - 0.26), P0(sl.x0 + 0.22, sl.y1 - 0.26)], coul[1]);
   }
@@ -915,6 +953,18 @@ function livres(g, P, y, x0, x1, z0, h, rnd) {
     const hh = h - Math.floor(rnd() * 4);
     quadY(g, P, y, x, Math.min(x1, x + w), z0, z0 + hh, cols[Math.floor(rnd() * cols.length)]);
     x += w + 0.008;
+  }
+}
+
+// Les mêmes, rangés contre le mur gauche (tranches vers +x).
+function livresX(g, P, x, y0, y1, z0, h, rnd) {
+  const cols = ['#e3342f', '#2f6fde', '#f6c21c', '#3aa655', '#9b5de5', '#ef7d22', '#ececec', '#1f2a44'];
+  let y = y0;
+  while (y < y1 - 0.03) {
+    const w = 0.035 + rnd() * 0.04;
+    const hh = h - Math.floor(rnd() * 4);
+    quadX(g, P, x, y, Math.min(y1, y + w), z0, z0 + hh, cols[Math.floor(rnd() * cols.length)]);
+    y += w + 0.008;
   }
 }
 
@@ -1127,6 +1177,15 @@ export function spriteMeuble(it, typeTheme, etat = {}) {
     case 'etagere': {
       s = spriteTuile(70, (g, P) => {
         const bois = typeTheme === 'unreal' ? '#3b4058' : typeTheme === 'direction' ? '#5b3418' : '#9a6a3c';
+        if (it.mur === 'gauche') {
+          prisme(g, P, 0.04, 0.08, 0.4, 0.92, 0, 60, bois);
+          quadX(g, P, 0.4, 0.12, 0.88, 3, 57, nuance(bois, -0.35));
+          for (const z of [3, 17, 31, 45]) {
+            quadX(g, P, 0.4, 0.12, 0.88, z - 1, z, nuance(bois, 0.1));
+            livresX(g, P, 0.4, 0.13, 0.87, z, 11, rnd);
+          }
+          return;
+        }
         prisme(g, P, 0.08, 0.04, 0.92, 0.4, 0, 60, bois);
         quadY(g, P, 0.4, 0.12, 0.88, 3, 57, nuance(bois, -0.35));
         for (const z of [3, 17, 31, 45]) {
@@ -1179,10 +1238,11 @@ export function spriteMeuble(it, typeTheme, etat = {}) {
     }
     case 'accueil': {
       const a = it.part === 'a';
+      const [corps, bande] = typeTheme === 'direction' ? ['#5b3418', '#c9a227'] : ['#f4f6fa', '#2f6fde'];
       s = spriteTuile(40, (g, P) => {
-        prisme(g, P, 0.1, a ? 0.1 : 0, 0.9, a ? 1 : 0.9, 0, 26, '#f4f6fa');
-        quadX(g, P, 0.9, a ? 0.2 : 0, a ? 1 : 0.8, 8, 12, '#2f6fde');
-        prisme(g, P, 0.04, a ? 0.04 : 0, 0.96, a ? 1 : 0.96, 26, 29, '#2f6fde');
+        prisme(g, P, 0.1, a ? 0.1 : 0, 0.9, a ? 1 : 0.9, 0, 26, corps);
+        quadX(g, P, 0.9, a ? 0.2 : 0, a ? 1 : 0.8, 8, 12, bande);
+        prisme(g, P, 0.04, a ? 0.04 : 0, 0.96, a ? 1 : 0.96, 26, 29, bande);
       });
       break;
     }

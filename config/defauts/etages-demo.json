@@ -1,0 +1,20 @@
+{
+  "note": "Immeuble de la démo (société fictive). Copié dans dossiers-demo/etages.json au lancement de la démo ; ses projets sont des dossiers vides de dossiers-demo/societe.",
+  "etages": [
+    { "id": "direction", "nom": "Direction", "type": "direction", "ordre": 9, "projet": "{DEMO}\\direction", "actif": true,
+      "note": "Bureau du DG. Seules les tâches de synthèse transversale (lecture seule) s'y déroulent." },
+    { "id": "pixel-pirates", "nom": "Pixel Pirates", "type": "roblox", "ordre": 8, "projet": "{DEMO}\\pixel-pirates", "actif": true, "portRojo": 34991 },
+    { "id": "cosmo-kart", "nom": "Cosmo Kart", "type": "roblox", "ordre": 7, "projet": "{DEMO}\\cosmo-kart", "actif": true, "portRojo": 34992 },
+    { "id": "atelier-3d", "nom": "Atelier 3D", "type": "atelier3d", "ordre": 6, "projet": "{DEMO}\\atelier-3d", "actif": true },
+    { "id": "etudes", "nom": "Bureau d'études", "type": "etudes", "ordre": 5, "projet": "{DEMO}\\etudes", "actif": true },
+    { "id": "video", "nom": "Studio vidéo", "type": "unreal", "ordre": 4, "projet": "{DEMO}\\video", "actif": true },
+    { "id": "salle-pause", "nom": "Salle de pause", "type": "pause", "ordre": 2, "projet": null, "actif": true,
+      "note": "Les agents qui attendent leur tour y jouent (billard, baby-foot, télé)." },
+    { "id": "salle-repos", "nom": "Salle de repos", "type": "repos", "ordre": 1, "projet": null, "actif": true,
+      "note": "Les agents en réserve y dorment, prêts à être réembauchés." },
+    { "id": "hall", "nom": "Hall", "type": "hall", "ordre": 0, "projet": null, "actif": false,
+      "note": "Accueil et fil global. Aucune tâche ne s'y déroule." },
+    { "id": "sous-sol", "nom": "Sous-sol serveurs", "type": "serveur", "ordre": -1, "projet": null, "actif": true,
+      "note": "Les serveurs longs (Rojo…) que les agents viennent allumer." }
+  ]
+}

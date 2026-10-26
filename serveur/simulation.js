@@ -4,6 +4,7 @@ import { etagesActifs } from './config.js';
 import { t as tr } from './i18n.js';
 import { modification } from './bus.js';
 import { modificationDe } from './session.js';
+import { scenario as scenarioParCle, scenarioDe, CODES_DEMO } from './scenarios-demo.js';
 
 // Code « écrit » par les agents simulés : de vrais diffs (lignes + et −) pour l'onglet Code et le vieil écran.
 const CODES = {
@@ -31,7 +32,7 @@ function patchSimule(avant, apres) {
   return [{ oldStart: ctx + 1, oldLines: avant.length - f - ctx, newStart: ctx + 1, newLines: apres.length - f - ctx, lines: lignes }];
 }
 function ecrireSimule(t, d, nom, chemin) {
-  const c = CODES[chemin];
+  const c = CODES[chemin] || CODES_DEMO[chemin];
   if (!c || t.x.profil === 'lecture' || t.etage === 'direction') return;
   const r = c.avant
     ? { filePath: chemin, originalFile: c.avant.join('\n'), structuredPatch: patchSimule(c.avant, c.apres), type: 'update' }
@@ -55,6 +56,15 @@ const OUTILS = [
   ['TodoWrite', 'plan de travail'], ['Edit', 'src/Client/HUD.luau'],
 ];
 
+// Grand scénario du dossier (démo lancée depuis le QG, ou demande qui le cite), s'il a ses étages.
+function scenarioDu(d) {
+  const sc = (d.x?.scenario && scenarioParCle(d.x.scenario)) || scenarioDe(d.texte);
+  if (!sc) return null;
+  const actifs = new Set(etagesActifs().map((e) => e.id));
+  return sc.taches().every((x) => actifs.has(x.etage)) ? sc : null;
+}
+const etapeDe = (d, t) => scenarioDu(d)?.taches().find((x) => x.ref === t.ref) || null;
+
 function tache(ref, titre, etage, nature, modele, effort, deps, inputsFrom, profil, verification) {
   return {
     ref, titre, etage, nature, modele, effort,
@@ -74,6 +84,19 @@ function tache(ref, titre, etage, nature, modele, effort, deps, inputsFrom, prof
 export function creerSimulation() {
   return {
     async planifier(d, { reponse = null } = {}) {
+      const sc = scenarioDu(d);
+      if (sc) {
+        d.x.scenario = sc.cle;
+        await this.penserSimule('dg', d.id, null, sc.pensees());
+        return {
+          sortie: {
+            titre: sc.titre(),
+            message: sc.message(),
+            clarification: '',
+            taches: sc.taches().map((x) => tache(x.ref, x.titre, x.etage, x.nature, x.modele, x.effort, x.deps || [], x.inputs || [], x.profil, x.verif)),
+          },
+        };
+      }
       await this.penserSimule('dg', d.id, null, [
         tr('La demande mélange une mesure et ce qui en dépend : je sépare le bench des tests.'),
         tr('Le bench est clair, Sonnet en effort élevé suffit ; la refonte du spawn est plus délicate, je prends Opus.'),
@@ -127,6 +150,8 @@ export function creerSimulation() {
       try {
         await attendre(1500, signal);
         ctx.surInit({ model: MODELES_REELS[t.modele], session_id: session });
+        const etape = etapeDe(d, t);
+        if (etape) return await this.produireEtape(t, d, ctx, etape, session, () => complements);
         await this.penserSimule(t.id, d.id, signal, [
           tr('Bon, ma mission : {mission}.', { mission: t.titre.toLowerCase() }),
           tr('Je commence par regarder ce qui existe déjà dans le projet.'),
@@ -173,6 +198,55 @@ export function creerSimulation() {
       }
     },
 
+    // Tâche d'un grand scénario : ses propres pensées, outils, fichiers, et au besoin un serveur du sous-sol.
+    async produireEtape(t, d, ctx, etape, session, complements) {
+      const signal = ctx.abortController.signal;
+      const rework = t.etat === 'rework';
+      await this.penserSimule(t.id, d.id, signal, rework
+        ? [tr('Le vérificateur a raison, je corrige : {remarque}', { remarque: etape.rework || '' })]
+        : [tr('Bon, ma mission : {mission}.', { mission: t.titre.toLowerCase() }), ...(etape.pensees || [])]);
+      const pas = rework ? etape.pas.filter(([nom]) => nom === 'Edit' || nom === 'Bash').slice(-3) : etape.pas;
+      for (let i = 0; i < pas.length; i++) {
+        await attendre(3800 + ((i * 937 + t.ref.charCodeAt(1) * 311) % 2400), signal);
+        if (i === 1 && etape.service && !rework) await this.allumerServeur(t, d, ctx, etape.service);
+        const [nom, cible] = pas[i];
+        ctx.surOutil(nom, cible);
+        if (nom === 'Edit' || nom === 'Write') ecrireSimule(t, d, nom, cible);
+      }
+      for (let i = 0; i < complements() * 2; i++) {
+        await attendre(1500, signal);
+        ctx.surOutil('Edit', tr('prise en compte du complément'));
+      }
+      if (ctx.canal) ctx.canal.injecter = async () => false;
+      const ecrits = [...new Set(etape.pas.filter(([nom]) => nom === 'Edit' || nom === 'Write').map(([, f]) => f))];
+      return {
+        sessionId: session,
+        sortie: {
+          status: 'done',
+          summary: etape.resume,
+          changedFiles: t.x.profil === 'lecture' ? [] : ecrits,
+          artifacts: [],
+          handoffNotes: etape.passation || '',
+          questionsForDg: [],
+          selfCheck: t.x.doneWhen.map((c) => ({ critere: c, ok: true, preuve: 'simulation' })),
+        },
+      };
+    },
+
+    // Comme l'outil mcp__qg__service_demarrer : l'agent descend au sous-sol allumer le serveur (simulé en démo).
+    async allumerServeur(t, d, ctx, type) {
+      const { emettre, message } = await import('./bus.js');
+      const { demarrer } = await import('./services.js');
+      emettre('service_action', { tache: t.id, service: `${t.etage}:${type}`, action: 'demarrer' }, d.id);
+      ctx.surOutil('mcp__qg__service_demarrer', type);
+      try {
+        const s = await demarrer(t.etage, type, t.ref);
+        message(d.id, 'systeme', s.port ? tr('{ref} a démarré {service} (port {port}) au sous-sol.', { ref: t.ref, service: s.nom, port: s.port }) : tr('{ref} a démarré {service} au sous-sol.', { ref: t.ref, service: s.nom }), [t.etage, 'sous-sol']);
+      } catch (e) {
+        ctx.surOutil('mcp__qg__service_demarrer', tr('impossible : {raison}', { raison: e.message }));
+      }
+    },
+
     async verifier(t, d, sortie, ctx) {
       try {
         for (let i = 0; i < 3; i++) {
@@ -182,6 +256,11 @@ export function creerSimulation() {
       } catch {
         return { verdict: null, echec: 'abort' };
       }
+      const etape = etapeDe(d, t);
+      if (etape) {
+        if (etape.rework && t.x.reworks === 0) return { verdict: { verdict: 'rework', issues: [{ gravite: 'bloquant', detail: etape.rework, fichier: '' }], preuve: tr('Relecture et essai dans Studio.') } };
+        return { verdict: { verdict: 'pass', issues: [], preuve: tr('Tous les critères sont remplis (simulation).') } };
+      }
       if (t.ref === 'T3' && t.x.reworks === 0) {
         return { verdict: { verdict: 'rework', issues: [{ gravite: 'bloquant', detail: tr('Le cas « chemin bloqué » n’est pas testé.'), fichier: 'tests/pathfinding.spec.luau' }], preuve: tr('Lecture des tests.') } };
       }
@@ -190,7 +269,7 @@ export function creerSimulation() {
 
     async reagir(d, evenements, complements = []) {
       await attendre(3000);
-      const relance = evenements.some((e) => e.startsWith('T4'));
+      const relance = !scenarioDu(d) && evenements.some((e) => e.startsWith('T4'));
       const ops = relance ? [{ op: 'relancer', ref: 'T4', consigne: tr('Garde la compatibilité avec l’ancien format de spawn.'), modele: 'opus', effort: 'xhigh', raison: tr('manque de contexte') }] : [];
       // Complément de l'utilisateur : on le transmet à toutes les tâches pas encore finies ;
       // si tout est fini, on ajoute une tâche confiée à un agent de la réserve.
@@ -231,6 +310,8 @@ export function creerSimulation() {
 
     async synthese(d) {
       await attendre(3000);
+      const sc = scenarioDu(d);
+      if (sc) return { sortie: { message: sc.synthese() } };
       return { sortie: { message: tr('Dossier {id} terminé (simulation) : bench et tests calibrés en place, module de spawn refait, note de synthèse prête.', { id: d.id }) } };
     },
   };

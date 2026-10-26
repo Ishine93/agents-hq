@@ -70,6 +70,7 @@ export class Etat {
     this.personnalisation = { prenoms: [], skins: {} };
     this.conso = null;
     this.miniJeu = { reglages: {}, personnalites: {}, memoires: {} };
+    this.skills = [];
   }
 
   // Dossier supprimé sur le serveur : il disparaît de partout (liste, scènes, tableau, fil, notifications).
@@ -501,9 +502,12 @@ export class Etat {
       case 'navigateur_app':
         this.navigateurApp = ev;
         break;
+      case 'skills':
+        if (Array.isArray(ev.skills)) this.skills = ev.skills;
+        break;
       // mini-jeu des personnages : réglages, personnalités, mémoires ; répliques en direct
       case 'mini_jeu':
-        this.miniJeu = { reglages: ev.reglages, personnalites: ev.personnalites, memoires: ev.memoires };
+        this.miniJeu = { reglages: ev.reglages, personnalites: ev.personnalites, memoires: ev.memoires, intrigues: ev.intrigues || { rumeurs: [], histoires: [] } };
         break;
       case 'discussion': {
         const m = this.miniJeu && this.miniJeu.memoires ? (this.miniJeu.memoires[ev.cle] = this.miniJeu.memoires[ev.cle] || { souvenirs: [], relations: {}, dialogue: [] }) : null;
@@ -576,6 +580,7 @@ export class Etat {
     if (ev.personnalisation && typeof ev.personnalisation === 'object') this.personnalisation = ev.personnalisation;
     if (ev.conso && typeof ev.conso === 'object') this.conso = ev.conso;
     if (ev.miniJeu && typeof ev.miniJeu === 'object') this.miniJeu = ev.miniJeu;
+    if (Array.isArray(ev.skills)) this.skills = ev.skills;
     // v1.2 : `plans` donne les vraies dépendances par dossier.
     if (ev.plans && typeof ev.plans === 'object') {
       for (const [dossier, taches] of Object.entries(ev.plans)) {

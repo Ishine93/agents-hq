@@ -14,13 +14,22 @@ import { t } from './i18n.js';
 
 const FICHIER_PERSOS = path.join(RACINE, 'config', 'personnalites.json');
 const FICHIER_PERSOS_DEFAUT = path.join(RACINE, 'config', 'defauts', 'personnalites.json');
-const FICHIER_MEMOIRES = process.env.QG_MEMOIRES_FICHIER || path.join(RACINE, 'runtime', 'memoires.json');
+let FICHIER_MEMOIRES = process.env.QG_MEMOIRES_FICHIER || path.join(RACINE, 'runtime', 'memoires.json');
 const MAX_SOUVENIRS = 40;
 const MAX_DIALOGUE = 30;
 const EN_ATTENTE = new Set(['planned', 'waiting', 'ready', 'queued']);
 // Mode démo (ou tests) : répliques toutes prêtes, aucun appel au modèle.
 let demo = !!process.env.QG_DEMO_MINIJEU;
-export const utiliserDemo = (v) => (demo = !!v);
+// La démo a ses propres souvenirs (dossiers-demo/memoires.json) : elle tourne à côté du vrai QG, qui écrit
+// les siens dans runtime/memoires.json ; les deux ne doivent jamais s’écraser.
+export function utiliserDemo(v, fichierMemoires = null) {
+  demo = !!v;
+  if (v && fichierMemoires) {
+    FICHIER_MEMOIRES = fichierMemoires;
+    memoires = lireJson(FICHIER_MEMOIRES, {});
+    chargerIntrigues();
+  }
+}
 const ACTIFS = new Set(['briefing', 'running', 'permission', 'rework', 'verifying']);
 
 // ---------------------------------------------------------------- réglages
@@ -30,7 +39,8 @@ export function reglagesMiniJeu() {
     actif: r.actif !== false,
     ecoute: r.ecoute !== false,
     bavardages: r.bavardages !== false,
-    bavardagesMinutes: Number(r.bavardagesMinutes) > 0 ? Number(r.bavardagesMinutes) : 10,
+    // 0 : en direct (en continu) ; 0,5 : toutes les 30 s
+    bavardagesMinutes: Number.isFinite(Number(r.bavardagesMinutes)) && Number(r.bavardagesMinutes) >= 0 && r.bavardagesMinutes !== null && r.bavardagesMinutes !== '' ? Number(r.bavardagesMinutes) : 10,
     modeleDiscussion: r.modeleDiscussion || 'sonnet',
     modeleBavardage: r.modeleBavardage || 'haiku',
   };
@@ -85,11 +95,13 @@ function souvenir(cle, texte, source) {
   m.souvenirs.push({ id: `S${Date.now().toString(36)}${(++compteur).toString(36)}`, t: Date.now(), texte: String(texte).slice(0, 300), source });
   if (m.souvenirs.length > MAX_SOUVENIRS) m.souvenirs.splice(0, m.souvenirs.length - MAX_SOUVENIRS);
 }
-function relation(de, vers, delta, note) {
+// lien : amitié, attirance, couple, rivalité, brouille… (le dernier dit ; « réconciliation » efface une brouille)
+function relation(de, vers, delta, note, lien = '') {
   if (!de || !vers || de === vers) return;
   const r = (memoire(de).relations[vers] = memoire(de).relations[vers] || { affinite: 0, note: '' });
   r.affinite = Math.max(-10, Math.min(10, r.affinite + Math.max(-3, Math.min(3, Math.round(Number(delta) || 0)))));
   if (note) r.note = String(note).slice(0, 160);
+  if (lien) r.lien = lien === 'réconciliation' ? 'amitié' : String(lien).slice(0, 30);
   r.t = Date.now();
 }
 
@@ -101,6 +113,7 @@ export function oublier({ cle = null, souvenir: sid = null, relation: rel = null
   else if (cle && rel) delete memoire(cle).relations[rel];
   else if (cle && relations) memoire(cle).relations = {};
   else if (cle) delete memoires[cle];
+  if (tout || relations || (cle && !sid && !rel)) oublierIntrigues({ cle: cle && !relations ? cle : null, tout, relations: relations && !cle });
   sauver();
   publier();
 }
@@ -117,6 +130,7 @@ export function renommerMemoire(ancien, nouveau) {
     }
   }
   const p = lireJson(FICHIER_PERSOS, {});
+  renommerIntrigues(ancien, nouveau);
   if (p.personnalites && p.personnalites[ancien]) {
     p.personnalites[nouveau] = p.personnalites[ancien];
     delete p.personnalites[ancien];
@@ -127,7 +141,7 @@ export function renommerMemoire(ancien, nouveau) {
 }
 
 export function miniJeuPublic() {
-  return { reglages: reglagesMiniJeu(), personnalites: personnalites(), memoires };
+  return { reglages: reglagesMiniJeu(), personnalites: personnalites(), memoires, intrigues };
 }
 function publier() {
   emettre('mini_jeu', miniJeuPublic());
@@ -209,7 +223,7 @@ const SCHEMA_DISCUSSION = {
 
 function ficheRelations(cle, noms) {
   const r = memoire(cle).relations;
-  return Object.entries(r).filter(([k]) => !noms || noms.has(k)).map(([k, v]) => `${nomDe(k)} (${v.affinite > 0 ? '+' : ''}${v.affinite}${v.note ? ' : ' + v.note : ''})`).join(' ; ');
+  return Object.entries(r).filter(([k]) => !noms || noms.has(k)).map(([k, v]) => `${nomDe(k)} (${v.affinite > 0 ? '+' : ''}${v.affinite}${v.lien ? ', ' + v.lien : ''}${v.note ? ' : ' + v.note : ''})`).join(' ; ');
 }
 
 function contexteCommun(cle, ici) {
@@ -304,69 +318,291 @@ function reponseSimulee(cle, message, voisins) {
 }
 
 // ---------------------------------------------------------------- bavardages entre collègues
+// Façon télé-réalité : des scènes de 6 à 10 répliques où l'on parle de la pluie et du beau temps, puis des
+// autres ; des rumeurs circulent (qui les a lancées, qui les connaît, la personne visée finit par les
+// apprendre), des liens se font et se défont (amitié, attirance, couple, rivalité, brouille…) et des
+// histoires se suivent d'une scène à l'autre. Plusieurs scènes peuvent se jouer en même temps (A et B
+// pendant que D et E), au rythme choisi, ou « en direct » : en continu.
+const MAX_RUMEURS = 30;
+const MAX_HISTOIRES = 8;
+const MAX_SCENES = 3; // scènes en même temps, au plus
+export const LIENS = ['', 'amitié', 'complicité', 'attirance', 'couple', 'rivalité', 'conflit', 'brouille', 'réconciliation', 'méfiance'];
+
+const fichierIntrigues = () => path.join(path.dirname(FICHIER_MEMOIRES), 'intrigues.json');
+let intrigues = { rumeurs: [], histoires: [] };
+function chargerIntrigues() {
+  const x = lireJson(fichierIntrigues(), {});
+  intrigues = { rumeurs: Array.isArray(x.rumeurs) ? x.rumeurs : [], histoires: Array.isArray(x.histoires) ? x.histoires : [] };
+}
+chargerIntrigues();
+function sauverIntrigues() {
+  try {
+    fs.mkdirSync(path.dirname(fichierIntrigues()), { recursive: true });
+    fs.writeFileSync(fichierIntrigues() + '.tmp', JSON.stringify(intrigues, null, 2));
+    fs.renameSync(fichierIntrigues() + '.tmp', fichierIntrigues());
+  } catch (e) {
+    console.error('intrigues', e.message);
+  }
+}
+// Oubli, renommage : les rumeurs et les histoires suivent la mémoire.
+function oublierIntrigues({ cle = null, tout = false, relations = false }) {
+  if (tout) intrigues = { rumeurs: [], histoires: [] };
+  else if (relations && !cle) intrigues.histoires = [];
+  else if (cle) {
+    intrigues.rumeurs = intrigues.rumeurs.filter((r) => r.par !== cle && r.sujet !== cle).map((r) => ({ ...r, connaisseurs: r.connaisseurs.filter((c) => c !== cle) }));
+    intrigues.histoires = intrigues.histoires.filter((h) => !h.qui.includes(cle));
+  }
+  sauverIntrigues();
+}
+function renommerIntrigues(ancien, nouveau) {
+  const r = (c) => (c === ancien ? nouveau : c);
+  for (const x of intrigues.rumeurs) {
+    x.par = r(x.par);
+    x.sujet = r(x.sujet);
+    x.connaisseurs = x.connaisseurs.map(r);
+  }
+  for (const h of intrigues.histoires) h.qui = h.qui.map(r);
+  sauverIntrigues();
+}
+
 const SCHEMA_BAVARDAGE = {
   type: 'object',
   additionalProperties: false,
   properties: {
-    lignes: { type: 'array', items: { type: 'object', additionalProperties: false, properties: { nom: { type: 'string' }, texte: { type: 'string' } }, required: ['nom', 'texte'] }, description: '3 à 5 répliques courtes, chacune d’un des personnages' },
+    lignes: { type: 'array', items: { type: 'object', additionalProperties: false, properties: { nom: { type: 'string' }, texte: { type: 'string' } }, required: ['nom', 'texte'] }, description: '6 à 10 répliques courtes qui s’enchaînent, chacune d’un des personnages de la scène' },
+    temoin: { type: 'object', additionalProperties: false, properties: { nom: { type: 'string' }, texte: { type: 'string' } }, required: ['nom', 'texte'], description: 'Un collègue à portée d’oreille qui intervient à la fin (nom et texte vides si personne)' },
     souvenirs: { type: 'array', items: { type: 'object', additionalProperties: false, properties: { nom: { type: 'string' }, texte: { type: 'string' } }, required: ['nom', 'texte'] } },
-    relations: { type: 'array', items: { type: 'object', additionalProperties: false, properties: { de: { type: 'string' }, vers: { type: 'string' }, delta: { type: 'integer' }, note: { type: 'string' } }, required: ['de', 'vers', 'delta', 'note'] } },
+    relations: { type: 'array', items: { type: 'object', additionalProperties: false, properties: { de: { type: 'string' }, vers: { type: 'string' }, delta: { type: 'integer' }, lien: { type: 'string', enum: LIENS }, note: { type: 'string' } }, required: ['de', 'vers', 'delta', 'lien', 'note'] } },
+    rumeurs: { type: 'array', items: { type: 'object', additionalProperties: false, properties: { par: { type: 'string' }, sujet: { type: 'string' }, texte: { type: 'string' } }, required: ['par', 'sujet', 'texte'] }, description: 'Rumeurs lancées dans la scène (sur un collègue, souvent absent)' },
+    revelations: { type: 'array', items: { type: 'object', additionalProperties: false, properties: { par: { type: 'string' }, a: { type: 'string' }, sujet: { type: 'string' } }, required: ['par', 'a', 'sujet'] }, description: 'Rumeurs connues répétées à quelqu’un dans la scène' },
+    histoire: { type: 'object', additionalProperties: false, properties: { titre: { type: 'string' }, resume: { type: 'string' } }, required: ['titre', 'resume'], description: 'L’histoire que la scène fait avancer (titre court, résumé d’une phrase), ou vide' },
   },
-  required: ['lignes', 'souvenirs', 'relations'],
+  required: ['lignes', 'temoin', 'souvenirs', 'relations', 'rumeurs', 'revelations', 'histoire'],
 };
 
-let dernierBavardage = Date.now();
-export async function bavarder({ force = false } = {}) {
-  const mj = reglagesMiniJeu();
-  if (!force && (!mj.actif || !mj.bavardages || nbClients() === 0 || Date.now() - dernierBavardage < mj.bavardagesMinutes * 60000)) return null;
-  dernierBavardage = Date.now();
-  // un étage où au moins deux personnages sont ensemble, de préférence la salle de pause
+const scenes = new Map(); // id → { qui: Set, etage, fin }
+let numScene = 0;
+function occupes() {
+  const out = new Set();
+  const now = Date.now();
+  for (const [id, sc] of scenes) {
+    if (sc.fin && sc.fin < now) scenes.delete(id);
+    else for (const c of sc.qui) out.add(c);
+  }
+  return out;
+}
+
+// Personnages qu'on connaît (présents ou passés), pour parler des absents.
+const connus = () => [...new Set([...presents().values()].map((p) => p.cle).concat(Object.keys(memoires)))].filter((c) => !c.startsWith('@'));
+
+// Qui bavarde : de préférence des personnages qu'une histoire en cours relie (pour la suite), sinon un
+// groupe au hasard, la salle de pause d'abord. Jamais quelqu'un déjà pris dans une autre scène.
+function choisirScene() {
+  const pris = occupes();
   const parEtage = new Map();
   for (const p of presents().values()) {
     if (p.cle.startsWith('@') || p.etage === 'salle-repos') continue; // on ne bavarde pas en dormant
     if (!parEtage.has(p.etage)) parEtage.set(p.etage, []);
     parEtage.get(p.etage).push(p);
   }
-  const groupes = [...parEtage.entries()].filter(([, l]) => l.length >= 2).sort((a, b) => (b[0] === 'salle-pause') - (a[0] === 'salle-pause') || b[1].length - a[1].length);
-  if (!groupes.length) return null;
-  const [etageId, liste] = groupes[0];
-  const qui = liste.sort(() => Math.random() - 0.5).slice(0, liste.length > 2 && Math.random() < 0.4 ? 3 : 2);
+  const libres = [...parEtage.entries()].map(([e, l]) => [e, l.filter((p) => !pris.has(p.cle))]).filter(([, l]) => l.length >= 2);
+  if (!libres.length) return null;
+  const melanger = (l) => l.slice().sort(() => Math.random() - 0.5);
+  if (Math.random() < 0.6) {
+    for (const h of intrigues.histoires.slice().reverse()) {
+      for (const [e, l] of libres) {
+        const ici = l.filter((p) => h.qui.includes(p.cle));
+        if (ici.length >= 2) return { etage: e, qui: melanger(ici).slice(0, 3), tous: parEtage.get(e) };
+      }
+    }
+  }
+  libres.sort((a, b) => (b[0] === 'salle-pause') - (a[0] === 'salle-pause') || b[1].length - a[1].length);
+  const [e, l] = Math.random() < 0.7 ? libres[0] : libres[Math.floor(Math.random() * libres.length)];
+  const n = l.length >= 5 && Math.random() < 0.25 ? 4 : l.length >= 3 && Math.random() < 0.4 ? 3 : 2;
+  return { etage: e, qui: melanger(l).slice(0, n), tous: parEtage.get(e) };
+}
+
+const rumeursDe = (cle) => intrigues.rumeurs.filter((r) => r.connaisseurs.includes(cle));
+
+function promptScene(choix, temoins) {
   const util = REGLAGES.utilisateur || t('le patron');
-  const fiches = qui.map((p) => [
+  const dans = new Set(choix.qui.map((p) => p.cle));
+  const fiches = choix.qui.map((p) => [
     `${p.nom} : ${personnaliteDe(p.cle) || 'personnalité à inventer'}`,
     `  en ce moment : ${p.fait}`,
     Object.keys(memoire(p.cle).relations).length ? `  ce qu'il/elle pense des autres : ${ficheRelations(p.cle)}` : '',
     memoire(p.cle).souvenirs.length ? `  souvenirs : ${memoire(p.cle).souvenirs.slice(-5).map((s) => s.texte).join(' / ')}` : '',
+    rumeursDe(p.cle).length ? `  rumeurs qu'il/elle connaît : ${rumeursDe(p.cle).slice(-4).map((r) => `« ${r.texte} » (sur ${nomDe(r.sujet)}, lancée par ${nomDe(r.par)})`).join(' ; ')}` : '',
   ].filter(Boolean).join('\n')).join('\n');
-  const prompt = `Écris une petite scène de bavardage au « QG des agents » (immeuble de bureaux en pixel art où des agents IA travaillent pour ${util}), entre ces collègues réunis à l'étage « ${trouverEtage(etageId)?.nom || etageId} » :\n${fiches}\n\nEn ${langueIA()}, 3 à 5 répliques très courtes (une bulle chacune), naturelles, drôles ou touchantes, fidèles à leurs personnalités, leurs relations et leurs souvenirs (amitiés, petites rivalités, amourettes possibles, mais rien de méchant). Pas de détails inventés sur le vrai travail. Indique ce que chacun retient et ce qui change entre eux (souvent rien).`;
-  let r;
+  const absents = connus().filter((c) => !dans.has(c) && !temoins.some((x) => x.cle === c)).slice(0, 10);
+  const histoires = intrigues.histoires.filter((h) => h.qui.some((c) => dans.has(c) || temoins.some((x) => x.cle === c))).slice(-4);
+  return [
+    `Écris une scène de bavardage au « QG des agents » (immeuble de bureaux en pixel art où des agents IA travaillent pour ${util}), façon télé-réalité (Secret Story, L'île de la tentation), à l'étage « ${trouverEtage(choix.etage)?.nom || choix.etage} ».`,
+    `Personnages de la scène :\n${fiches}`,
+    temoins.length ? `À portée d'oreille (ils entendent tout ; au plus un peut intervenir à la fin, champ temoin) : ${temoins.map((x) => x.nom).join(', ')}.` : 'Personne d’autre n’entend (champ temoin vide).',
+    absents.length ? `Collègues absents dont on peut parler : ${absents.map((c) => `${nomDe(c)}${personnaliteDe(c) ? ` (${personnaliteDe(c).slice(0, 70)})` : ''}`).join(' ; ')}.` : '',
+    `N'invente aucun autre collègue : les rumeurs et les potins portent sur les personnes citées ici (présentes, à portée d'oreille ou absentes), le DG (${nomDg()}), ${nomJoy()} ou ${util}.`,
+    histoires.length ? `Histoires en cours :\n${histoires.map((h) => `- ${h.titre} : ${h.resume} (${h.qui.map(nomDe).join(', ')})`).join('\n')}` : '',
+    `En ${langueIA()}, 6 à 10 répliques très courtes (une bulle chacune, 20 mots au plus) qui s'enchaînent vraiment : on se répond, on rebondit, on taquine. Ça part souvent de la pluie et du beau temps, puis ça glisse : potins et rumeurs sur un collègue absent, confidences, jalousie, complicité, flirt, petite dispute ou réconciliation. Fais avancer une histoire en cours qui les concerne, sinon lances-en une. Si quelqu'un connaît une rumeur sur une personne présente, il peut la lui répéter (et c'est le drame). Fidèle aux personnalités, relations et souvenirs. Drôle et léger : pas d'insulte, rien de sexuel, pas de méchanceté gratuite, rien d'inventé sur le vrai travail.`,
+    `Indique ce que chacun retient, ce qui change entre eux (delta de -3 à 3 et le lien qui en résulte, souvent rien), les rumeurs lancées, les rumeurs répétées à quelqu'un, et l'histoire que la scène fait avancer.`,
+  ].filter(Boolean).join('\n\n');
+}
+
+// Démo (sans compte) : des scènes toutes prêtes, avec rumeurs et liens, pour voir le jeu sans tokens.
+function sceneSimulee(qui) {
+  const [A, B] = qui;
+  const absents = connus().filter((c) => !qui.some((p) => p.cle === c));
+  const X = absents.length ? absents[Math.floor(Math.random() * absents.length)] : null;
+  const scenes = [
+    () => ({
+      lignes: [[A, t('Il fait un temps de chien dehors, non ?')], [B, t('Parfait pour rester au chaud avec un café.')], [A, X ? t('Tu as vu {x} ce matin ? Trois cafés avant 9 h.', { x: nomDe(X) }) : t('Le café est encore tombé en panne.')], [B, t('Non ! Il paraît que c’est pour tenir le rythme du DG.')], [A, t('Ou pour impressionner quelqu’un…')], [B, t('Tais-toi, tu vas faire des jaloux.')], [A, t('Moi ? Jamais. Enfin… peut-être.')]],
+      rumeur: X ? { par: A.cle, sujet: X, texte: t('{x} boit trois cafés avant 9 h pour impressionner quelqu’un', { x: nomDe(X) }) } : null,
+      relations: [[A, B, 1, 'complicité', t('on se raconte tout')]],
+      histoire: { titre: t('Les cafés du matin'), resume: t('{a} et {b} se demandent pour qui on fait tant d’efforts.', { a: A.nom, b: B.nom }) },
+    }),
+    () => ({
+      lignes: [[A, t('Tu as dormi ? Tu as une tête de lundi.')], [B, t('Merci, toi aussi tu es radieux.')], [A, t('Je plaisante ! Tu as bonne mine, en vrai.')], [B, t('…Tu dis ça à tout le monde.')], [A, t('Non. Juste à toi.')], [B, t('Bon. On en reparle à la pause ?')], [A, t('Avec plaisir.')]],
+      relations: [[A, B, 2, 'attirance', t('il y a quelque chose')], [B, A, 1, 'attirance', t('troublé(e)')]],
+      histoire: { titre: t('{a} et {b}, plus que collègues ?', { a: A.nom, b: B.nom }), resume: t('Un compliment de trop, un rendez-vous à la pause.') },
+    }),
+    () => ({
+      lignes: [[A, t('C’est toi qui as fini mes biscuits ?')], [B, t('Quels biscuits ?')], [A, t('Ceux avec mon prénom écrit dessus.')], [B, t('Ah. Ceux-là. Ils étaient très bons.')], [A, t('Incroyable. On ne peut faire confiance à personne ici.')], [B, t('Je t’en rachète demain, promis.')], [A, t('Double ration. Et des excuses publiques.')]],
+      relations: [[A, B, -1, 'rivalité', t('a mangé mes biscuits')]],
+      histoire: { titre: t('L’affaire des biscuits'), resume: t('{b} a mangé les biscuits de {a}, la guerre est déclarée.', { a: A.nom, b: B.nom }) },
+    }),
+    () => ({
+      lignes: [[A, t('Tu sais ce qu’on raconte sur toi ?')], [B, t('Non… dis-moi.')], [A, t('Que tu chantes sous la douche du QG.')], [B, t('Il n’y a pas de douche au QG !')], [A, t('Justement. C’est ça le mystère.')], [B, t('Qui a lancé ça ?')], [A, t('Je ne balance pas…')]],
+      rumeur: { par: X || A.cle, sujet: B.cle, texte: t('{b} chanterait sous la douche du QG', { b: B.nom }) },
+      revelation: true,
+      relations: [],
+      histoire: { titre: t('La rumeur de la douche'), resume: t('{b} découvre ce qu’on dit dans son dos.', { b: B.nom }) },
+    }),
+  ];
+  const sc = scenes[Math.floor(Math.random() * scenes.length)]();
+  return {
+    lignes: sc.lignes.map(([p, texte]) => ({ nom: p.nom, texte })),
+    temoin: { nom: '', texte: '' },
+    souvenirs: [{ nom: B.nom, texte: sc.histoire.resume }],
+    relations: sc.relations.map(([de, vers, delta, lien, note]) => ({ de: de.nom, vers: vers.nom, delta, lien, note })),
+    rumeurs: sc.rumeur ? [{ par: nomDe(sc.rumeur.par), sujet: nomDe(sc.rumeur.sujet), texte: sc.rumeur.texte }] : [],
+    revelations: sc.revelation ? [{ par: A.nom, a: B.nom, sujet: B.nom }] : [],
+    histoire: sc.histoire,
+  };
+}
+
+// Une scène : choix des personnages, écriture (modèle, ou toute prête en démo), mémoire, rumeurs, histoires.
+export async function bavarder({ force = false } = {}) {
+  const mj = reglagesMiniJeu();
+  if (!force && (!mj.actif || !mj.bavardages || nbClients() === 0)) return null;
+  const choix = choisirScene();
+  if (!choix) return null;
+  const dejaPris = occupes(); // ceux qui jouent déjà une autre scène ne font pas les témoins
+  const id = ++numScene;
+  scenes.set(id, { qui: new Set(choix.qui.map((p) => p.cle)), etage: choix.etage, fin: 0 });
   try {
-    r = demo
-      ? { lignes: [{ nom: qui[0].nom, texte: t('Tu as vu le nouveau tableau blanc ?') }, { nom: qui[1].nom, texte: t('Oui, le DG l’a encore rempli de flèches…') }], souvenirs: [], relations: [] }
-      : await appeler(prompt, SCHEMA_BAVARDAGE, mj.modeleBavardage, 'minijeu');
+    const temoins = mj.ecoute ? choix.tous.filter((p) => !choix.qui.includes(p) && !dejaPris.has(p.cle)) : [];
+    const r = demo ? sceneSimulee(choix.qui) : await appeler(promptScene(choix, temoins), SCHEMA_BAVARDAGE, mj.modeleBavardage, 'minijeu');
+    const cles = new Map();
+    for (const c of connus()) cles.set(c.toLowerCase(), c);
+    for (const p of [...presents().values(), ...choix.qui]) cles.set(p.nom.toLowerCase(), p.cle);
+    cles.set(nomJoy().toLowerCase(), '@joy');
+    const cleDe = (nom) => cles.get(String(nom || '').trim().toLowerCase()) || null;
+    const parNom = new Map(choix.qui.map((p) => [p.nom.toLowerCase(), p]));
+    const lignes = (r.lignes || []).map((l) => ({ p: parNom.get(String(l.nom).toLowerCase()), texte: String(l.texte || '').slice(0, 200) })).filter((l) => l.p && l.texte).slice(0, 12);
+    if (!lignes.length) return null;
+    const temoin = r.temoin && r.temoin.texte ? temoins.find((p) => p.nom.toLowerCase() === String(r.temoin.nom).toLowerCase()) : null;
+    if (temoin) lignes.push({ p: temoin, texte: String(r.temoin.texte).slice(0, 200) });
+    for (const s of r.souvenirs || []) {
+      const c = cleDe(s.nom);
+      if (c && s.texte) souvenir(c, s.texte, 'bavardage');
+    }
+    for (const rel of r.relations || []) {
+      const de = cleDe(rel.de);
+      const vers = cleDe(rel.vers);
+      if (de && vers) relation(de, vers, rel.delta, rel.note, rel.lien);
+    }
+    // rumeurs : connues de toute la pièce ; la personne visée, si elle est là, l'a entendue
+    const piece = new Set([...choix.qui, ...temoins].map((p) => p.cle));
+    for (const ru of r.rumeurs || []) {
+      const par = cleDe(ru.par);
+      const sujet = cleDe(ru.sujet);
+      if (!par || !sujet || !ru.texte) continue;
+      intrigues.rumeurs.push({ id: `R${Date.now().toString(36)}${(++compteur).toString(36)}`, t: Date.now(), par, sujet, texte: String(ru.texte).slice(0, 200), connaisseurs: [...piece] });
+      if (piece.has(sujet) && sujet !== par) {
+        souvenir(sujet, t('J’ai entendu {par} raconter sur moi : « {texte} »', { par: nomDe(par), texte: String(ru.texte).slice(0, 120) }), 'entendu');
+        relation(sujet, par, -2, t('raconte des choses sur moi'), 'méfiance');
+      }
+    }
+    // rumeurs répétées : la personne mise au courant ; si c'est la personne visée, elle en veut à qui l'a lancée
+    for (const rv of r.revelations || []) {
+      const a = cleDe(rv.a);
+      const sujet = cleDe(rv.sujet);
+      if (!a || !sujet) continue;
+      for (const ru of intrigues.rumeurs.filter((x) => x.sujet === sujet)) {
+        if (!ru.connaisseurs.includes(a)) ru.connaisseurs.push(a);
+        if (a === sujet && ru.par !== a) {
+          souvenir(a, t('{qui} m’a répété ce que {par} raconte sur moi : « {texte} »', { qui: nomDe(cleDe(rv.par) || rv.par), par: nomDe(ru.par), texte: ru.texte.slice(0, 120) }), 'bavardage');
+          relation(a, ru.par, -2, t('raconte des choses sur moi'), 'méfiance');
+        }
+      }
+    }
+    if (intrigues.rumeurs.length > MAX_RUMEURS) intrigues.rumeurs.splice(0, intrigues.rumeurs.length - MAX_RUMEURS);
+    // l'histoire en cours (même titre : on la poursuit)
+    const h = r.histoire;
+    if (h && h.titre && h.titre.trim()) {
+      const titre = h.titre.trim().slice(0, 80);
+      const qui = choix.qui.map((p) => p.cle);
+      const ex = intrigues.histoires.find((x) => x.titre.toLowerCase() === titre.toLowerCase());
+      if (ex) {
+        ex.resume = String(h.resume || ex.resume).slice(0, 240);
+        ex.qui = [...new Set([...ex.qui, ...qui])];
+        ex.t = Date.now();
+        ex.episodes = (ex.episodes || 1) + 1;
+        intrigues.histoires = [...intrigues.histoires.filter((x) => x !== ex), ex];
+      } else intrigues.histoires.push({ titre, resume: String(h.resume || '').slice(0, 240), qui, t: Date.now(), episodes: 1 });
+      if (intrigues.histoires.length > MAX_HISTOIRES) intrigues.histoires.splice(0, intrigues.histoires.length - MAX_HISTOIRES);
+    }
+    // les autres de la pièce ont entendu
+    if (mj.ecoute) {
+      const extrait = lignes.slice(0, 2).map((l) => `${l.p.nom} : « ${l.texte.slice(0, 70)} »`).join(' ');
+      for (const v of temoins) if (v !== temoin) souvenir(v.cle, t('J’ai entendu {noms} papoter. {extrait}', { noms: choix.qui.map((p) => p.nom).join(' & '), extrait }), 'entendu');
+    }
+    sauver();
+    sauverIntrigues();
+    publier();
+    // la scène se joue dans le site : ses personnages restent pris jusqu'à la fin
+    const duree = lignes.reduce((n, l) => n + Math.min(8000, 2400 + l.texte.length * 40) * 0.8, 6000);
+    scenes.get(id).fin = Date.now() + duree;
+    const ev = { etage: choix.etage, scene: id, lignes: lignes.map((l) => ({ cle: l.p.cle, nom: l.p.nom, tache: l.p.tache, agent: l.p.agent, texte: l.texte, temoin: l.p === temoin || undefined })) };
+    emettre('bavardage', ev);
+    return ev;
   } catch (e) {
     console.error('bavardage', e.message);
     return null;
+  } finally {
+    const sc = scenes.get(id);
+    if (sc && !sc.fin) scenes.delete(id);
   }
-  const parNom = new Map(qui.map((p) => [p.nom.toLowerCase(), p]));
-  const lignes = (r.lignes || []).map((l) => ({ p: parNom.get(String(l.nom).toLowerCase()), texte: String(l.texte || '').slice(0, 200) })).filter((l) => l.p && l.texte).slice(0, 6);
-  if (!lignes.length) return null;
-  for (const s of r.souvenirs || []) {
-    const p = parNom.get(String(s.nom).toLowerCase());
-    if (p && s.texte) souvenir(p.cle, s.texte, 'bavardage');
-  }
-  for (const rel of r.relations || []) {
-    const de = parNom.get(String(rel.de).toLowerCase());
-    const vers = parNom.get(String(rel.vers).toLowerCase());
-    if (de && vers) relation(de.cle, vers.cle, rel.delta, rel.note);
-  }
-  sauver();
-  publier();
-  const ev = { etage: etageId, lignes: lignes.map((l) => ({ cle: l.p.cle, nom: l.p.nom, tache: l.p.tache, agent: l.p.agent, texte: l.texte })) };
-  emettre('bavardage', ev);
-  return ev;
 }
 
+// Rythme : une scène toutes les N minutes (0,5 = 30 s), ou « en direct » (0) : dès qu'une scène se
+// termine, une autre commence, jusqu'à 3 en même temps. Seulement quand le QG est ouvert.
+let derniereScene = Date.now();
+let prochainDirect = 0;
 export function demarrerBavardages() {
-  setInterval(() => bavarder().catch(() => null), 60000).unref();
+  setInterval(() => {
+    const mj = reglagesMiniJeu();
+    if (!mj.actif || !mj.bavardages || nbClients() === 0) return;
+    const now = Date.now();
+    occupes();
+    if (scenes.size >= MAX_SCENES) return;
+    // démo : au moins une scène par minute, pour voir le jeu vivre
+    const minutes = demo && mj.bavardagesMinutes > 1 ? 1 : mj.bavardagesMinutes;
+    if (minutes === 0) {
+      if (now < prochainDirect) return;
+      prochainDirect = now + 6000 + Math.random() * 6000;
+    } else if (now - derniereScene < minutes * 60000) return;
+    derniereScene = now;
+    bavarder().catch(() => null);
+  }, 5000).unref();
 }

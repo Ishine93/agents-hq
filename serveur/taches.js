@@ -2,6 +2,7 @@
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import { message, commande, pensee, modification } from './bus.js';
+import { skillsSession, optionsSkills } from './skills.js';
 import { dossierPieces, sauverCapture, piecePublique } from './pieces.js';
 import { serveurQg, OUTILS_QG } from './outils-qg.js';
 import { REGLAGES, directive, etage as trouverEtage } from './config.js';
@@ -115,19 +116,22 @@ function optionsProduction(t, dossier, ctx, captures) {
   // complètes à chaque appel (mesuré : ~470 000 tokens par appel sur un compte Team). Une tâche Haiku s'en passe.
   const mcp = optionsMcp(t.etage, dossier.compte, t.x.profil.startsWith('lecture') || /haiku/i.test(t.modele || ''));
   const repPieces = dossierPieces(dossier.id);
+  // skills de l'agent : « toujours » dans son prompt, « disponibles » chargés seulement s'il en a besoin
+  const sk = optionsSkills(skillsSession({ role: 'agent', dossier, tache: t, etage: t.etage }), { projet: e.projet });
   return {
     model: t.modele,
     effort: t.effort,
     cwd: e.projet,
     additionalDirectories: [...(e.dossiers || []).filter((d) => d !== e.projet), ...(fs.existsSync(repPieces) ? [repPieces] : [])],
     ...profil,
-    allowedTools: [...profil.allowedTools, ...mcp.autorises, ...OUTILS_QG],
+    ...(sk.plugins ? { plugins: sk.plugins, skills: sk.skills, tools: Array.isArray(profil.tools) ? [...profil.tools, 'Skill'] : profil.tools } : {}),
+    allowedTools: [...profil.allowedTools, ...mcp.autorises, ...OUTILS_QG, ...(sk.plugins ? ['Skill'] : [])],
     disallowedTools: [...profil.disallowedTools, ...mcp.interdits],
     canUseTool: ctx.canUseTool,
     settingSources: ['project'],
     mcpServers: { ...mcp.mcpServers, qg: serveurQg(t, dossier, { captures, signal: ctx.abortController?.signal }) },
     strictMcpConfig: mcp.strictMcpConfig,
-    systemPrompt: { type: 'preset', preset: 'claude_code', append: directive('tache') },
+    systemPrompt: { type: 'preset', preset: 'claude_code', append: directive('tache') + sk.append },
     outputFormat: { type: 'json_schema', schema: SCHEMA_RESULTAT },
     maxTurns: REGLAGES.tache.maxTurnsDefaut,
     abortController: ctx.abortController,

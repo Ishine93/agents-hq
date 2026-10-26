@@ -27,14 +27,16 @@ const FICHIERS_RACINE = [
 const DOSSIERS = [
   ['serveur', (f) => /\.(js|py)$/.test(f)],
   ['serveur/i18n', (f) => /\.json$/.test(f)],
-  ['web', (f) => /\.(js|css|html)$/.test(f) && f !== 'mock.js'],
+  ['web', (f) => /\.(js|css|html|png)$/.test(f) && f !== 'mock.js'],
   ['web/i18n', (f) => /\.js$/.test(f)],
   ['config/defauts', () => true],
   ['config/defauts/fiches', () => true],
   ['outils', (f) => /\.(ps1|mjs)$/.test(f)],
   ['docs', (f) => /\.md$/.test(f)],
   // fenêtre « application » (Electron, installé à la demande dans runtime/navigateur)
-  ['app', (f) => /\.(cjs|json)$/.test(f)],
+  ['app', (f) => /\.(cjs|json|ico)$/.test(f)],
+  // images du README
+  ['docs/images', (f) => /\.(png|jpg)$/.test(f)],
 ];
 const DEMO = ['bac-a-sable/projet-demo/README.md', 'bac-a-sable/projet-demo/package.json', 'bac-a-sable/projet-demo/src/chemin.js'];
 
@@ -93,6 +95,7 @@ if (manquants.length) {
 const problemes = [];
 for (const rel of fichiers) {
   const cible = copier(rel, DEPOT);
+  if (/\.(png|jpg|ico)$/.test(rel)) continue; // images : pas de texte à contrôler
   const texte = fs.readFileSync(cible, 'utf8');
   for (const [re, quoi] of SECRETS) if (re.test(texte)) problemes.push(`${rel} : ${quoi} (${texte.match(re)[0].slice(0, 40)})`);
   for (const m of personnels) if (texte.toLowerCase().includes(m.toLowerCase())) problemes.push(`${rel} : motif personnel « ${m} »`);

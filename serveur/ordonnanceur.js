@@ -13,6 +13,7 @@ import { sauverPiecesUtilisateur, piecePublique } from './pieces.js';
 import { notifier, notificationResolue } from './notifications.js';
 import { enregistrerReemploi, surLimitesLues, oublierDossier as oublierDossierConso, quotaFable, lireLimites } from './conso.js';
 import { demanderDecision } from './decisions.js';
+import { skillsAttribuables } from './skills.js';
 import { recruter, reembaucher, occuper, liberer, agent as agentEquipe, tirerPrenom, libererPrenom } from './equipe.js';
 import { t as tr } from './i18n.js';
 
@@ -54,7 +55,9 @@ function tableau(d) {
 
 // ---------------------------------------------------------------- dossiers
 
-export function creerDossier({ texte, etageAffiche, compte, dg = null, pieces = [] }) {
+// skills : choisis à l'envoi ([{id, pour: 'dg' | 'tous' | 'demande'}]) ; skillsExclus : skills de partout à ne pas utiliser ici.
+// scenario : grand scénario de la démo (simulation), choisi par la démo elle-même
+export function creerDossier({ texte, etageAffiche, compte, dg = null, pieces = [], skills = [], skillsExclus = [], scenario = null }) {
   const e = trouverEtage(etageAffiche);
   const d = {
     id: `D${++compteurDossiers}`,
@@ -68,7 +71,9 @@ export function creerDossier({ texte, etageAffiche, compte, dg = null, pieces = 
     synthese: null,
     creeLe: Date.now(),
     etageAffiche: etageAffiche || 'hall',
-    x: { dgSession: null, essaisPlan: 0, syntheseEnCours: false, pieces: [], complementsEnAttente: [] },
+    skills,
+    skillsExclus,
+    x: { dgSession: null, essaisPlan: 0, syntheseEnCours: false, pieces: [], complementsEnAttente: [], ...(scenario ? { scenario } : {}) },
   };
   majDossier(d);
   const jointes = joindre(d, pieces);
@@ -138,6 +143,14 @@ async function planifierDossier(d, opts) {
     return;
   }
   const erreurs = validerTaches(p.taches, []);
+  // demande qui n'était qu'une création de skill : le DG l'a faite lui-même, pas de tâche, le dossier est fini
+  if (!p.taches.length && d.x.skillsCrees?.length && !erreurs.length) {
+    d.etat = 'termine';
+    d.synthese = p.message || tr('Skill créé.');
+    majDossier(d);
+    message(d.id, 'dg', d.synthese);
+    return;
+  }
   if (!p.taches.length) erreurs.push('Le plan est vide.');
   // le plan affiché montre la vérification qui aura vraiment lieu (IA si la validation par toi est coupée)
   for (const x of p.taches) x.verification = verificationEffective(x.verification);
@@ -200,8 +213,9 @@ function verificationEffective(v) {
 
 function ajouterTaches(d, liste) {
   const nouvelles = [];
+  const attribuables = new Set(skillsAttribuables(d));
   for (const p0 of liste) {
-    const p = { ...p0, verification: verificationEffective(p0.verification) };
+    const p = { ...p0, verification: verificationEffective(p0.verification), skills: (p0.skills || []).filter((id) => attribuables.has(id)) };
     const t = {
       id: `${d.id}-${p.ref}`,
       dossier: d.id,
@@ -242,7 +256,9 @@ function ajouterTaches(d, liste) {
         gen: 0,
         enAttenteDg: false,
         agentDemande: p.agent || '',
+        skills: p.skills,
       },
+      skills: p.skills, // affichés dans la fiche
       agent: null, // id de l'agent qui porte la tâche (réserve : A1, A2…)
       reembauche: false,
       // Prénom affiché dès le plan : celui de l'agent de la réserve demandé, sinon celui de la future recrue.

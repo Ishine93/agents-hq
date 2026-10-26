@@ -7,6 +7,7 @@ import { rendreMcp } from './reglages.js';
 import { apparence, spriteAvatar, PALETTE_PEAUX, PALETTE_CHEVEUX, PALETTE_PANTALONS } from './sprites.js';
 import { TERMINAUX } from './etat.js';
 import { md } from './markdown.js';
+import { sectionSkills } from './skills.js';
 
 const SECTIONS = [
   ['general', 'Général'],
@@ -14,6 +15,7 @@ const SECTIONS = [
   ['dossiers', 'Dossiers et étages'],
   ['mcp', 'Connecteurs MCP'],
   ['equipe', 'Équipe et skins'],
+  ['skills', 'Skills'],
   ['bonheur', 'Happiness manager'],
   ['dictee', 'Dictée et notifications'],
   ['apropos', 'À propos'],
@@ -24,6 +26,8 @@ export const TYPES_PROJET = {
 };
 const COIFFURES = 6;
 export const DEPOT_GITHUB = 'https://github.com/Ishine93/agents-hq';
+// Liens entre personnages (mini-jeu) : de quoi suivre les histoires d’un coup d’œil.
+const LIEN_ICONES = { amitié: '🤝', complicité: '😉', attirance: '💘', couple: '💕', rivalité: '⚔️', conflit: '💢', brouille: '🙅', méfiance: '🤨' };
 
 const champ = (attrs) => h('input', { class: 'champ', ...attrs });
 const ligne = (lib, ...contenu) => h('div', { class: 'param-ligne' }, h('label', { class: 'param-lib' }, lib), h('div', { class: 'param-val' }, ...contenu));
@@ -86,7 +90,7 @@ export class Parametres {
       this.enRetard = true;
       return;
     }
-    if (this.section === 'bonheur' || this.section === 'equipe') return; // éditeurs locaux : pas de redessin automatique
+    if (this.section === 'bonheur' || this.section === 'equipe' || this.section === 'skills') return; // éditeurs locaux : pas de redessin automatique
     this.rendre();
   }
 
@@ -96,7 +100,7 @@ export class Parametres {
     this.m.titre(t('Réglages'));
     this.nav.replaceChildren(...SECTIONS.map(([id, lib]) => h('button', { type: 'button', class: id === this.section ? 'actif' : '', on: { click: () => this.aller(id) } }, t(lib))));
     const haut = this.contenu.scrollTop;
-    const fn = { general: this.general, comptes: this.comptes, dossiers: this.dossiers, mcp: this.mcp, equipe: this.equipe, bonheur: this.bonheur, dictee: this.dictee, apropos: this.apropos }[this.section];
+    const fn = { general: this.general, comptes: this.comptes, dossiers: this.dossiers, mcp: this.mcp, equipe: this.equipe, skills: this.skills, bonheur: this.bonheur, dictee: this.dictee, apropos: this.apropos }[this.section];
     this.contenu.replaceChildren(h('h3', {}, t(SECTIONS.find((s) => s[0] === this.section)[1])), ...[].concat(fn.call(this)).filter(Boolean));
     this.contenu.scrollTop = haut;
     if (this.defiler) {
@@ -433,8 +437,8 @@ export class Parametres {
     const caseMj = (k, libelle) => h('label', { class: 'param-case' },
       h('input', { type: 'checkbox', checked: mj[k] !== false, on: { change: (e) => regler(k, e.target.checked) } }), ' ', libelle);
     const frequence = h('select', { class: 'champ', disabled: mj.bavardages === false ? true : null, on: { change: (e) => regler('bavardagesMinutes', Number(e.target.value)) } },
-      [2, 5, 10, 15, 30, 60, 120].map((n) => h('option', { value: String(n), selected: Number(mj.bavardagesMinutes || 10) === n ? true : null },
-        n < 60 ? t('toutes les {n} min', { n }) : n === 60 ? t('toutes les heures') : t('toutes les 2 h'))));
+      [0, 0.5, 1, 2, 5, 10, 15, 30, 60, 120].map((n) => h('option', { value: String(n), selected: Number(mj.bavardagesMinutes ?? 10) === n ? true : null },
+        n === 0 ? t('en direct (en continu)') : n === 0.5 ? t('toutes les 30 s') : n === 1 ? t('toutes les minutes') : n < 60 ? t('toutes les {n} min', { n }) : n === 60 ? t('toutes les heures') : t('toutes les 2 h'))));
     const modele = (k, defaut) => h('select', { class: 'champ', on: { change: (e) => regler(k, e.target.value) } },
       [['haiku', 'Haiku (' + t('le moins cher') + ')'], ['sonnet', 'Sonnet'], ['opus', 'Opus (' + t('le plus cher') + ')']].map(([v, l]) => h('option', { value: v, selected: (mj[k] || defaut) === v ? true : null }, l)));
     return h('div', { class: 'bloc param-minijeu' },
@@ -444,7 +448,8 @@ export class Parametres {
       mj.actif === false ? null : [
         caseMj('ecoute', t('Les collègues présents dans la pièce entendent les discussions')),
         h('div', { class: 'param-ligne' }, caseMj('bavardages', t('Bavardages écrits par l’IA entre collègues')), frequence),
-        h('small', { class: 'meta' }, t('Seulement quand le QG est ouvert et que deux collègues au moins sont au même étage. Sinon, les bavardages tout prêts (gratuits) continuent.')),
+        h('small', { class: 'meta' }, t('Façon télé-réalité : potins, rumeurs qui circulent (et finissent par revenir aux oreilles de l’intéressé), amitiés, amourettes, brouilles, histoires qui se suivent. Plusieurs scènes peuvent se jouer en même temps. Seulement quand le QG est ouvert et que deux collègues au moins sont au même étage ; sinon, les bavardages tout prêts (gratuits) continuent.')),
+        Number(mj.bavardagesMinutes) <= 0.5 && mj.bavardages !== false ? h('small', { class: 'meta attention' }, t('En direct ou toutes les 30 s, les scènes s’enchaînent (jusqu’à 3 en même temps) : quelques milliers de tokens par scène avec Haiku, à surveiller dans ⚡ Consommation.')) : null,
         h('div', { class: 'param-ligne' }, h('span', {}, t('Modèle des discussions')), modele('modeleDiscussion', 'sonnet'), h('span', {}, t('Modèle des bavardages')), modele('modeleBavardage', 'haiku')),
         h('div', { class: 'boutons' },
           h('button', { class: 'petit', type: 'button', on: { click: async () => {
@@ -461,7 +466,22 @@ export class Parametres {
             await this.poster('/api/personnages/oublier', { tout: true }, t('Mémoires effacées.'));
             this.rendre();
           } } }, t('Effacer toutes les mémoires'))),
+        this.blocIntrigues(),
       ]);
+  }
+
+  // Les intrigues du QG (mini-jeu) : histoires en cours et rumeurs qui circulent.
+  blocIntrigues() {
+    const S = this.store;
+    const I = (S.miniJeu && S.miniJeu.intrigues) || { rumeurs: [], histoires: [] };
+    const nomDe = (k) => (k === '@dg' ? S.nomDg() : k === '@joy' ? S.nomJoy() : k);
+    if (!I.histoires.length && !I.rumeurs.length) return h('p', { class: 'meta' }, '📺 ' + t('Pas encore d’intrigue : elles naîtront des bavardages.'));
+    return h('details', { class: 'param-intrigues', open: true },
+      h('summary', {}, '📺 ' + t('Les intrigues du QG : {h} histoire(s), {r} rumeur(s)', { h: I.histoires.length, r: I.rumeurs.length })),
+      I.histoires.length ? h('ul', { class: 'mem-souvenirs' }, I.histoires.slice().reverse().map((x) => h('li', {},
+        h('b', {}, x.titre), ' — ', x.resume, ' ', h('span', { class: 'meta' }, '(' + x.qui.map(nomDe).join(', ') + (x.episodes > 1 ? ' · ' + t('{n} épisodes', { n: x.episodes }) : '') + ')')))) : null,
+      I.rumeurs.length ? h('ul', { class: 'mem-souvenirs' }, I.rumeurs.slice(-8).reverse().map((x) => h('li', {},
+        '🗣 « ', x.texte, ' » ', h('span', { class: 'meta' }, t('lancée par {par}, connue de {n} personne(s)', { par: nomDe(x.par), n: x.connaisseurs.length }) + ' · ' + (x.connaisseurs.includes(x.sujet) ? t('{qui} est au courant', { qui: nomDe(x.sujet) }) : t('{qui} ne sait pas encore', { qui: nomDe(x.sujet) })))))) : null);
   }
 
   // Personnalité et mémoire d'un personnage, dans sa carte (mini-jeu).
@@ -494,7 +514,7 @@ export class Parametres {
         h('summary', {}, t('Mémoire : {s} souvenir(s), {r} relation(s), {d} réplique(s)', { s: mem.souvenirs.length, r: relations.length, d: mem.dialogue.length })),
         relations.length ? h('ul', { class: 'mem-relations' }, relations.map(([k, r]) => h('li', {},
           h('span', { class: 'mem-affinite ' + (r.affinite > 0 ? 'plus' : r.affinite < 0 ? 'moins' : '') }, (r.affinite > 0 ? '+' : '') + r.affinite),
-          ' ', h('b', {}, nomDe(k)), r.note ? ' — ' + r.note : '',
+          ' ', h('b', {}, nomDe(k)), r.lien ? h('span', { class: 'mem-lien' }, ' ' + (LIEN_ICONES[r.lien] || '') + ' ' + t(r.lien)) : null, r.note ? ' — ' + r.note : '',
           h('button', { class: 'mem-x', type: 'button', title: t('Oublier ce que {nom} pense de {autre}', { nom: lib, autre: nomDe(k) }), on: { click: () => oublier({ relation: k }) } }, '×')))) : null,
         mem.souvenirs.length ? h('ul', { class: 'mem-souvenirs' }, mem.souvenirs.slice().reverse().map((x) => h('li', {},
           h('span', { class: 'mem-source' }, x.source === 'entendu' ? '👂' : x.source === 'bavardage' ? '💬' : '🗨'), ' ', x.texte,
@@ -594,6 +614,11 @@ export class Parametres {
     const bp = this.blocPersonnage(id, lib);
     if (bp) carte.append(bp);
     return carte;
+  }
+
+  // ---------------------------------------------------------------- skills
+  skills() {
+    return sectionSkills(this);
   }
 
   // ---------------------------------------------------------------- happiness manager
@@ -743,6 +768,12 @@ export class Parametres {
         h('dt', {}, t('Version')), h('dd', {}, R.version || '—'),
         h('dt', {}, t('Dossier du QG')), h('dd', {}, h('code', {}, R.qg || '—')),
         h('dt', {}, t('Code source')), h('dd', {}, h('a', { href: DEPOT_GITHUB, target: '_blank', rel: 'noopener noreferrer' }, DEPOT_GITHUB))),
+      h('h4', {}, t('Démo')),
+      R.demo
+        ? h('div', {}, h('p', {}, t('Tu es dans la démo : un immeuble fictif, des agents simulés, aucun token consommé. Ton vrai QG tourne à côté, dans son autre fenêtre.')),
+          h('div', { class: 'boutons' }, h('button', { class: 'petit', type: 'button', on: { click: () => this.quitterDemo() } }, t('Quitter la démo'))))
+        : h('div', {}, h('p', {}, t('Découvre le QG sans rien consommer : un immeuble fictif où une douzaine d’agents simulés travaillent en parallèle, se réunissent et se passent le relais. La démo s’ouvre dans sa propre fenêtre, sur un autre port ; ton QG continue de tourner normalement.')),
+          h('div', { class: 'boutons' }, h('button', { class: 'petit ok', type: 'button', on: { click: (e) => this.lancerDemo(e.currentTarget) } }, t('Lancer la démo')))),
       h('h4', {}, t('Mises à jour')),
       h('label', { class: 'param-case' },
         h('input', { type: 'checkbox', checked: R.miseAJourAuto !== false, on: { change: (e) => this.reglage({ miseAJourAuto: e.target.checked }, t('Enregistré.')) } }),
@@ -751,6 +782,28 @@ export class Parametres {
       h('p', { class: 'meta' }, t('Tout reste sur ce PC : tes réglages (dossier config), l’historique des dossiers (dossier dossiers) et les données de travail (dossier runtime). Le QG n’écoute que ton ordinateur (127.0.0.1) et ne partage rien.')),
       h('div', { class: 'boutons' }, h('button', { class: 'petit', type: 'button', on: { click: () => this.ui.lecteur.ouvrir(R.qg + '\\README.md') } }, t('Lire le mode d’emploi'))),
     ];
+  }
+
+  async lancerDemo(bouton) {
+    bouton.disabled = true;
+    try {
+      const r = await api('/api/demo/lancer', {});
+      this.ui.toast('info', r.deja ? t('La démo est déjà ouverte : elle repasse devant.') : t('La démo démarre dans une nouvelle fenêtre (quelques secondes).'));
+    } catch (e) {
+      this.ui.toast('erreur', e.message);
+    }
+    setTimeout(() => (bouton.disabled = false), 5000);
+  }
+
+  async quitterDemo() {
+    if (!window.confirm(t('Quitter la démo ? Sa fenêtre se ferme ; ton QG n’est pas touché.'))) return;
+    try {
+      await api('/api/demo/quitter', {});
+    } catch {
+      /* déjà arrêtée */
+    }
+    document.body.replaceChildren(h('div', { class: 'demo-fin' }, h('p', {}, t('Démo fermée. Tu peux fermer cette fenêtre.'))));
+    setTimeout(() => window.close(), 400);
   }
 
   // Vérifier la dernière version publiée et, s'il y en a une plus récente, la lancer : le QG se ferme

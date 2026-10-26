@@ -4,7 +4,9 @@
 // pour le reste, on ouvre le site dans une fenêtre « application » de ton navigateur habituel, avec ta
 // session (cookies, comptes connectés).
 import { spawn, execFile } from 'node:child_process';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
+import net from 'node:net';
 import path from 'node:path';
 import { RACINE, NODE_DIR } from './config.js';
 import { t } from './i18n.js';
@@ -15,6 +17,20 @@ export const VERSION_ELECTRON = '44.7.0';
 const DOSSIER_APP = path.join(RACINE, 'runtime', 'navigateur');
 const ELECTRON = path.join(DOSSIER_APP, 'node_modules', 'electron', 'dist', 'electron.exe');
 export const appInstallee = () => fs.existsSync(ELECTRON);
+// Lancé depuis une application Electron (VS Code, Claude…), le QG peut hériter de ELECTRON_RUN_AS_NODE :
+// présente, même vide, elle ferait tourner notre Electron comme un simple Node.
+function lancerElectron(args) {
+  const env = { ...process.env };
+  delete env.ELECTRON_RUN_AS_NODE;
+  let sortie = 'ignore';
+  try {
+    sortie = fs.openSync(path.join(DOSSIER_APP, 'electron.log'), 'w');
+  } catch {
+    /* journal facultatif */
+  }
+  spawn(ELECTRON, [path.join(RACINE, 'app'), ...args], { detached: true, stdio: ['ignore', sortie, sortie], cwd: RACINE, env, windowsHide: false }).unref();
+  if (typeof sortie === 'number') fs.closeSync(sortie);
+}
 let installation = null; // { etat: 'en_cours' | 'ok' | 'erreur', texte, debut }
 export const etatApp = () => ({ installee: appInstallee(), version: VERSION_ELECTRON, installation });
 
@@ -55,8 +71,51 @@ export function installerApp(publier) {
 // Ouvre le QG dans sa fenêtre application (si elle est déjà ouverte, elle passe devant).
 export function ouvrirApp(lien) {
   if (!appInstallee()) return false;
-  spawn(ELECTRON, [path.join(RACINE, 'app'), `--qg-url=${lien}`], { detached: true, stdio: 'ignore', cwd: RACINE, env: { ...process.env, ELECTRON_RUN_AS_NODE: '' } }).unref();
+  lancerElectron([`--qg-url=${lien}`]);
   return true;
+}
+
+// ---------- moteur du navigateur complet, quand le QG est affiché dans un navigateur ordinaire ----------
+// Les pages tournent dans Electron, hors écran (app/moteur.cjs) ; le site du QG s'y connecte directement
+// (WebSocket sur 127.0.0.1, avec une clé que seul un site muni du jeton du QG obtient).
+let moteur = null; // { port, cle }
+let demarrageMoteur = null;
+const portLibre = () =>
+  new Promise((ok, ko) => {
+    const s = net.createServer();
+    s.unref();
+    s.on('error', ko);
+    s.listen(0, '127.0.0.1', () => {
+      const { port } = s.address();
+      s.close(() => ok(port));
+    });
+  });
+async function moteurRepond(m) {
+  try {
+    const r = await fetch(`http://127.0.0.1:${m.port}/etat?cle=${m.cle}`, { signal: AbortSignal.timeout(1500) });
+    return r.ok;
+  } catch {
+    return false;
+  }
+}
+export async function moteurActif() {
+  if (moteur && !(await moteurRepond(moteur))) moteur = null;
+  return moteur;
+}
+export function demarrerMoteur(portQg) {
+  if (demarrageMoteur) return demarrageMoteur;
+  demarrageMoteur = (async () => {
+    if (await moteurActif()) return moteur;
+    if (!appInstallee()) throw new Error(t('Le navigateur complet n’est pas encore installé.'));
+    const m = { port: await portLibre(), cle: crypto.randomBytes(24).toString('hex') };
+    lancerElectron([`--qg-moteur=${m.port}:${m.cle}:${portQg}`]);
+    for (let i = 0; i < 60; i++) {
+      await new Promise((ok) => setTimeout(ok, 500));
+      if (await moteurRepond(m)) return (moteur = m);
+    }
+    throw new Error(t('Le navigateur complet n’a pas démarré.'));
+  })().finally(() => (demarrageMoteur = null));
+  return demarrageMoteur;
 }
 
 // Adresse tapée → URL (une recherche si ce n'est pas une adresse).
@@ -65,7 +124,7 @@ export function normaliser(saisie) {
   if (!s) return null;
   if (/^https?:\/\//i.test(s)) return s;
   if (/^[\w-]+(\.[\w-]+)+(:\d+)?(\/\S*)?$/.test(s)) return 'https://' + s;
-  return 'https://duckduckgo.com/?q=' + encodeURIComponent(s);
+  return 'https://www.google.com/search?q=' + encodeURIComponent(s);
 }
 
 // Vidéos et directs : le lecteur officiel, qui accepte d'être intégré.
@@ -180,6 +239,20 @@ export async function routesNavigateur(req, res, chemin, { json, url, corps, lie
   if (req.method === 'POST' && chemin === '/api/navigateur/app/ouvrir') {
     if (!ouvrirApp(lien)) return json(res, 409, { erreur: t('Le navigateur complet n’est pas encore installé.') }), true;
     return json(res, 200, { ok: true }), true;
+  }
+  if (chemin === '/api/navigateur/moteur') {
+    if (req.method === 'GET') {
+      const m = await moteurActif();
+      return json(res, 200, { installee: appInstallee(), ...(m ? { port: m.port, cle: m.cle } : {}) }), true;
+    }
+    if (req.method === 'POST') {
+      try {
+        const m = await demarrerMoteur(Number(new URL(lien).port));
+        return json(res, 200, { installee: true, port: m.port, cle: m.cle }), true;
+      } catch (e) {
+        return json(res, 409, { erreur: e.message, installee: appInstallee() }), true;
+      }
+    }
   }
   if (req.method === 'GET' && chemin === '/api/navigateur/ouvrir') {
     const u = normaliser(url.searchParams.get('url'));

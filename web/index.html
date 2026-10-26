@@ -6,7 +6,7 @@
   <title>QG des agents</title>
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="v2.css">
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' shape-rendering='crispEdges'%3E%3Crect x='3' y='2' width='10' height='13' fill='%232f6fde'/%3E%3Crect x='5' y='4' width='2' height='2' fill='%23ffe14d'/%3E%3Crect x='9' y='4' width='2' height='2' fill='%23ffe14d'/%3E%3Crect x='5' y='8' width='2' height='2' fill='%23ffe14d'/%3E%3Crect x='9' y='8' width='2' height='2' fill='%2315151f'/%3E%3Crect x='7' y='12' width='2' height='3' fill='%2315151f'/%3E%3C/svg%3E">
+  <link rel="icon" type="image/png" href="icone.png">
 </head>
 <body>
   <canvas id="scene" data-t-aria="Vue isométrique de l'étage" aria-label="Vue isométrique de l'étage"></canvas>
@@ -19,6 +19,7 @@
     <div class="marque">
       <span class="logo" aria-hidden="true"></span>
       <span class="nom" data-t>QG des agents</span>
+      <span id="badge-demo" class="badge-demo" hidden data-t-title="Démo : agents simulés, aucun token consommé" title="Démo : agents simulés, aucun token consommé" data-t>DÉMO</span>
       <span id="statut" class="statut"></span>
       <label class="choix-langue" data-t-title="Langue de l’interface" title="Langue de l’interface">
         <span aria-hidden="true">🌐</span>
@@ -118,6 +119,7 @@
       <select id="dg-modele" data-t-aria="Modèle du DG pour cette demande" aria-label="Modèle du DG pour cette demande"></select>
       <span class="sep">·</span>
       <select id="dg-effort" data-t-aria="Effort du DG pour cette demande" aria-label="Effort du DG pour cette demande"></select>
+      <button id="btn-skills" class="outil-saisie skills" type="button" data-t-aria="Skills pour ce dossier" aria-label="Skills pour ce dossier">🧩<span class="nb" hidden></span></button>
     </div>
     <div class="envoi" role="group" data-t-aria="Envoi du message" aria-label="Envoi du message">
       <select id="cible-saisie" class="cible-saisie" data-t-aria="Où va le message" aria-label="Où va le message">

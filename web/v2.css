@@ -438,6 +438,22 @@ body.redimensionne, body.redimensionne * { cursor: inherit !important; user-sele
 .nav-bandeau[hidden] { display: none; }
 .nav-bandeau .erreur { color: #ff8f8f; }
 .nav-vue { flex: 1; width: 100%; height: 100%; border: 0; background: #fff; }
+/* mode complet hors fenêtre application : les images du moteur du QG */
+.nav-flux { flex: 1; width: 100%; height: 100%; min-width: 0; display: block; background: #fff; outline: none; touch-action: none; }
+.fen.bouge .nav-flux { pointer-events: none; }
+.nav-cadre { position: relative; }
+.nav-saisie { position: absolute; left: 0; top: 0; width: 1px; height: 1px; padding: 0; border: 0; opacity: 0; resize: none; overflow: hidden; pointer-events: none; }
+.nav-modes { display: flex; margin-left: 4px; border: 1px solid #39437a; border-radius: 6px; overflow: hidden; flex: 0 0 auto; }
+.nav-mode { background: #1b2142; color: #aeb6e0; border: 0; padding: 0 8px; height: 24px; font-size: 11.5px; cursor: pointer; }
+.nav-mode + .nav-mode { border-left: 1px solid #39437a; }
+.nav-mode.actif { background: #2f6fde; color: #fff; font-weight: 700; }
+.nav-onglets { display: flex; gap: 3px; padding: 3px 6px 0; background: #151a35; border-bottom: 1px solid #2a3160; overflow-x: auto; }
+.nav-onglets[hidden] { display: none; }
+.nav-onglet { display: flex; align-items: center; gap: 6px; max-width: 220px; padding: 3px 6px 3px 10px; background: #1b2142; border: 1px solid #2f3866; border-bottom: 0; border-radius: 6px 6px 0 0; font-size: 11.5px; color: #c9cff0; cursor: pointer; }
+.nav-onglet.actif { background: #2a3366; color: #fff; }
+.nav-onglet span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.nav-onglet-x { background: transparent; border: 0; color: inherit; cursor: pointer; font-size: 11px; padding: 0 2px; }
+.nav-choix { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-top: 10px; }
 .fen-plan .fen-corps { display: flex; flex-direction: column; overflow: hidden; background: #12162a; }
 .fen-plan .plan-entete { flex: 0 0 auto; padding: 6px 12px; background: #161b38; border-bottom: 1px solid #2a3256; }
 /* vieil écran dans sa fenêtre flottante : le moniteur remplit la fenêtre */
@@ -490,3 +506,32 @@ body:has(#panneau.replie) #demandes-boite:not(.placee) { right: 26px; }
 #demandes-poignee span { flex: 1; }
 .demandes-reset { background: #262d55; color: var(--texte); border: 1px solid #39437a; border-radius: 4px; cursor: pointer; font-size: 12px; padding: 0 6px; }
 .demandes-reset[hidden] { display: none; }
+
+/* ---------- skills : bouton 🧩 de la barre d'envoi, choix pour un dossier, Réglages › Skills ---------- */
+.outil-saisie.skills { position: relative; }
+.outil-saisie.skills.actif { box-shadow: 0 0 0 2px #7d5cff inset; }
+.outil-saisie.skills .nb { position: absolute; top: -5px; right: -5px; min-width: 16px; height: 16px; border-radius: 8px; background: #7d5cff; color: #fff; font-size: 10px; line-height: 16px; text-align: center; padding: 0 3px; }
+.outil-saisie.skills .nb[hidden] { display: none; }
+.skills-choix { position: fixed; z-index: 70; width: min(440px, 94vw); max-height: 60vh; overflow: auto; background: #12162c; border: 2px solid #3a4470; border-radius: 10px; padding: 10px 12px; box-shadow: 0 14px 36px rgba(0, 0, 0, 0.55); display: flex; flex-direction: column; gap: 8px; }
+.skills-choix[hidden] { display: none; }
+.skills-tete { display: flex; align-items: center; justify-content: space-between; }
+.skills-bloc { display: flex; flex-direction: column; gap: 4px; }
+.skills-ligne { display: flex; align-items: center; gap: 8px; }
+.skills-ligne label { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; cursor: pointer; }
+.skills-ligne small { opacity: 0.7; font-size: 11.5px; }
+.skills-ligne select { font-size: 12px; }
+.skills-form { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; }
+.skills-form[hidden] { display: none; }
+.skills-liste { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+.skills-carte { border: 1px solid #2f3866; border-left: 4px solid #4a5280; border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; background: #12162c; }
+.skills-carte.m-toujours { border-left-color: #7d5cff; }
+.skills-carte.m-dispo { border-left-color: #2f9ede; }
+.skills-carte-tete { display: flex; align-items: center; gap: 8px; }
+.skills-reglage, .skills-etages { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.skills-editeur { width: 100%; font-family: Consolas, 'Cascadia Mono', monospace; font-size: 12px; }
+.skills-editeur[hidden] { display: none; }
+.skills-claude ul { list-style: none; padding: 0; margin: 6px 0; display: flex; flex-direction: column; gap: 4px; }
+/* démo : badge dans la barre du haut, page de fin */
+.badge-demo { background: #e8a33a; color: #1b1205; font-weight: 800; font-size: 11px; letter-spacing: 1px; padding: 2px 8px; border-radius: 10px; }
+.badge-demo[hidden] { display: none; }
+.demo-fin { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: #0b0e1c; color: #c9cff0; font-size: 16px; }

@@ -212,7 +212,9 @@ export async function routesReglages(req, res, chemin, ctx) {
         const mj = corps.miniJeu;
         const p = {};
         for (const k of ['actif', 'ecoute', 'bavardages']) if (typeof mj[k] === 'boolean') p[k] = mj[k];
-        if (Number.isFinite(mj.bavardagesMinutes) && mj.bavardagesMinutes >= 1 && mj.bavardagesMinutes <= 240) p.bavardagesMinutes = Math.round(mj.bavardagesMinutes);
+        // 0 : en direct ; 0,5 : toutes les 30 s ; sinon des minutes
+        if (mj.bavardagesMinutes === 0 || mj.bavardagesMinutes === 0.5) p.bavardagesMinutes = mj.bavardagesMinutes;
+        else if (Number.isFinite(mj.bavardagesMinutes) && mj.bavardagesMinutes >= 1 && mj.bavardagesMinutes <= 240) p.bavardagesMinutes = Math.round(mj.bavardagesMinutes);
         for (const k of ['modeleDiscussion', 'modeleBavardage']) if (['haiku', 'sonnet', 'opus'].includes(mj[k])) p[k] = mj[k];
         patch.miniJeu = p;
       }

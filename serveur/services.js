@@ -18,6 +18,9 @@ const MAX_LIGNES = 400;
 const processus = new Map(); // id → ChildProcess
 const tampons = new Map(); // id → lignes en attente d'envoi
 let minuterieLog = null;
+// Démo : rien n’est lancé pour de vrai, les serveurs « démarrent » avec un journal simulé.
+let simules = false;
+export const simulerServices = () => (simules = true);
 
 const cle = (etageId, type) => `${etageId}:${type}`;
 
@@ -102,6 +105,7 @@ function portsEnEcoute() {
 }
 
 async function surveiller() {
+  if (simules) return;
   const ports = await portsEnEcoute();
   for (const s of etat.services.values()) {
     if (processus.has(s.id) || !s.port) continue;
@@ -125,6 +129,7 @@ export async function demarrer(etageId, type, par = 'toi', attenteMs = 20000) {
   const s = serviceDe(etageId, type);
   if (!s) throw new Error(tr("aucun service « {type} » pour l'étage {etage}", { type, etage: etageId }));
   if (processus.has(s.id)) return publicService(s);
+  if (simules) return demarrerSimule(s, par);
   // Conflit de port : un autre service du QG, ou un programme lancé hors du QG, l'occupe déjà.
   const rival = [...etat.services.values()].find((x) => x.id !== s.id && x.port === s.port && processus.has(x.id));
   if (rival) throw new Error(tr("le port {port} est déjà utilisé par {service} de {etage} : arrête-le d'abord", { port: s.port, service: rival.nom, etage: trouverEtage(rival.etage)?.nom }));
@@ -172,12 +177,30 @@ export async function demarrer(etageId, type, par = 'toi', attenteMs = 20000) {
 
 export function arreter(etageId, type) {
   const s = serviceDe(etageId, type);
+  if (simules && s && s.etat !== 'arrete') {
+    ajouterLignes(s, tr('(arrêt, code {code})', { code: 0 }));
+    Object.assign(s, { etat: 'arrete', pid: null, erreur: null });
+    publier(s);
+    return true;
+  }
   const enfant = s && processus.get(s.id);
   if (!enfant) return false;
   s.arretDemande = true;
   // taskkill /T : tue aussi les processus enfants (le raccourci rokit lance le vrai rojo.exe).
   execFile('taskkill', ['/PID', String(enfant.pid), '/T', '/F'], { windowsHide: true }, () => {});
   return true;
+}
+
+async function demarrerSimule(s, par) {
+  if (s.etat === 'actif') return publicService(s);
+  Object.assign(s, { etat: 'demarrage', depuis: Date.now(), par, erreur: null, externe: null, lignes: [] });
+  ajouterLignes(s, `> ${s.commande}${s.port ? ` --port ${s.port}` : ''}   ${tr('(démo : rien n’est lancé pour de vrai)')}`);
+  publier(s);
+  await new Promise((r) => setTimeout(r, 1500));
+  ajouterLignes(s, ['Rojo server listening:', '  Address: localhost', `  Port:    ${s.port}`, '', `Visit http://localhost:${s.port}/ in your browser for more information.`].join('\n'));
+  s.etat = 'actif';
+  publier(s);
+  return publicService(s);
 }
 
 export function journaux(etageId, type, n = 80) {

@@ -1,6 +1,6 @@
 {
   "name": "agents-hq",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "private": true,
   "description": "QG des agents : un immeuble d'agents Claude en pixel art, où un DG découpe tes demandes en tâches confiées à des sessions Claude Code",
   "license": "PolyForm-Noncommercial-1.0.0",

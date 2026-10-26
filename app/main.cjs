@@ -3,9 +3,12 @@
 // Reddit, X, YouTube…). Les sites ont leur propre session, gardée d'un lancement à l'autre : on s'y
 // connecte une fois.
 // Lancement (par le serveur) : electron.exe <ce dossier> --qg-url=http://127.0.0.1:PORT/?jeton=…
+// ou, pour le navigateur complet d'un QG affiché dans un navigateur ordinaire : --qg-moteur=… (moteur.cjs).
+// Un seul processus : un QG relancé, la démo (autre port) ou le moteur arrivent ici (« second-instance »).
 const { app, BrowserWindow, session, shell } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
+const { lireArgument, demarrerMoteur, moteursActifs } = require('./moteur.cjs');
 
 const RACINE = path.resolve(__dirname, '..');
 const PARTITION = 'persist:qg-navigateur';
@@ -13,8 +16,6 @@ const argUrl = (argv) => {
   const a = argv.find((x) => x.startsWith('--qg-url='));
   return a ? a.slice('--qg-url='.length) : null;
 };
-const URL_QG = argUrl(process.argv) || 'http://127.0.0.1:4747/';
-const ORIGINE = new URL(URL_QG).origin;
 
 // profil (cookies des sites, taille de la fenêtre) dans le dossier du QG, jamais publié
 app.setPath('userData', path.join(RACINE, 'runtime', 'navigateur', 'profil'));
@@ -32,36 +33,53 @@ function lireFenetre() {
   }
 }
 
-let fenetre = null;
+const fenetres = new Map(); // origine du QG (port) → fenêtre : le QG et sa démo ont chacun la leur
 
-function creer() {
+function preparerSession() {
   const sites = session.fromPartition(PARTITION);
   sites.setUserAgent(UA);
   // les sites n'ont ni caméra, ni micro, ni position, ni notifications : juste le plein écran
   sites.setPermissionRequestHandler((_wc, permission, ok) => ok(['fullscreen', 'clipboard-sanitized-write', 'pointerLock'].includes(permission)));
+}
 
+function ouvrirQg(url) {
+  const origine = new URL(url).origin;
+  const f = fenetres.get(origine);
+  if (!f) return creer(url, origine);
+  f.loadURL(url);
+  if (f.isMinimized()) f.restore();
+  f.focus();
+}
+
+function creer(url, origine) {
   const etat = lireFenetre();
-  fenetre = new BrowserWindow({
+  const premiere = !fenetres.size;
+  // une deuxième fenêtre (la démo) se décale pour ne pas recouvrir la première
+  const decale = !premiere ? { x: (etat.x ?? 80) + 40 * fenetres.size, y: (etat.y ?? 60) + 40 * fenetres.size } : {};
+  const fenetre = new BrowserWindow({
     ...etat,
+    ...decale,
     minWidth: 900,
     minHeight: 560,
     title: 'QG des agents',
+    icon: path.join(__dirname, 'icone.ico'),
     backgroundColor: '#0b0e1c',
     autoHideMenuBar: true,
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), webviewTag: true, contextIsolation: true, sandbox: true },
   });
+  fenetres.set(origine, fenetre);
   fenetre.removeMenu();
-  if (etat.agrandie) fenetre.maximize();
+  if (etat.agrandie && premiere) fenetre.maximize();
 
   // la fenêtre principale ne montre que le QG ; un lien vers ailleurs part dans le navigateur par défaut
-  fenetre.webContents.setWindowOpenHandler(({ url }) => {
-    if (/^https?:/i.test(url) && !url.startsWith(ORIGINE)) shell.openExternal(url);
+  fenetre.webContents.setWindowOpenHandler(({ url: lien }) => {
+    if (/^https?:/i.test(lien) && !lien.startsWith(origine)) shell.openExternal(lien);
     return { action: 'deny' };
   });
-  fenetre.webContents.on('will-navigate', (e, url) => {
-    if (!url.startsWith(ORIGINE)) {
+  fenetre.webContents.on('will-navigate', (e, lien) => {
+    if (!lien.startsWith(origine)) {
       e.preventDefault();
-      if (/^https?:/i.test(url)) shell.openExternal(url);
+      if (/^https?:/i.test(lien)) shell.openExternal(lien);
     }
   });
   // <webview> du navigateur : réglages imposés quoi que demande la page (pas de Node, session des sites)
@@ -83,13 +101,17 @@ function creer() {
       /* rien */
     }
   };
-  fenetre.on('close', enregistrer);
-  fenetre.on('closed', () => (fenetre = null));
-  fenetre.loadURL(URL_QG);
+  // seule la fenêtre du QG principal retient sa place
+  fenetre.on('close', () => {
+    if ([...fenetres.keys()][0] === origine) enregistrer();
+  });
+  fenetre.on('closed', () => fenetres.delete(origine));
+  fenetre.loadURL(url);
 }
 
-// Pages ouvertes depuis un site : un lien « nouvel onglet » s'ouvre dans la même vue ; une vraie fenêtre
-// (connexion Google ou Twitch, paiement…) s'ouvre en petite fenêtre, avec la même session.
+// Pages ouvertes depuis un site (dans la fenêtre application) : un lien « nouvel onglet » s'ouvre dans la
+// même vue ; une vraie fenêtre (connexion Google ou Twitch, paiement…) s'ouvre en petite fenêtre, avec la
+// même session. (Les pages du moteur gèrent les leurs dans moteur.cjs.)
 app.on('web-contents-created', (_e, contents) => {
   if (contents.getType() !== 'webview') return;
   contents.setWindowOpenHandler(({ url, disposition }) => {
@@ -97,22 +119,39 @@ app.on('web-contents-created', (_e, contents) => {
     if (disposition === 'new-window') {
       return { action: 'allow', overrideBrowserWindowOptions: { width: 520, height: 720, autoHideMenuBar: true, backgroundColor: '#ffffff', webPreferences: { partition: PARTITION, sandbox: true, contextIsolation: true } } };
     }
-    contents.loadURL(url);
+    contents.loadURL(url).catch(() => {});
     return { action: 'deny' };
   });
 });
 
+// Plus de fenêtre ni de moteur : on s'arrête.
+const quitterSiInutile = () => {
+  if (!moteursActifs() && !fenetres.size) app.quit();
+};
+
+function traiter(argv, premier) {
+  const moteur = lireArgument(argv);
+  if (moteur) demarrerMoteur(moteur, () => setTimeout(quitterSiInutile, 500));
+  const u = argUrl(argv);
+  if (u) ouvrirQg(u);
+  else if (!moteur) {
+    // relancé sans adresse : on montre ce qui est ouvert
+    const f = [...fenetres.values()][0];
+    if (f) {
+      if (f.isMinimized()) f.restore();
+      f.focus();
+    } else if (premier) ouvrirQg('http://127.0.0.1:4747/');
+  }
+}
+
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  // QG relancé alors que la fenêtre est ouverte : on la montre (avec la nouvelle adresse, nouveau jeton)
-  app.on('second-instance', (_e, argv) => {
-    if (!fenetre) return creer();
-    const u = argUrl(argv);
-    if (u) fenetre.loadURL(u);
-    if (fenetre.isMinimized()) fenetre.restore();
-    fenetre.focus();
+  app.on('second-instance', (_e, argv) => traiter(argv, false));
+  app.whenReady().then(() => {
+    preparerSession();
+    traiter(process.argv, true);
   });
-  app.whenReady().then(creer);
-  app.on('window-all-closed', () => app.quit());
+  // les pages du moteur sont des fenêtres invisibles : tant qu'il tourne, l'application reste
+  app.on('window-all-closed', quitterSiInutile);
 }

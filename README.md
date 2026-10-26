@@ -1,7 +1,13 @@
 # QG des agents
 
+<p align="center"><img src="docs/images/banniere.jpg" alt="QG des agents : un immeuble d’agents Claude en pixel art" width="100%"></p>
+
 **Un immeuble d'agents Claude qui travaillent pour toi, en pixel art.**
 Tu écris une demande au DG (le directeur) ; il la découpe en tâches, choisit pour chacune le bon modèle (Opus, Sonnet, Haiku, Fable) et le bon niveau de réflexion, puis des agents travaillent en parallèle, un étage par projet. Tu les regardes réfléchir, tu réponds à leurs questions, tu valides ce qui doit l'être.
+
+| ![Le DG découpe ta demande en tâches](docs/images/dg.jpg) | ![Réunion de passation entre agents](docs/images/reunion.jpg) | ![La salle de pause](docs/images/pause.jpg) |
+|:---:|:---:|:---:|
+| Le DG découpe ta demande et distribue les tâches | Les agents se passent le relais en réunion | Ceux qui attendent leur tour jouent en salle de pause |
 
 *English below.*
 
@@ -38,6 +44,7 @@ Ensuite, pour lancer le QG : **`lancer.bat`** (ou le raccourci du bureau). Laiss
 - **Salle de pause et salle de repos** : les agents qui attendent leur tour jouent en salle de pause (billard, baby-foot, télé) ; ceux qui ont fini dorment en salle de repos, prêts à être réembauchés avec tout leur contexte.
 - **📄 Documents** : les fichiers `.md` produits par les agents, mis en forme (titres, gras, tableaux…), du plus récent au plus ancien. Les fichiers cités dans les messages s'ouvrent d'un clic.
 - **⚡ Consommation** : tokens du jour, limites de ton forfait (fenêtre de 5 h, semaine, par modèle), détail par compte, modèle, étage et dossier, et les tokens économisés grâce au cache.
+- **🌐 Navigateur** : une fenêtre dans le QG, en deux modes. *Simple* : vidéos et directs (YouTube, Twitch, Kick) joués ici, les autres sites dans une fenêtre de ton navigateur, avec tes comptes. *Complet* : tous les sites ici (Google, Docs, Reddit…), recherche Google, avec une session propre au QG (tu te connectes une fois, c’est gardé) ; il installe une fois le navigateur intégré (≈ 100 Mo) et marche aussi si ton navigateur habituel est Brave, Firefox…
 - **Arrêt d'urgence** : coupe tout, tout de suite.
 - **Panneau de droite** : élargis-le en tirant son bord gauche ; agrandis la zone de saisie en tirant son bord haut ; A− / A+ pour la taille du texte.
 
@@ -68,7 +75,7 @@ Tout se règle dans le site, sans toucher aux fichiers :
 - **Le site ne s'ouvre pas** : ouvre le lien affiché dans la fenêtre du QG. Si le port 4747 est pris, change `"port"` dans `config\reglages.json`.
 - **Un compte « non connecté »** : Réglages › Comptes › Se connecter.
 - **Les agents ne lancent aucune commande** : installe Git pour Windows (https://git-scm.com/download/win) puis relance le QG.
-- **Essayer sans rien consommer** : `lancer-demo.bat` lance une simulation complète, sans aucune session Claude.
+- **Essayer sans rien consommer** : Réglages › À propos › **Lancer la démo** (ou `lancer-demo.bat`) ouvre, dans sa propre fenêtre et sur un autre port, une société fictive où une douzaine d’agents simulés travaillent, se réunissent et allument les serveurs du sous-sol. Aucune session Claude ; ton QG continue de tourner à côté.
 
 ## Pour les curieux
 | Dossier | Contenu |
@@ -90,7 +97,7 @@ Tout se règle dans le site, sans toucher aux fichiers :
 
 **Install**: download the zip from Releases, right-click › Properties › *Unblock*, extract to a simple folder (e.g. `C:\QG-des-agents`), double-click `installer.bat`. The HQ opens in your browser with a guided setup (switch the interface language to English in the first step, or with the 🌐 menu at the top left). Afterwards, start it with `lancer.bat`.
 
-Everything is configured in the app (⚙ Settings): accounts, project folders and floors, MCP connectors, agent names and skins, the happiness manager's jokes (Excel import/export), dictation. Runs locally only (`127.0.0.1`), no telemetry. The agents run Claude Code with your own account: follow Anthropic's terms of use.
+Everything is configured in the app (⚙ Settings): accounts, project folders and floors, MCP connectors, agent names and skins, the happiness manager's jokes (Excel import/export), dictation. Try it without using anything: Settings › About › **Start the demo** opens a made-up company in its own window (about ten simulated agents, meetings, servers in the basement). The 🌐 browser has a simple mode (videos here, other sites in your usual browser) and a full mode (every site inside the HQ, with its own sign-ins). Runs locally only (`127.0.0.1`), no telemetry. The agents run Claude Code with your own account: follow Anthropic's terms of use.
 
 ## Licence
 [PolyForm Noncommercial 1.0.0](LICENSE) : gratuit pour un usage personnel, associatif, éducatif ou de recherche, modifications comprises. **Pas d'usage commercial** (vente, revente, service payant, usage en entreprise) sans l'accord de l'auteur.

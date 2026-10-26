@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { RACINE, REGLAGES } from './config.js';
+import { RACINE, REGLAGES, utiliserImmeubleDemo } from './config.js';
 import { etat, abonner, instantane, chargerHistorique, appliquerEvenement, DOSSIERS_DIR, sauver, utiliserDossiers, emettre, modelesPublics, mcpPublic, alerte, comptesPublics, modificationsDe } from './bus.js';
 import { decouvrir, decouverteEnCache } from './decouverte.js';
 import { changerMode } from './mcp.js';
@@ -14,10 +14,11 @@ import { definirLienSite } from './notifications.js';
 import { chargerEquipe, retirer as retirerAgent } from './equipe.js';
 import { demarrerDetection, ajouterEtage, ignorerProjet } from './detection.js';
 import { demarrerBonheur, recolter as recolterBonheur } from './bonheur.js';
-import { initialiserServices, servicesPublics, demarrer as demarrerService, arreter as arreterService, journaux as journauxService, arreterTout } from './services.js';
+import { simulerServices, initialiserServices, servicesPublics, demarrer as demarrerService, arreter as arreterService, journaux as journauxService, arreterTout } from './services.js';
 import { cheminPiece, TYPES_IMAGES } from './pieces.js';
 import { transcrire, etatDictee, prechargerDictee } from './dictee.js';
 import { trouverCompte, compteConnecte, chargerComptes } from './comptes.js';
+import { SPECTACLE, scenario as scenarioParCle } from './scenarios-demo.js';
 import * as ordo from './ordonnanceur.js';
 import { resoudre } from './permissions.js';
 import * as dg from './dg.js';
@@ -25,7 +26,9 @@ import * as taches from './taches.js';
 import { creerSimulation } from './simulation.js';
 import { routesReglages, ajouterEtages } from './api-reglages.js';
 import { routesNavigateur, etatApp, ouvrirApp } from './navigateur.js';
+import { majIconeRaccourci } from './raccourci.js';
 import { discuter, definirPersonnalite, oublier, bavarder, demarrerBavardages, utiliserDemo } from './personnages.js';
+import { listeSkills, skillsClaudeCode, lireSkill, existe as existeSkill, idsSkills, creerSkill, modifierSkill, reglerSkill, supprimerSkill, importerFichier, importerClaudeCode } from './skills.js';
 import { surChangement as surConso, consoPublique, demarrerSuiviLimites, surLimitesLues } from './conso.js';
 import { t as tr } from './i18n.js';
 import { questionTache, questionDg } from './questions.js';
@@ -43,7 +46,8 @@ const option = (nom, defaut = null) => {
 const DEMO = args.includes('--demo');
 const REPLAY = option('replay');
 const VITESSE = Number(option('vitesse', 1)) || 1;
-const PORT = Number(option('port', REGLAGES.port));
+// la démo prend le port suivant : elle tourne à côté du QG sans le déranger
+const PORT = Number(option('port', DEMO ? Number(REGLAGES.port) + 1 : REGLAGES.port));
 const HOTE = REGLAGES.hote;
 const OUVRIR = !args.includes('--no-open');
 
@@ -58,7 +62,19 @@ const JETON = fs.readFileSync(FICHIER_JETON, 'utf8').trim();
 if (!DEMO && !REPLAY && !args.includes('--sans-maj') && (await majAuLancement(REGLAGES))) await new Promise(() => {});
 
 // ---------------------------------------------------------------- moteur
-if (DEMO) utiliserDossiers('dossiers-demo');
+// Démo : ses dossiers, son équipe, ses souvenirs et son immeuble fictif à elle (jamais ceux du vrai QG, qui
+// peut tourner à côté) ; lancée depuis le QG (--neuve), elle repart de zéro.
+if (DEMO) {
+  const dossierDemo = path.join(RACINE, 'dossiers-demo');
+  if (args.includes('--neuve')) {
+    fs.rmSync(dossierDemo, { recursive: true, force: true });
+    fs.rmSync(path.join(RACINE, 'runtime', 'equipe-demo.json'), { force: true });
+  }
+  utiliserDossiers('dossiers-demo');
+  utiliserImmeubleDemo(dossierDemo, { neuf: args.includes('--neuve') });
+  utiliserDemo(true, path.join(dossierDemo, 'memoires.json'));
+  simulerServices();
+}
 if (!REPLAY) chargerEquipe(DEMO ? 'equipe-demo.json' : null);
 if (!REPLAY) initialiserServices();
 // Nouveaux jeux : port Rojo unique et proposition d'étage (pas en démo : la démo ne touche à aucun projet).
@@ -170,6 +186,12 @@ async function api(req, res, chemin) {
     return json(res, 200, { lignes: journauxService(etageId, type, 400) });
   }
   if (req.method === 'GET' && (m = chemin.match(/^\/api\/pieces\/(D\d+)\/([^/]+)$/))) return servirPiece(res, m[1], m[2]);
+  // skills : la bibliothèque (et ceux de Claude Code à importer), ou le texte d'un skill
+  if (req.method === 'GET' && chemin === '/api/skills') return json(res, 200, { skills: listeSkills(), claudeCode: skillsClaudeCode() });
+  if (req.method === 'GET' && (m = chemin.match(/^\/api\/skills\/([a-z0-9-]+)$/))) {
+    if (!existeSkill(m[1])) return json(res, 404, { erreur: tr('skill inconnu') });
+    return json(res, 200, { id: m[1], texte: lireSkill(m[1]) });
+  }
   // code écrit par un agent (diffs), y compris après un redémarrage (relu dans le journal du dossier)
   if (req.method === 'GET' && (m = chemin.match(/^\/api\/taches\/(D\d+-T\d+)\/modifications$/))) return json(res, 200, { modifications: modificationsDe(m[1]) });
   if (req.method === 'GET' || !REPLAY) {
@@ -194,7 +216,33 @@ async function api(req, res, chemin) {
   }
   if (REPLAY) return json(res, 403, { erreur: tr('mode replay : lecture seule') });
 
+  // Skills : import d'un fichier (corps brut : SKILL.md, .skill ou .zip)
+  if (chemin === '/api/skills/importer') {
+    const url = new URL(req.url, 'http://127.0.0.1');
+    try {
+      const ids = await importerFichier(url.searchParams.get('nom') || 'skill.md', await lireBrut(req, 9 * 1024 * 1024));
+      emettre('skills', { skills: listeSkills() });
+      return json(res, 200, { ids });
+    } catch (e) {
+      return json(res, 400, { erreur: e.message });
+    }
+  }
   const corps = await lireCorps(req, AVEC_PIECES.test(chemin) ? 80 * 1024 * 1024 : 256 * 1024);
+  // Skills : créer, modifier, régler (mode, pour qui, étages), supprimer, importer depuis Claude Code
+  if ((m = chemin.match(/^\/api\/skills\/(creer|importer-claude)$/)) || (m = chemin.match(/^\/api\/skills\/([a-z0-9-]+)\/(modifier|regler|supprimer)$/))) {
+    try {
+      let r = { ok: true };
+      if (m[1] === 'creer') r = { id: creerSkill({ nom: corps.nom, description: corps.description, instructions: corps.instructions }) };
+      else if (m[1] === 'importer-claude') r = { id: importerClaudeCode(String(corps.chemin || '')) };
+      else if (m[2] === 'modifier') modifierSkill(m[1], String(corps.texte || ''));
+      else if (m[2] === 'regler') r = { reglage: reglerSkill(m[1], corps) };
+      else supprimerSkill(m[1]);
+      emettre('skills', { skills: listeSkills() });
+      return json(res, 200, r);
+    } catch (e) {
+      return json(res, 400, { erreur: e.message });
+    }
+  }
   if (chemin === '/api/dossiers') {
     const texte = String(corps.texte || '').trim();
     if (!texte) return json(res, 400, { erreur: tr('demande vide') });
@@ -211,7 +259,11 @@ async function api(req, res, chemin) {
       if (corps.dg.effort && m && !m.efforts.includes(corps.dg.effort)) return json(res, 400, { erreur: tr('effort non supporté : {effort}', { effort: corps.dg.effort }) });
       reglageDg = { modele: corps.dg.modele || null, effort: corps.dg.effort || null };
     }
-    const d = ordo.creerDossier({ texte, etageAffiche: String(corps.etageAffiche || 'hall'), compte: compte.id, dg: reglageDg, pieces: corps.pieces || [] });
+    // skills choisis à l'envoi (🧩) : seulement des skills de la bibliothèque
+    const connus = new Set(idsSkills());
+    const skills = (Array.isArray(corps.skills) ? corps.skills : []).filter((s) => s && connus.has(s.id) && ['dg', 'tous', 'demande'].includes(s.pour)).map((s) => ({ id: s.id, pour: s.pour }));
+    const skillsExclus = (Array.isArray(corps.skillsExclus) ? corps.skillsExclus : []).filter((id) => connus.has(id));
+    const d = ordo.creerDossier({ texte, etageAffiche: String(corps.etageAffiche || 'hall'), compte: compte.id, dg: reglageDg, pieces: corps.pieces || [], skills, skillsExclus });
     return json(res, 200, { id: d.id });
   }
   if (chemin === '/api/bonheur/recolter') {
@@ -335,6 +387,24 @@ async function api(req, res, chemin) {
       return json(res, 409, { erreur: e.message });
     }
   }
+  // Démo (Réglages › À propos) : une autre instance, simulée, dans sa propre fenêtre et sur son propre port.
+  if (chemin === '/api/demo/lancer') {
+    if (DEMO) return json(res, 409, { erreur: tr('Tu es déjà dans la démo.') });
+    const port = PORT + 1;
+    const lienDemo = `http://${HOTE}:${port}/?jeton=${JETON}`;
+    if (await portRepond(port)) {
+      if (!(REGLAGES.ouvrirEnApp !== false && ouvrirApp(lienDemo))) spawn('cmd.exe', ['/c', 'start', '', lienDemo], { detached: true, stdio: 'ignore' }).unref();
+      return json(res, 200, { ok: true, deja: true });
+    }
+    spawn('cmd.exe', ['/d', '/c', 'start', 'QG des agents - demo', path.join(RACINE, 'lancer-demo.bat'), '--port', String(port), '--neuve', '--spectacle'], { detached: true, stdio: 'ignore', cwd: RACINE }).unref();
+    return json(res, 200, { ok: true });
+  }
+  if (chemin === '/api/demo/quitter') {
+    if (!DEMO) return json(res, 409, { erreur: tr('Ce n’est pas la démo.') });
+    json(res, 200, { ok: true });
+    setTimeout(() => arreter(0), 300);
+    return;
+  }
   if (chemin === '/api/urgence') {
     ordo.urgence();
     return json(res, 200, { ok: true });
@@ -383,8 +453,10 @@ serveur.listen(PORT, HOTE, () => {
   else ordo.reprendreDossiers(); // dossiers interrompus par un arrêt : ils repartent
   if (!REPLAY) prechargerDictee();
   // mini-jeu : en démo, des répliques toutes prêtes (aucun token)
-  utiliserDemo(DEMO);
+  // démo lancée depuis le QG : le grand scénario démarre tout seul
+  if (DEMO && args.includes('--spectacle')) lancerSpectacle();
   if (!REPLAY) demarrerBavardages();
+  if (!DEMO && !REPLAY) majIconeRaccourci();
   if (!DEMO && !REPLAY) {
     // En pause sur une limite d'usage : relecture toutes les 5 min, pour reprendre dès qu'il y a de la marge.
     demarrerSuiviLimites({ urgent: () => !!etat.ordonnanceur?.pause?.limite });
@@ -417,6 +489,17 @@ serveur.listen(PORT, HOTE, () => {
   }
 });
 
+// ---------------------------------------------------------------- démo : le grand scénario
+// Démo lancée depuis le QG : les demandes partent toutes seules, l'une après l'autre (scenarios-demo.js).
+function lancerSpectacle() {
+  for (const { scenario: cle, apres, etage } of SPECTACLE) {
+    setTimeout(() => {
+      const sc = scenarioParCle(cle);
+      ordo.creerDossier({ texte: sc.texte(), etageAffiche: etage, compte: trouverCompte().id, scenario: cle });
+    }, apres);
+  }
+}
+
 // ---------------------------------------------------------------- replay
 function lancerReplay() {
   const fichier = /^D\d+$/.test(REPLAY) ? path.join(DOSSIERS_DIR, REPLAY, 'events.jsonl') : path.resolve(REPLAY);
@@ -426,6 +509,21 @@ function lancerReplay() {
   setTimeout(() => {
     for (const ev of evenements) setTimeout(() => appliquerEvenement(ev), (ev.t - t0) / VITESSE);
   }, 2000);
+}
+
+// Un QG répond-il déjà sur ce port ? (la démo, déjà ouverte)
+function portRepond(port) {
+  return new Promise((ok) => {
+    const r = http.get({ host: HOTE, port, path: '/', timeout: 1500 }, (x) => {
+      x.resume();
+      ok(true);
+    });
+    r.on('error', () => ok(false));
+    r.on('timeout', () => {
+      r.destroy();
+      ok(false);
+    });
+  });
 }
 
 let arretEnCours = false;

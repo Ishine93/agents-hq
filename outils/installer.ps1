@@ -134,6 +134,8 @@ try {
     $s.TargetPath = Join-Path $QG 'lancer.bat'
     $s.WorkingDirectory = $QG
     $s.Description = 'QG des agents'
+    $ico = Join-Path $QG 'app\icone.ico'
+    if (Test-Path $ico) { $s.IconLocation = "$ico,0" }
     $s.Save()
     Ok 'raccourci créé sur le bureau'
   } else { Info 'pas de raccourci' }

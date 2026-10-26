@@ -14,6 +14,7 @@ import { Navigateur } from './navigateur.js';
 import { Fenetre } from './fenetres.js';
 import { Discussions } from './discussion.js';
 import { brancherDemandes } from './demandes.js';
+import { ChoixSkills } from './skills.js';
 import { carteDemandes, grouperPermissions, clePermissions } from './permis.js';
 import { etageJoy, etageVisibleTache, etageVisibleAgent } from './scenes.js';
 import { md } from './markdown.js';
@@ -216,6 +217,7 @@ export class Interface {
     this.navigateur = new Navigateur(this);
     this.discussions = new Discussions(this);
     this.majPoigneeDemandes = brancherDemandes();
+    this.choixSkills = new ChoixSkills(this);
     this.modifsOuvertes = new Set();
     this.lecteur = new Lecteur(this.store);
     this.conso = new Conso(this.store, this);
@@ -504,6 +506,10 @@ export class Interface {
     if (R.langueInterface && R.langueInterface !== langueCourante() && !MAQUETTE) this.changerLangue(R.langueInterface);
     $('#choix-langue').value = langueCourante();
     if (R.langueIA) $('#choix-langue-ia').value = R.langueIA;
+    // démo : bien visible, pour ne pas la confondre avec le vrai QG ouvert à côté
+    const badge = $('#badge-demo');
+    if (badge) badge.hidden = !R.demo;
+    document.title = R.demo ? tr('QG des agents — démo') : tr('QG des agents');
   }
 
   // La page se recharge : enseignes du décor, journal et fenêtres déjà construites passent tous dans la nouvelle langue.
@@ -802,10 +808,11 @@ export class Interface {
       if (m && m.type === 'repondre') await envoyer('/api/dossiers/' + encodeURIComponent(m.dossier) + '/repondre', avecPieces({ texte }));
       else if (m && m.type === 'completer') await envoyer('/api/dossiers/' + encodeURIComponent(m.dossier) + '/completer', avecPieces({ texte }));
       else {
-        const corps = { texte, etageAffiche: this.etageId, compte: this.compte };
+        const corps = { texte, etageAffiche: this.etageId, compte: this.compte, ...this.choixSkills.pourEnvoi() };
         const dg = this.reglageDg();
         if (dg) corps.dg = dg;
         await envoyer('/api/dossiers', avecPieces(corps));
+        this.choixSkills.vider(); // les skills choisis valent pour ce dossier-là
       }
       s.value = '';
       this.jointes.vider();
@@ -976,7 +983,8 @@ export class Interface {
           (d.etages || []).map((x) => S.etage(x)?.nom || x).join(' · ') || '—',
           taches.length ? ' — ' + tr('{faites}/{total} tâche(s)', { faites, total: taches.length }) : '',
           d.compte ? ' — ' + (S.comptes.find((c) => c.id === d.compte)?.nom || d.compte) : '',
-          d.dg && d.dg.modele ? ' — ' + tr('DG : {modele}', { modele: S.nomModele(d.dg.modele, d.compte) }) + (d.dg.effort ? ' · ' + d.dg.effort : '') : ''),
+          d.dg && d.dg.modele ? ' — ' + tr('DG : {modele}', { modele: S.nomModele(d.dg.modele, d.compte) }) + (d.dg.effort ? ' · ' + d.dg.effort : '') : '',
+          d.skills && d.skills.length ? ' — 🧩 ' + d.skills.map((x) => x.id).join(', ') : ''),
         ouvert && d.question ? h('div', { class: 'question' }, h('b', {}, tr('Question :') + ' '), md(d.question, { fichier: (c) => this.ouvrirFichier(c) })) : null,
         ouvert && d.synthese ? md(d.synthese, { classe: 'synthese', fichier: (c) => this.ouvrirFichier(c, (d.etages || [])[0] || null) }) : null,
         ouvert ? h('div', { class: 'taches' }, taches.map((t) =>
@@ -1339,6 +1347,7 @@ export class Interface {
         t.motifFile ? [h('dt', {}, tr('File')), h('dd', {}, t.motifFile)] : null,
         h('dt', {}, tr('Vérification')), h('dd', {}, t.verif ? t.verif.mode + (t.verif.modele ? ' (' + t.verif.modele + ')' : '') + (v && v.verdict ? ' — ' + tr('dernier verdict : {verdict}', { verdict: v.verdict }) : '') : '—'),
         h('dt', {}, tr('Tentative')), h('dd', {}, String(t.tentative || 1)),
+        t.skills && t.skills.length ? [h('dt', {}, tr('Skills')), h('dd', {}, t.skills.join(', '))] : null,
         t.lignes ? [h('dt', {}, tr('Code')), h('dd', {},
           h('button', { class: 'lien', on: { click: () => { this.ficheOnglet = 'code'; this.majFiche(); } } }, compteLignes(t.lignes.ajouts, t.lignes.suppressions)),
           ' ' + tr('dans {n} fichier(s)', { n: t.lignes.fichiers || 0 }))] : null,
