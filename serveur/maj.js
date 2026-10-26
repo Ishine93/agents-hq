@@ -21,26 +21,43 @@ function comparer(a, b) {
 // changements pas encore publiés, on la refuse.
 export const installationDev = () => fs.existsSync(path.join(RACINE, 'tests')) || fs.existsSync(path.join(RACINE, 'SPEC.md'));
 
+// Sans l'API : la page « dernière version » redirige vers celle de sa version (…/releases/tag/v1.0.5) et le
+// zip a une adresse connue. Sert quand l'API refuse (403 : 60 demandes par heure et par connexion, vite
+// atteintes sur une connexion partagée, 4G, VPN…) ; on n'a alors pas les notes.
+async function derniereSansApi(delaiMs) {
+  const opts = { method: 'HEAD', headers: { 'User-Agent': 'QG-des-agents' }, signal: AbortSignal.timeout(delaiMs) };
+  const r = await fetch(`https://github.com/${DEPOT}/releases/latest`, opts).catch(() => null);
+  const m = r && r.ok && r.url.match(/\/releases\/tag\/v?([\w.-]+)$/);
+  if (!m) return null;
+  const zip = await fetch(`https://github.com/${DEPOT}/releases/download/v${m[1]}/QG-des-agents-${m[1]}.zip`, { ...opts, signal: AbortSignal.timeout(delaiMs) }).catch(() => null);
+  return { derniere: m[1], notes: '', url: r.url, publieLe: null, zip: !!zip && zip.ok };
+}
+
 let cache = null;
 export async function verifierMaj({ forcer = false, delaiMs = 10000 } = {}) {
   if (forcer || !cache || Date.now() - cache.t > 3600 * 1000) {
-    const r = await fetch(`https://api.github.com/repos/${DEPOT}/releases/latest`, {
+    // QG_MAJ_SANS_API (tests) : comme si l'API refusait
+    const r = process.env.QG_MAJ_SANS_API ? null : await fetch(`https://api.github.com/repos/${DEPOT}/releases/latest`, {
       headers: { 'User-Agent': 'QG-des-agents', Accept: 'application/vnd.github+json' },
       signal: AbortSignal.timeout(delaiMs),
     }).catch(() => null);
-    if (!r) throw new Error(t('GitHub est injoignable : vérifie ta connexion Internet.'));
-    if (!r.ok) throw new Error(t('GitHub ne répond pas ({code}).', { code: r.status }));
-    const j = await r.json();
-    cache = {
-      t: Date.now(),
-      r: {
+    let info = null;
+    if (r && r.ok) {
+      const j = await r.json();
+      info = {
         derniere: String(j.tag_name || '').replace(/^v/, ''),
         notes: String(j.body || ''),
         url: j.html_url || `https://github.com/${DEPOT}/releases`,
         publieLe: j.published_at || null,
         zip: (j.assets || []).some((a) => a.name.endsWith('.zip')),
-      },
-    };
+      };
+    } else info = await derniereSansApi(delaiMs);
+    if (!info) {
+      if (!r) throw new Error(t('GitHub est injoignable : vérifie ta connexion Internet.'));
+      if (r.status === 403 || r.status === 429) throw new Error(t('GitHub limite les vérifications depuis ta connexion ({code}) : réessaie dans une heure.', { code: r.status }));
+      throw new Error(t('GitHub ne répond pas ({code}).', { code: r.status }));
+    }
+    cache = { t: Date.now(), r: info };
   }
   const actuelle = versionLocale();
   return { ...cache.r, actuelle, disponible: cache.r.zip && comparer(cache.r.derniere, actuelle) > 0, dev: installationDev(), depot: DEPOT };

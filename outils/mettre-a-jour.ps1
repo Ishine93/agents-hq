@@ -76,16 +76,48 @@ if ($AttendrePid) {
 $actuelle = (Get-Content (Join-Path $QG 'package.json') -Raw | ConvertFrom-Json).version
 Write-Host "QG des agents — version installée : $actuelle"
 
+$UA = @{ 'User-Agent' = 'QG-des-agents' }
+$derniere = $null
+$zipUrl = $null
+$shaUrl = $null
 try {
-  $rel = Invoke-RestMethod "https://api.github.com/repos/$Depot/releases/latest" -Headers @{ 'User-Agent' = 'QG-des-agents' }
-} catch { Echec "impossible de joindre GitHub ($($_.Exception.Message))." }
-$derniere = $rel.tag_name -replace '^v', ''
+  if ($env:QG_MAJ_SANS_API) { throw 'API sautée (test)' }
+  $rel = Invoke-RestMethod "https://api.github.com/repos/$Depot/releases/latest" -Headers $UA
+  $derniere = $rel.tag_name -replace '^v', ''
+  $zipAsset = $rel.assets | Where-Object { $_.name -like '*.zip' } | Select-Object -First 1
+  $shaAsset = $rel.assets | Where-Object { $_.name -like '*.sha256' } | Select-Object -First 1
+  if ($zipAsset -and $shaAsset) { $zipUrl = $zipAsset.browser_download_url; $shaUrl = $shaAsset.browser_download_url }
+} catch {
+  # L'API refuse (403 : 60 demandes par heure et par connexion, vite atteintes sur une connexion partagée) :
+  # la page « dernière version » redirige vers celle de sa version, et le zip a une adresse connue.
+  Write-Host "API GitHub indisponible ($($_.Exception.Message)) : on passe par la page des versions."
+  try {
+    $page = Invoke-WebRequest "https://github.com/$Depot/releases/latest" -Headers $UA -Method Head -UseBasicParsing
+    $final = $page.BaseResponse.ResponseUri.AbsoluteUri
+    if ($final -match '/releases/tag/v?([\w.-]+)$') { $derniere = $Matches[1] }
+  } catch { Echec "impossible de joindre GitHub ($($_.Exception.Message))." }
+  if (-not $derniere) { Echec 'impossible de lire la dernière version publiée sur GitHub.' }
+}
 Write-Host "Dernière version publiée : $derniere"
 if ($derniere -eq $actuelle) { Write-Host 'Tu as déjà la dernière version.' -ForegroundColor Green; Relance; exit 0 }
+if (-not $zipUrl) {
+  $zipUrl = "https://github.com/$Depot/releases/download/v$derniere/QG-des-agents-$derniere.zip"
+  $shaUrl = "$zipUrl.sha256"
+}
+$zipAsset = @{ name = "QG-des-agents-$derniere.zip" }
+$shaAsset = @{ name = "QG-des-agents-$derniere.zip.sha256" }
 
-$zipAsset = $rel.assets | Where-Object { $_.name -like '*.zip' } | Select-Object -First 1
-$shaAsset = $rel.assets | Where-Object { $_.name -like '*.sha256' } | Select-Object -First 1
-if (-not $zipAsset -or -not $shaAsset) { Echec 'la version publiée ne contient pas de zip vérifiable.' }
+# Téléchargement avec trois essais (connexion qui coupe, serveur occupé…).
+function Telecharger($url, $fichier) {
+  for ($n = 1; $n -le 3; $n++) {
+    try { Invoke-WebRequest $url -OutFile $fichier -Headers $UA -UseBasicParsing; return }
+    catch {
+      if ($n -eq 3) { Echec "téléchargement impossible ($($_.Exception.Message))." }
+      Write-Host "Téléchargement interrompu ($($_.Exception.Message)), nouvel essai…"
+      Start-Sleep -Seconds (3 * $n)
+    }
+  }
+}
 
 # Le QG ne doit pas tourner pendant la copie.
 $enCours = Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Where-Object { $_.CommandLine -like "*$QG*serveur*index.js*" }
@@ -96,8 +128,8 @@ New-Item -ItemType Directory -Force -Path $Tmp | Out-Null
 $zip = Join-Path $Tmp $zipAsset.name
 $sha = Join-Path $Tmp $shaAsset.name
 Write-Host "Téléchargement de $($zipAsset.name)…"
-Invoke-WebRequest $zipAsset.browser_download_url -OutFile $zip -UseBasicParsing
-Invoke-WebRequest $shaAsset.browser_download_url -OutFile $sha -UseBasicParsing
+Telecharger $zipUrl $zip
+Telecharger $shaUrl $sha
 $attendue = ((Get-Content $sha -Raw).Trim() -split '\s+')[0].ToLower()
 if ((Get-FileHash -Algorithm SHA256 $zip).Hash.ToLower() -ne $attendue) { Echec 'empreinte incorrecte : mise à jour annulée.' }
 Write-Host 'Empreinte SHA-256 vérifiée.' -ForegroundColor Green

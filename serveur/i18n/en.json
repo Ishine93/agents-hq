@@ -501,5 +501,6 @@
   "J’ai entendu {par} raconter sur moi : « {texte} »": "I heard {par} say about me: \"{texte}\"",
   "raconte des choses sur moi": "says things about me",
   "{qui} m’a répété ce que {par} raconte sur moi : « {texte} »": "{qui} told me what {par} says about me: \"{texte}\"",
-  "J’ai entendu {noms} papoter. {extrait}": "I heard {noms} chatting. {extrait}"
+  "J’ai entendu {noms} papoter. {extrait}": "I heard {noms} chatting. {extrait}",
+  "GitHub limite les vérifications depuis ta connexion ({code}) : réessaie dans une heure.": "GitHub is limiting checks from your connection ({code}): try again in an hour."
 }
