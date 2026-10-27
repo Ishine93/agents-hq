@@ -176,9 +176,9 @@ export function recruter(t, d, prenom = null) {
     id,
     prenom: nom,
     etage: t.etage,
-    compte: d.compte,
-    modele: t.modele,
-    effort: t.effort,
+    compte: t.x?.route?.compte || d.compteAgents || d.compte, // le compte qui exécute la tâche (routeur), sinon celui de la demande
+    modele: t.x?.route ? t.x.route.modele : t.modele,
+    effort: t.x?.route ? t.x.route.effort : t.effort,
     titre: t.titre,
     specialite: '',
     fichiers: [],
@@ -197,7 +197,7 @@ export function recruter(t, d, prenom = null) {
 // Réembauche : renvoie l'agent et s'il faut cloner sa conversation (déjà occupé ailleurs).
 export function reembaucher(id, t, d) {
   const a = equipe.agents[id];
-  if (!a || a.etat === 'retire' || !a.session || a.compte !== d.compte || a.etage !== t.etage) return null;
+  if (!a || a.etat === 'retire' || !a.session || a.compte !== (t.x?.route?.compte || d.compteAgents || d.compte) || a.etage !== t.etage) return null;
   if (a.etat === 'occupe') {
     // Clone : une copie de sa conversation part sur la nouvelle tâche, l'original continue.
     if (t.prenom && t.prenom !== a.prenom) reserves.delete(t.prenom);
@@ -207,7 +207,7 @@ export function reembaucher(id, t, d) {
     return { agent: clone, resume: a.session, fork: true };
   }
   if (t.prenom && t.prenom !== a.prenom) reserves.delete(t.prenom);
-  Object.assign(a, { etat: 'occupe', tache: t.id, titre: t.titre, modele: t.modele, effort: t.effort, depuis: Date.now() });
+  Object.assign(a, { etat: 'occupe', tache: t.id, titre: t.titre, modele: t.x?.route ? t.x.route.modele : t.modele, effort: t.x?.route ? t.x.route.effort : t.effort, depuis: Date.now() });
   publier(a);
   return { agent: a, resume: a.session, fork: false };
 }
@@ -216,7 +216,7 @@ export function reembaucher(id, t, d) {
 export function occuper(id, t) {
   const a = equipe.agents[id];
   if (!a) return;
-  Object.assign(a, { etat: 'occupe', tache: t.id, modele: t.modele, effort: t.effort, depuis: Date.now() });
+  Object.assign(a, { etat: 'occupe', tache: t.id, modele: t.x?.route ? t.x.route.modele : t.modele, effort: t.x?.route ? t.x.route.effort : t.effort, depuis: Date.now() });
   publier(a);
 }
 
@@ -247,13 +247,25 @@ export function retirer(id) {
 }
 
 // Résumé pour le DG.
+// Cache du fournisseur : chaud si la dernière activité date de moins de 55 min (réembauche économique, lot A5).
+export const CACHE_CHAUD_MS = 55 * 60 * 1000;
+export function etatCache(a, maintenant = Date.now()) {
+  const minutes = Math.max(0, Math.round((maintenant - (a.depuis || maintenant)) / 60000));
+  return { minutes, chaud: maintenant - (a.depuis || maintenant) < CACHE_CHAUD_MS };
+}
+const texteCache = (a) => {
+  if (a.etat === 'occupe') return '';
+  const c = etatCache(a);
+  return `, dernière activité il y a ${c.minutes} min, cache ${c.chaud ? 'chaud' : 'froid'}`;
+};
+
 export function resumeEquipePourDg(compte) {
   const liste = disponiblesPour(compte);
   if (!liste.length) return 'Aucun agent en réserve pour ce compte.';
   return liste
     .map(
       (a) =>
-        `- ${a.id} « ${a.prenom || '?'} » (étage ${a.etage}, ${a.modele}/${a.effort}, ${a.missions} mission(s), contexte ~${Math.round(a.contexte / 1000)}k tokens${a.etat === 'occupe' ? ', occupé : sera cloné' : ''}) — dernière mission « ${a.titre} » : ${a.specialite || '—'}${a.fichiers.length ? ` Fichiers : ${a.fichiers.join(', ')}` : ''}`,
+        `- ${a.id} « ${a.prenom || '?'} » (étage ${a.etage}, ${a.modele}/${a.effort}, ${a.missions} mission(s), contexte ~${Math.round(a.contexte / 1000)}k tokens${texteCache(a)}${a.etat === 'occupe' ? ', occupé : sera cloné' : ''}) — dernière mission « ${a.titre} » : ${a.specialite || '—'}${a.fichiers.length ? ` Fichiers : ${a.fichiers.join(', ')}` : ''}`,
     )
     .join('\n');
 }

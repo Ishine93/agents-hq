@@ -61,7 +61,7 @@ export class Fenetre {
     ] : [];
     this.outils = h('span', { class: 'fen-outils' }, outils);
     this.tete = h('div', { class: 'fen-tete' }, this.titreEl, this.outils, h('span', { class: 'fen-zoom' }, zoom),
-      h('button', { class: 'fen-b', type: 'button', title: tr('Réduire'), on: { click: () => this.reduire() } }, '–'),
+      h('button', { class: 'fen-b', type: 'button', title: tr('Réduire la fenêtre'), on: { click: () => this.reduire() } }, '–'),
       h('button', { class: 'fen-b fen-fermer', type: 'button', title: tr('Fermer'), on: { click: () => this.fermer() } }, '×'));
     this.corps = h('div', { class: 'fen-corps' });
     const poignees = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'].map((d) => h('div', { class: 'fen-poignee fen-' + d, 'data-d': d }));

@@ -8,10 +8,15 @@ import { apparence, spriteAvatar, PALETTE_PEAUX, PALETTE_CHEVEUX, PALETTE_PANTAL
 import { TERMINAUX } from './etat.js';
 import { md } from './markdown.js';
 import { sectionSkills } from './skills.js';
+import { sectionPriorites, badgeQualification } from './priorites.js';
+import { script as scriptPlateforme, infos as infosPlateforme, dicteeSysteme } from './plateforme.js';
+import { NIVEAUX, NIVEAU_DEFAUT, nomNiveau, phraseNiveau, travailDe, sansCapacite, CAPACITES_COUT, boutonsCout, texteValeur } from './cout.js';
+import { blocGraphismes } from './graphismes.js';
 
 const SECTIONS = [
   ['general', 'Général'],
-  ['comptes', 'Comptes Claude'],
+  ['comptes', 'Comptes IA'],
+  ['priorites', 'Priorités'],
   ['dossiers', 'Dossiers et étages'],
   ['mcp', 'Connecteurs MCP'],
   ['equipe', 'Équipe et skins'],
@@ -24,6 +29,8 @@ export const TYPES_PROJET = {
   roblox: 'Jeu Roblox', unreal: 'Unreal', unity: 'Unity', godot: 'Godot', comfyui: 'ComfyUI', web: 'Web / Node', python: 'Python',
   projet: 'Projet', direction: 'Direction', bac: 'Bac à sable', hall: 'Hall', serveur: 'Serveurs', atelier3d: 'Atelier 3D', etudes: 'Études',
 };
+// Types qu'on peut choisir pour un nouvel étage (TYPES de serveur/detection.js).
+const TYPES_CHOIX = ['projet', 'web', 'python', 'roblox', 'unreal', 'unity', 'godot', 'comfyui'];
 const COIFFURES = 6;
 export const DEPOT_GITHUB = 'https://github.com/Ishine93/agents-hq';
 // Liens entre personnages (mini-jeu) : de quoi suivre les histoires d’un coup d’œil.
@@ -100,7 +107,7 @@ export class Parametres {
     this.m.titre(t('Réglages'));
     this.nav.replaceChildren(...SECTIONS.map(([id, lib]) => h('button', { type: 'button', class: id === this.section ? 'actif' : '', on: { click: () => this.aller(id) } }, t(lib))));
     const haut = this.contenu.scrollTop;
-    const fn = { general: this.general, comptes: this.comptes, dossiers: this.dossiers, mcp: this.mcp, equipe: this.equipe, skills: this.skills, bonheur: this.bonheur, dictee: this.dictee, apropos: this.apropos }[this.section];
+    const fn = { general: this.general, comptes: this.comptes, priorites: this.priorites, dossiers: this.dossiers, mcp: this.mcp, equipe: this.equipe, skills: this.skills, bonheur: this.bonheur, dictee: this.dictee, apropos: this.apropos }[this.section];
     this.contenu.replaceChildren(h('h3', {}, t(SECTIONS.find((s) => s[0] === this.section)[1])), ...[].concat(fn.call(this)).filter(Boolean));
     this.contenu.scrollTop = haut;
     if (this.defiler) {
@@ -153,12 +160,21 @@ export class Parametres {
     return [
       ligne(t('Langue de l’interface'), selLangue),
       ligne(t('Langue des IA'), selIA, h('small', { class: 'meta' }, t('Le DG et les agents réfléchissent, écrivent et te répondent dans cette langue.'))),
+      ligne(t('Traduire les réflexions'),
+        h('label', { class: 'param-case' },
+          h('input', { type: 'checkbox', checked: !!R.traduireReflexion, on: { change: (e) => {
+            this.reglage({ traduireReflexion: e.target.checked }, e.target.checked ? t('Les réflexions terminées seront traduites dans la langue des IA.') : t('Les réflexions restent dans leur langue d’origine.'));
+          } } }),
+          ' ', t('Traduire dans la langue des IA les blocs de réflexion écrits dans une autre langue (souvent l’anglais).')),
+        h('small', { class: 'meta' }, t('Chaque bloc terminé est traduit par Haiku ; le texte d’origine reste visible d’un clic. Coût estimé : 1 000 à 3 000 tokens Haiku par bloc, pris sur ton forfait.'))),
       ligne(t('Ton prénom'), prenom, h('small', { class: 'meta' }, t('Facultatif : le DG s’adresse à toi par ton prénom.'))),
       h('h4', {}, t('Mode de travail des agents')),
       mode('auto', t('Autonome (recommandé)'), t('Les agents lisent partout et écrivent librement dans tes dossiers racines. Écrire ailleurs, publier ou envoyer quelque chose demande ton accord. Les commandes sont jugées par le mode auto de Claude Code.')),
       mode('prudent', t('Prudent'), t('Toute action qui n’est pas une simple lecture ou une écriture dans tes dossiers lève la main : tu valides chaque commande. Plus sûr, plus lent.')),
       h('h4', {}, t('DG par défaut')),
       modeles.length ? ligne(t('Modèle et effort'), selMod, selEff, h('small', { class: 'meta' }, t('Modifiable aussi demande par demande, en bas de l’écran.'))) : h('div', { class: 'vide' }, t('Connecte un compte pour choisir le modèle du DG.')),
+      h('h4', {}, t('Coût')),
+      ...this.blocCout(),
       h('h4', {}, t('Parallélisme')),
       ligne(t('Tâches en même temps (total)'), plafond('plafondGlobal'), h('small', { class: 'meta' }, t('0 = sans limite : seules les dépendances entre tâches comptent.'))),
       ligne(t('Tâches en même temps (par étage)'), plafond('plafondEtage')),
@@ -170,6 +186,7 @@ export class Parametres {
           h('input', { type: 'checkbox', checked: !!R.entreeEnvoie, on: { change: (e) => this.reglage({ entreeEnvoie: e.target.checked }, e.target.checked ? t('Entrée envoie (Maj+Entrée : retour à la ligne).') : t('Ctrl+Entrée envoie.')) } }),
           ' ', t('Envoyer avec Entrée dans les précisions, réponses, questions, consignes et discussions (Maj+Entrée pour aller à la ligne).')),
         h('small', { class: 'meta' }, t('Décoché : Ctrl+Entrée envoie, Entrée va à la ligne. Le message principal au DG part toujours avec Entrée.'))),
+      ...blocGraphismes(),
       h('h4', {}, t('Navigateur')),
       R.navigateurApp
         ? ligne(t('Fenêtre application'),
@@ -224,77 +241,291 @@ export class Parametres {
     ];
   }
 
-  // ---------------------------------------------------------------- comptes
-  comptes() {
+  // ---------------------------------------------------------------- coût (1.0.6, B2)
+  // Niveau des nouvelles demandes (aussi réglable demande par demande, en bas de l'écran) et personnalisation
+  // bouton par bouton. POST /api/reglages, champ travail : la personnalisation envoyée remplace l'ancienne.
+  blocCout() {
     const S = this.store;
     const R = S.reglages;
-    const lignes = S.comptes.map((c) => {
-      const nom = champ({ value: c.nom, maxlength: '40', 'aria-label': t('Nom du compte') });
-      nom.addEventListener('change', () => this.poster('/api/comptes/' + c.id + '/modifier', { nom: nom.value }, t('Compte renommé.')));
-      const action = (lib, route, opts = {}) => h('button', {
-        class: 'petit' + (opts.danger ? ' danger' : ''), type: 'button', title: opts.titre || null,
-        on: {
-          click: async () => {
-            if (opts.confirmer && !window.confirm(opts.confirmer)) return;
-            const r = await this.poster('/api/comptes/' + c.id + '/' + route, opts.corps || {}, opts.ok || null);
-            if (r && r.comptes) {
-              S.comptes = r.comptes;
-              S.compteDefaut = r.compteDefaut;
-              this.rendre();
-              this.ui.majComptes();
-            }
-          },
-        },
-      }, lib);
-      return h('div', { class: 'param-compte' + (c.connecte ? ' connecte' : '') },
-        h('div', { class: 'param-compte-tete' },
-          nom,
-          h('span', { class: 'badge ' + (c.connecte ? 'st-ok' : 'st-ko') }, c.connecte ? t('connecté') : t('non connecté')),
-          c.id === S.compteDefaut ? h('span', { class: 'badge perso' }, t('par défaut')) : null),
-        h('div', { class: 'meta' }, [c.abonnement, c.email, c.partage ? t('partagé avec Claude Code sur ce PC') : null].filter(Boolean).join(' · ') || ' '),
-        h('div', { class: 'meta' }, h('code', {}, c.dossier || '')),
-        h('div', { class: 'boutons' },
-          c.type === 'api' ? null : action(c.connecte ? t('Reconnecter') : t('Se connecter'), 'connecter', { ok: t('Une fenêtre de connexion s’est ouverte : suis les étapes dans ton navigateur.'), titre: t('Ouvre la connexion officielle de Claude Code (navigateur)') }),
-          c.connecte && c.type !== 'api' ? action(t('Déconnecter'), 'deconnecter', { confirmer: t('Déconnecter {nom} ? Les dossiers en cours sur ce compte s’arrêteront.', { nom: c.nom }) }) : null,
-          c.id !== S.compteDefaut ? action(t('Par défaut'), 'modifier', { corps: { defaut: true }, titre: t('Compte choisi par défaut pour les nouvelles demandes') }) : null,
-          c.connecte ? action(t('Lire les limites'), 'limites', { titre: t('Relit les limites du forfait (sans tokens)') }) : null,
-          S.comptes.length > 1 ? action(t('Retirer'), 'supprimer', { danger: true, confirmer: t('Retirer {nom} de la liste ? Son dossier de connexion reste sur le disque.', { nom: c.nom }) }) : null));
-    });
-    const nouveau = champ({ placeholder: t('Nom du nouveau compte (ex. Claude perso)'), maxlength: '40' });
-    const ajouter = async (partage = false) => {
-      const r = await this.poster('/api/comptes/ajouter', { nom: nouveau.value, partage }, partage ? t('Compte ajouté.') : t('Compte ajouté : une fenêtre de connexion s’est ouverte, suis les étapes dans ton navigateur.'));
-      if (r) nouveau.value = '';
-    };
-    const dejaPartage = S.comptes.some((c) => c.partage);
+    const { cout, personnalise } = travailDe(R);
+    const base = (R.niveauxTravail && R.niveauxTravail[cout]) || null;
+    const enregistrer = (travail, ok) => this.reglage({ travail }, ok).then(() => this.rendre());
+    const niveaux = h('div', { class: 'param-niveaux', role: 'radiogroup', 'aria-label': t('Coût') }, NIVEAUX.map((n) =>
+      h('button', {
+        type: 'button', role: 'radio', class: 'param-niveau' + (n === cout ? ' choisi' : ''), 'aria-checked': n === cout ? 'true' : 'false',
+        on: { click: () => { if (n !== cout) enregistrer({ cout: n, personnalise }, t('Coût des nouvelles demandes : {niveau}.', { niveau: nomNiveau(n) })); } },
+      }, h('b', {}, nomNiveau(n)), n === NIVEAU_DEFAUT ? h('span', { class: 'meta' }, ' ' + t('(défaut)')) : null, h('small', {}, phraseNiveau(n)))));
+    // fournisseurs sans compaction, plafond par tâche ni sous-agent (Codex) : ces boutons sont sans effet pour eux
+    const sans = [...new Set(CAPACITES_COUT.flatMap((c) => sansCapacite(S, c)))];
+    const nb = Object.keys(personnalise).length;
+    const perso = h('details', { class: 'param-cout-perso', open: this.persoCoutOuvert ? true : null, on: { toggle: (e) => { this.persoCoutOuvert = e.target.open; } } },
+      h('summary', {}, t('Personnaliser') + (nb ? ' — ' + t('{n} valeur(s) changée(s)', { n: nb }) : '')),
+      h('small', { class: 'meta' }, t('Valeurs du niveau {niveau}. Une valeur changée ici vaut pour les demandes envoyées à ce niveau ; une demande envoyée à un autre niveau prend les valeurs de cet autre niveau.', { niveau: nomNiveau(cout) })),
+      ...(base ? boutonsCout().map((b) => this.ligneCout(b, base[b.cle], personnalise, cout, enregistrer)) : [h('div', { class: 'vide' }, t('Valeurs des niveaux indisponibles.'))]));
     return [
-      h('p', { class: 'meta' }, t('Chaque compte est une connexion Claude séparée (abonnement Pro, Max, Team ou Enterprise). La connexion se fait dans une petite fenêtre puis dans ton navigateur : le QG ne voit jamais ton mot de passe ni ton jeton.')),
-      ...lignes,
-      h('h4', {}, t('Ajouter un compte')),
-      h('div', { class: 'param-ajout' }, nouveau, h('button', { class: 'petit ok', type: 'button', on: { click: () => ajouter(false) } }, t('Ajouter et se connecter'))),
-      R.claudeCodeLocal && !dejaPartage
-        ? h('div', { class: 'param-ajout' }, h('button', { class: 'petit', type: 'button', on: { click: () => ajouter(true) } }, t('Utiliser le compte Claude Code déjà connecté sur ce PC')), h('small', { class: 'meta' }, t('Partage la connexion de Claude Code (dossier .claude) : rien à refaire.')))
-        : null,
-      h('h4', {}, t('Ou avec une clé API')),
-      this.ajoutCleApi(),
-      h('p', { class: 'meta' }, t('Tu peux aussi double-cliquer sur ajouter-un-compte.bat dans le dossier du QG.')),
+      niveaux,
+      h('small', { class: 'meta' }, t('Pour les nouvelles demandes ; modifiable aussi demande par demande, en bas de l’écran. Le modèle et l’effort des agents et du DG ne changent jamais.')),
+      sans.length ? h('div', { class: 'meta' }, t('Avec {fournisseurs}, la compaction, le plafond par tâche et le sous-agent d’exploration sont sans effet ; le reste s’applique.', { fournisseurs: sans.join(', ') })) : null,
+      perso,
+      ligne(t('Sorties de tests'),
+        h('label', { class: 'param-case' },
+          h('input', { type: 'checkbox', checked: R.filtreTests !== false, on: { change: (e) => {
+            this.reglage({ filtreTests: e.target.checked }, e.target.checked ? t('Les sorties de tests des agents seront raccourcies.') : t('Les agents liront les sorties de tests en entier.'));
+          } } }),
+          ' ', t('Raccourcir les sorties des commandes de test des agents (node --test, npm test, vitest…)')),
+        h('small', { class: 'meta' }, t('Garde le début, chaque échec en entier et le résumé ; le code de sortie ne change pas. Moins de texte lu, donc moins de tokens. Agents Claude seulement ; vaut pour les prochaines tâches.'))),
     ];
   }
 
-  // Compte « clé API » (console.anthropic.com) : facturé au token, sans connexion par navigateur.
-  ajoutCleApi() {
-    const nom = champ({ placeholder: t('Nom (ex. Claude API)'), maxlength: '40', style: { maxWidth: '200px' } });
-    const cle = champ({ type: 'password', placeholder: 'sk-ant-…', autocomplete: 'off', 'aria-label': t('Clé API') });
-    return h('div', {},
-      h('div', { class: 'param-ajout' }, nom, cle,
-        h('button', { class: 'petit', type: 'button', on: { click: async () => {
-          if (!cle.value.trim()) return;
-          const r = await this.poster('/api/comptes/ajouter', { nom: nom.value || t('Claude API'), cleApi: cle.value.trim() }, t('Compte ajouté.'));
-          if (r) {
-            cle.value = '';
-            nom.value = '';
-          }
-        } } }, t('Ajouter'))),
-      h('small', { class: 'meta' }, t('Facturée au token par Anthropic (console.anthropic.com). La clé reste sur ce PC, dans config\\comptes.json ; les agents ne peuvent pas la lire.')));
+  // Une ligne de « Personnaliser » : valeur actuelle (celle du niveau, ou la tienne), « revenir au niveau ».
+  ligneCout(b, valeurNiveau, perso, cout, enregistrer) {
+    const change = Object.prototype.hasOwnProperty.call(perso, b.cle);
+    const v = change ? perso[b.cle] : valeurNiveau;
+    const poser = (nv) => {
+      const p = { ...perso };
+      if (nv === valeurNiveau) delete p[b.cle];
+      else p[b.cle] = nv;
+      return enregistrer({ cout, personnalise: p }, t('Enregistré.'));
+    };
+    let ctl;
+    let unite = null;
+    if (b.choix) {
+      ctl = h('select', { class: 'champ', 'aria-label': b.lib, on: { change: (e) => poser(JSON.parse(e.target.value)) } },
+        b.choix.map(([x, lib]) => h('option', { value: JSON.stringify(x), selected: x === v ? true : null }, lib)));
+    } else {
+      const k = b.type === 'k' ? 1000 : 1;
+      const min = b.min ?? (b.type === 'pourcent' || b.type === 'facteur' ? 1 : 0);
+      const max = b.max ?? (b.type === 'pourcent' ? 100 : null);
+      const afficher = (x) => (x == null ? '' : String(x / k));
+      ctl = champ({ type: 'number', min: String(min), max: max != null ? String(max) : null, step: b.type === 'facteur' ? '0.5' : '1', value: afficher(v), placeholder: b.nul || null, 'aria-label': b.lib, style: { width: '110px' } });
+      ctl.addEventListener('change', () => {
+        const brut = ctl.value.trim();
+        if (!brut && b.nul) return poser(null);
+        const n = Number(brut);
+        if (!brut || !Number.isFinite(n) || n < min || (max != null && n > max)) {
+          this.ui.toast('warn', t('Valeur invalide.'));
+          ctl.value = afficher(v);
+          return;
+        }
+        poser(b.type === 'facteur' ? n : Math.round(n * k));
+      });
+      unite = { k: t('k tokens'), pourcent: t('% de ta fenêtre de 5 h'), facteur: t('× l’estimation de la tâche') }[b.type] || null;
+    }
+    const sans = b.capacite ? sansCapacite(this.store, b.capacite) : [];
+    const note = [change ? t('Niveau {niveau} : {valeur}.', { niveau: nomNiveau(cout), valeur: texteValeur(b, valeurNiveau) }) : null, b.aide || null].filter(Boolean).join(' ');
+    return ligne(b.lib, ctl, unite ? h('span', { class: 'meta' }, unite) : null,
+      change ? h('span', { class: 'badge perso' }, t('personnalisé')) : null,
+      change ? h('button', { class: 'petit', type: 'button', on: { click: () => poser(valeurNiveau) } }, t('Revenir au niveau')) : null,
+      sans.length ? h('span', { class: 'badge st-gris' }, t('sans effet pour {fournisseurs}', { fournisseurs: sans.join(', ') })) : null,
+      note ? h('small', { class: 'meta' }, note) : null);
+  }
+
+  // ---------------------------------------------------------------- comptes IA
+  // Comptes groupés par fournisseur (Claude, ChatGPT · Codex, autres agents ACP) : connexion, déconnexion,
+  // renommage, compte par défaut ; ajout en trois choix (fournisseur → accès → nom ou clé ; pour un agent ACP,
+  // l'agent ou sa commande) ; compte qui exécute les tâches.
+  // accueil : configuration guidée du premier lancement (comptes et ajout seulement) ; apres : la redessine.
+  comptes({ accueil = false, apres = null } = {}) {
+    const S = this.store;
+    const R = S.reglages;
+    const fournisseurs = S.fournisseurs && S.fournisseurs.length ? S.fournisseurs : [{ id: 'claude', nom: 'Claude', acces: ['abonnement', 'cle'], connexions: ['navigateur'], present: true }];
+    const nomFournisseur = (id) => (fournisseurs.find((f) => f.id === id) || { nom: id }).nom;
+    const agentsAcp = S.agentsAcp || [];
+    const majDepuis = (r) => {
+      if (r && r.comptes) {
+        S.comptes = r.comptes;
+        S.compteDefaut = r.compteDefaut;
+        if (r.fournisseurs) S.fournisseurs = r.fournisseurs;
+        if (r.agentsAcp) S.agentsAcp = r.agentsAcp;
+        if ('compteAgents' in r) S.compteAgents = r.compteAgents;
+        this.rendre();
+        if (apres) apres();
+        this.ui.majComptes();
+      }
+    };
+    const ligneCompte = (c) => {
+      const nom = champ({ value: c.nom, maxlength: '40', 'aria-label': t('Nom du compte') });
+      nom.addEventListener('change', () => this.poster('/api/comptes/' + c.id + '/modifier', { nom: nom.value }, t('Compte renommé.')));
+      const action = (lib, route, opts = {}) => h('button', {
+        class: 'petit' + (opts.danger ? ' danger' : '') + (opts.ok1 ? ' ok' : ''), type: 'button', title: opts.titre || null,
+        on: {
+          click: async () => {
+            if (opts.confirmer && !window.confirm(opts.confirmer)) return;
+            majDepuis(await this.poster('/api/comptes/' + c.id + '/' + route, opts.corps || {}, opts.ok || null));
+          },
+        },
+      }, lib);
+      const codex = c.fournisseur === 'codex';
+      const acp = c.fournisseur === 'acp';
+      const agentAcp = acp ? agentsAcp.find((a) => a.id === c.agent) : null;
+      const cle = c.type === 'api';
+      const profils = c.capacites && c.capacites.profils ? c.capacites.profils : null;
+      const refuses = profils ? Object.keys(profils).filter((p) => profils[p] === 'refuse') : [];
+      return h('div', { class: 'param-compte' + (c.connecte ? ' connecte' : '') },
+        h('div', { class: 'param-compte-tete' },
+          nom,
+          h('span', { class: 'badge st-gris' }, acp ? (agentAcp ? agentAcp.nomCourt : t('agent ACP personnalisé')) : nomFournisseur(c.fournisseur || 'claude')),
+          h('span', { class: 'badge ' + (c.connecte ? 'st-ok' : 'st-ko') }, c.connecte ? t('connecté') : t('non connecté')),
+          badgeQualification(c),
+          c.id === S.compteDefaut ? h('span', { class: 'badge perso' }, t('par défaut')) : null,
+          c.id === S.compteAgents ? h('span', { class: 'badge perso' }, t('agents')) : null),
+        h('div', { class: 'meta' }, [cle ? t('clé API') : t('abonnement'), c.abonnement, c.email, c.partage ? t('partagé avec Claude Code sur ce PC') : null].filter(Boolean).join(' · ')),
+        h('div', { class: 'meta' }, h('code', {}, c.dossier || '')),
+        codex && refuses.length ? h('div', { class: 'meta' }, t('Profils refusés sur ce compte : {profils} (Codex ne peut pas demander ton accord action par action).', { profils: refuses.join(', ') })) : null,
+        acp ? h('div', { class: 'meta' }, t('Agent ACP : le QG répond à chacune de ses demandes (fichiers, commandes, permissions) ; profil ops et mode prudent refusés. Pas encore qualifié par le QG : à essayer d’abord sur un petit projet.')) : null,
+        h('div', { class: 'boutons' },
+          cle || (acp && !agentAcp) ? null : action(c.connecte ? t('Reconnecter') : t('Se connecter'), 'connecter', { ok: acp ? t('Une fenêtre de connexion s’est ouverte : suis les étapes de l’agent.') : t('Une fenêtre de connexion s’est ouverte : suis les étapes dans ton navigateur.'), titre: acp ? t('Ouvre la connexion de l’agent dans une fenêtre de terminal') : codex ? t('Ouvre la connexion officielle de Codex (navigateur)') : t('Ouvre la connexion officielle de Claude Code (navigateur)'), ok1: !c.connecte }),
+          codex && !cle ? action(t('Par code d’appareil'), 'connecter', { corps: { mode: 'code' }, ok: t('Une fenêtre s’est ouverte : saisis le code affiché sur la page ChatGPT.'), titre: t('Si la page de connexion ne s’ouvre pas : connexion par code (à activer dans les paramètres de sécurité ChatGPT)') }) : null,
+          c.connecte && !cle && !acp ? action(t('Déconnecter'), 'deconnecter', { confirmer: t('Déconnecter {nom} ? Les dossiers en cours sur ce compte s’arrêteront.', { nom: c.nom }) }) : null,
+          c.id !== S.compteDefaut ? action(t('Par défaut'), 'modifier', { corps: { defaut: true }, titre: t('Compte choisi par défaut pour les nouvelles demandes') }) : null,
+          c.connecte && !acp ? action(t('Lire les limites'), 'limites', { titre: t('Relit les limites du forfait (sans tokens)') }) : null,
+          action(t('Retirer'), 'supprimer', { danger: true, confirmer: t('Retirer {nom} de la liste ? Son dossier de connexion reste sur le disque.', { nom: c.nom }) })));
+    };
+    const groupes = fournisseurs.map((f) => {
+      const liste = S.comptes.filter((c) => (c.fournisseur || 'claude') === f.id);
+      if (!liste.length) return null;
+      return h('div', { class: 'param-groupe' }, h('h4', {}, f.nom), ...liste.map(ligneCompte));
+    });
+    // ---- ajout : fournisseur → accès → nom (ou clé)
+    const selF = h('select', { class: 'champ', 'aria-label': t('Fournisseur') }, fournisseurs.map((f) => h('option', { value: f.id, selected: f.id === this.ajoutFournisseur ? true : null }, f.nom + (f.present ? '' : ' — ' + t('non installé')))));
+    const selAcces = h('select', { class: 'champ', 'aria-label': t('Type d’accès') });
+    // Codex absent : installation à la demande (version épinglée, dans le dossier du QG), suivie ici
+    const zoneInstall = h('div', { class: 'param-install' });
+    const majInstall = (f) => {
+      const inst = S.installationCodex || { etat: f.present ? 'installe' : 'absent', lignes: [] };
+      if (f.id !== 'codex' || (f.present && inst.etat !== 'erreur' && inst.etat !== 'installation')) {
+        zoneInstall.replaceChildren();
+        return;
+      }
+      const enCours = inst.etat === 'installation';
+      const derniere = (inst.lignes || []).slice(-1)[0] || '';
+      zoneInstall.replaceChildren(...[
+        h('div', { class: 'boutons' },
+          h('button', {
+            class: 'petit ok', type: 'button', disabled: enCours ? true : null,
+            title: t('Installe Codex {version} dans le dossier runtime/codex du QG, avec le npm du QG', { version: inst.version || '' }),
+            on: { click: async () => {
+              const r = await this.poster('/api/codex/installer', {}, null);
+              if (r) {
+                S.installationCodex = r;
+                this.rendre();
+                if (apres) apres();
+              }
+            } },
+          }, enCours ? t('Installation de Codex…') : inst.etat === 'erreur' ? t('Réessayer l’installation de Codex') : t('Installer Codex'))),
+        enCours ? h('small', { class: 'meta' }, t('Téléchargement et installation en cours (une à deux minutes).') + (derniere ? ' ' + derniere : '')) : null,
+        inst.etat === 'erreur' ? h('small', { class: 'meta st-ko' }, t('L’installation de Codex a échoué : {erreur}', { erreur: inst.erreur || '' })) : null,
+      ].filter(Boolean)); // replaceChildren écrirait « null » en texte
+    };
+    // agent ACP : un agent connu (Grok, Cursor…) ou une commande personnalisée
+    const selAgent = h('select', { class: 'champ', 'aria-label': t('Agent') },
+      ...agentsAcp.map((a) => h('option', { value: a.id, selected: a.id === this.ajoutAgent ? true : null }, a.nom + (a.present ? '' : ' — ' + t('non installé')))),
+      h('option', { value: 'personnalise', selected: this.ajoutAgent === 'personnalise' ? true : null }, t('autre agent ACP (commande)')));
+    const commandeAcp = champ({ placeholder: t('commande ACP, ex. mon-agent --acp'), maxlength: '400', 'aria-label': t('Commande de l’agent') });
+    const varCleAcp = champ({ placeholder: t('variable de la clé, ex. MON_AGENT_API_KEY'), maxlength: '64', 'aria-label': t('Variable de la clé') });
+    const nouveau = champ({ placeholder: t('Nom du compte (ex. perso, pro)'), maxlength: '40' });
+    const cle = champ({ type: 'password', placeholder: 'sk-…', autocomplete: 'off', 'aria-label': t('Clé API') });
+    const aide = h('small', { class: 'meta' });
+    const boutons = h('div', { class: 'param-ajout' });
+    const ajouter = async (opts = {}) => {
+      const f = selF.value;
+      const acces = selAcces.value;
+      const corps = { fournisseur: f, nom: nouveau.value, ...opts };
+      if (f === 'acp') {
+        corps.agent = selAgent.value;
+        if (selAgent.value === 'personnalise') {
+          if (!commandeAcp.value.trim()) return;
+          corps.commande = commandeAcp.value.trim();
+          if (varCleAcp.value.trim()) corps.varCle = varCleAcp.value.trim();
+        }
+      }
+      if (acces === 'cle') {
+        if (!cle.value.trim()) return;
+        corps.cleApi = cle.value.trim();
+      }
+      const r = await this.poster('/api/comptes/ajouter', corps, null);
+      if (!r) return;
+      if (r.avertissement) this.ui.toast('erreur', r.avertissement);
+      else this.ui.toast('info', r.connexion ? t('Compte ajouté : une fenêtre de connexion s’est ouverte, suis les étapes dans ton navigateur.') : t('Compte ajouté.'));
+      nouveau.value = '';
+      cle.value = '';
+      commandeAcp.value = '';
+    };
+    const rafraichirAjout = () => {
+      const f = fournisseurs.find((x) => x.id === selF.value) || fournisseurs[0];
+      this.ajoutFournisseur = f.id;
+      const accesActuel = selAcces.value || this.ajoutAcces;
+      majInstall(f);
+      const acp = f.id === 'acp';
+      const agent = acp ? agentsAcp.find((a) => a.id === selAgent.value) || null : null;
+      if (acp) this.ajoutAgent = selAgent.value;
+      const perso = acp && selAgent.value === 'personnalise';
+      selAgent.style.display = acp ? '' : 'none';
+      commandeAcp.style.display = perso ? '' : 'none';
+      selAcces.replaceChildren(...(agent ? agent.acces : f.acces).map((a) => h('option', { value: a, selected: a === accesActuel ? true : null }, a === 'cle' ? t('clé API (facturée à l’usage)') : t('abonnement'))));
+      const parCle = selAcces.value === 'cle';
+      this.ajoutAcces = selAcces.value;
+      cle.style.display = parCle ? '' : 'none';
+      varCleAcp.style.display = perso && parCle ? '' : 'none';
+      cle.placeholder = f.id === 'claude' ? 'sk-ant-…' : acp ? t('clé API de l’agent') : 'sk-…';
+      const dejaPartage = S.comptes.some((c) => c.partage);
+      boutons.replaceChildren(...[
+        parCle
+          ? h('button', { class: 'petit ok', type: 'button', on: { click: () => ajouter() } }, t('Ajouter'))
+          : h('button', { class: 'petit ok', type: 'button', on: { click: () => ajouter() } }, t('Ajouter et se connecter')),
+        !parCle && f.connexions && f.connexions.includes('code') ? h('button', { class: 'petit', type: 'button', on: { click: () => ajouter({ mode: 'code' }) } }, t('Ajouter et se connecter par code')) : null,
+        !parCle && f.id === 'claude' && R.claudeCodeLocal && !dejaPartage ? h('button', { class: 'petit', type: 'button', on: { click: () => ajouter({ partage: true }) } }, t('Utiliser le compte Claude Code déjà connecté sur ce PC')) : null,
+      ].filter(Boolean));
+      if (acp) {
+        aide.textContent = (perso
+          ? t('Agent qui parle le protocole ACP (agentclientprotocol.com) : donne la commande qui le lance en mode ACP.') + ' '
+          : agent ? (agent.present ? '' : t('{nom} n’est pas installé sur ce PC : {installation}', { nom: agent.nomCourt, installation: t(agent.installation) }) + ' ') + (!parCle && agent.connexion ? t(agent.connexion) + ' ' : '') : '')
+          + (parCle ? t('La clé reste sur ce PC, dans config\\comptes.json ; seul cet agent la reçoit, les autres agents ne peuvent pas la lire.') : t('La connexion se fait dans l’agent lui-même ; le QG ne voit jamais ton jeton.')) + ' '
+          + t('Le QG répond à chacune des demandes de l’agent (fichiers, commandes, permissions) et refuse le profil ops et le mode prudent.');
+      } else if (f.id === 'codex') {
+        aide.textContent = parCle
+          ? t('Clé API OpenAI (platform.openai.com), facturée à l’usage. La clé reste sur ce PC, dans config\\comptes.json ; les agents ne peuvent pas la lire.')
+          : t('Abonnement ChatGPT (Plus, Pro, Business…). Un compte = une personne, sur son propre PC : pas de partage ni de rotation de comptes. La connexion se fait dans une fenêtre puis sur la page ChatGPT ; le jeton reste dans le dossier du compte, jamais lu par le QG.') + (f.present ? '' : ' ' + t('Codex n’est pas encore installé sur ce PC : le bouton « Installer Codex » l’installe dans le dossier du QG (ou installe le Codex CLI officiel).'));
+      } else {
+        aide.textContent = parCle
+          ? t('Facturée au token par Anthropic (console.anthropic.com). La clé reste sur ce PC, dans config\\comptes.json ; les agents ne peuvent pas la lire.')
+          : t('Abonnement Claude (Pro, Max, Team ou Enterprise). La connexion se fait dans une petite fenêtre puis dans ton navigateur : le QG ne voit jamais ton mot de passe ni ton jeton.');
+      }
+    };
+    selF.addEventListener('change', rafraichirAjout);
+    selAgent.addEventListener('change', rafraichirAjout);
+    selAcces.addEventListener('change', rafraichirAjout);
+    rafraichirAjout();
+    const intro = h('p', { class: 'meta' }, t('Chaque compte est une connexion séparée à un fournisseur d’IA (Claude, ChatGPT · Codex, Grok, Cursor et d’autres agents ACP), avec son propre dossier de connexion : le QG ne voit jamais ton mot de passe ni ton jeton. Le compte par défaut reçoit tes demandes (le DG) ; les tâches peuvent tourner sur un autre compte.'));
+    const ajout = [
+      h('h4', {}, t('Ajouter un compte')),
+      h('div', { class: 'param-ajout' }, selF, selAgent, selAcces, commandeAcp, nouveau, cle, varCleAcp),
+      boutons,
+      zoneInstall,
+      aide,
+    ];
+    if (accueil) return [intro, ...groupes, ...ajout];
+    // ---- compte qui exécute les tâches
+    const selAgents = h('select', { class: 'champ', 'aria-label': t('Agents de la demande') },
+      h('option', { value: '', selected: !S.compteAgents ? true : null }, t('même compte que le DG')),
+      ...S.comptes.map((c) => h('option', { value: c.id, selected: c.id === S.compteAgents ? true : null }, c.nom + ' (' + nomFournisseur(c.fournisseur || 'claude') + ')' + (c.connecte ? '' : ' — ' + t('non connecté')))));
+    selAgents.addEventListener('change', async () => {
+      const r = await this.reglage({ compteAgents: selAgents.value || null }, t('Réglage enregistré : s’applique aux prochaines demandes.'));
+      if (r) S.compteAgents = selAgents.value || null;
+      this.rendre();
+    });
+    const strict = h('input', { type: 'checkbox', checked: R.codex && R.codex.lectureStricte ? true : null, on: { change: (e) => this.reglage({ codex: { lectureStricte: e.target.checked } }) } });
+    return [
+      intro,
+      ...groupes,
+      ...ajout,
+      h('h4', {}, t('Agents de la demande')),
+      ligne(t('Les tâches sont exécutées par'), selAgents, h('small', { class: 'meta' }, t('Le DG planifie sur le compte de la demande ; ses agents et vérificateurs tournent sur ce compte-ci. Avec Codex : profils lecture, édition et édition+tests (jamais ops ni mode prudent), écriture limitée aux dossiers de la tâche, réseau coupé.'))),
+      S.comptes.some((c) => c.fournisseur === 'codex')
+        ? h('label', { class: 'param-case' }, strict, ' ', t('Lecture stricte pour Codex : refuser aussi les profils de lecture (en sandbox lecture seule, Codex peut lancer des commandes sans rien écrire ni envoyer).'))
+        : null,
+      h('p', { class: 'meta' }, t('Tu peux aussi double-cliquer sur {script} dans le dossier du QG.', { script: scriptPlateforme(this.store, 'ajouterCompte') })),
+    ];
   }
 
   // ---------------------------------------------------------------- dossiers et étages
@@ -330,21 +561,23 @@ export class Parametres {
           h('button', { class: 'petit danger', type: 'button', on: { click: () => window.confirm(t('Retirer {r} des dossiers racines ?', { r })) && majRacines(racines.filter((x) => x !== r)) } }, t('Retirer')))))
         : h('div', { class: 'vide' }, t('Aucun dossier racine : ajoute le dossier où sont tes projets.')),
       h('div', { class: 'param-ajout' },
-        h('button', { class: 'petit ok', type: 'button', on: { click: async () => { const r = await this.poster('/api/choisir-dossier', { titre: t('Choisis un dossier qui contient tes projets') }); if (r && r.chemin) ajouterRacine(r.chemin); } } }, t('Choisir un dossier…')),
+        h('button', { class: 'petit ok', type: 'button', on: { click: async (ev) => { const b = ev.currentTarget; if (b.disabled) return; const txt = b.textContent; b.disabled = true; b.textContent = t('Fenêtre ouverte…'); let r = null; try { r = await this.poster('/api/choisir-dossier', { titre: t('Choisis un dossier qui contient tes projets') }); } finally { b.disabled = false; b.textContent = txt; } if (r && r.chemin) ajouterRacine(r.chemin); } } }, t('Choisir un dossier…')),
         manuel,
         h('button', { class: 'petit', type: 'button', on: { click: () => ajouterRacine(manuel.value.trim()) } }, t('Ajouter'))),
       h('h4', {}, t('Étages')),
+      h('div', { class: 'param-ajout' },
+        h('button', { class: 'petit ok', type: 'button', title: t('Un étage à toi : un nom, un type et un ou plusieurs dossiers, même sans projet détecté'), on: { click: () => this.formulaireEtage() } }, '＋ ' + t('Nouvel étage'))),
       h('div', { class: 'param-etages' }, etages.map((e) => this.ligneEtage(e))),
       h('h4', {}, t('Projets détectés sans étage')),
       !this.projets ? h('div', { class: 'vide' }, t('Recherche…'))
         : libres.length
           ? h('ul', { class: 'param-liste' }, libres.map((p) => h('li', {},
-            h('span', { class: 'badge' }, t(TYPES_PROJET[p.type] || p.type)), ' ', h('b', {}, p.nom), ' ', h('code', { class: 'meta' }, p.dossier),
-            h('button', { class: 'petit ok', type: 'button', on: { click: async () => { if (await this.poster('/api/etages/ajouter', { dossier: p.dossier }, t('Étage ajouté.'))) { this.projets = null; this.rendre(); } } } }, t('Ajouter l’étage')),
+            h('span', { class: 'badge' }, p.racine ? t('Dossier entier') : t(TYPES_PROJET[p.type] || p.type)), ' ', h('b', {}, p.nom), ' ', h('code', { class: 'meta' }, p.dossier),
+            h('button', { class: 'petit ok', type: 'button', on: { click: async () => { if (await this.poster('/api/etages/ajouter', { dossier: p.dossier }, t('Étage ajouté.'))) { this.projets = null; this.rendre(); } } } }, p.racine ? t('Utiliser ce dossier entier comme étage') : t('Ajouter l’étage')),
             h('button', { class: 'petit', type: 'button', on: { click: async () => { if (await this.poster('/api/etages/ignorer', { dossier: p.dossier })) { this.projets = null; this.rendre(); } } } }, t('Ignorer')))))
           : h('div', { class: 'vide' }, t('Tous les projets détectés ont un étage.')),
       h('div', { class: 'boutons' },
-        h('button', { class: 'petit', type: 'button', on: { click: async () => { const r = await this.poster('/api/choisir-dossier', { titre: t('Choisis le dossier d’un projet') }); if (r && r.chemin && (await this.poster('/api/etages/ajouter', { dossier: r.chemin }, t('Étage ajouté.')))) { this.projets = null; this.rendre(); } } } }, t('Ajouter un autre dossier comme étage…')),
+        h('button', { class: 'petit', type: 'button', on: { click: async (ev) => { const b = ev.currentTarget; if (b.disabled) return; const txt = b.textContent; b.disabled = true; b.textContent = t('Fenêtre ouverte…'); let r = null; try { r = await this.poster('/api/choisir-dossier', { titre: t('Choisis le dossier d’un projet') }); } finally { b.disabled = false; b.textContent = txt; } if (r && r.chemin && (await this.poster('/api/etages/ajouter', { dossier: r.chemin }, t('Étage ajouté.')))) { this.projets = null; this.rendre(); } } } }, t('Ajouter un autre dossier comme étage…')),
         h('button', { class: 'petit', type: 'button', on: { click: () => { this.projets = null; this.rendre(); } } }, t('Relancer la détection'))),
     ];
   }
@@ -364,7 +597,67 @@ export class Parametres {
       h('div', { class: 'boutons' },
         e.projet ? h('button', { class: 'petit', type: 'button', on: { click: () => this.editerFiche(e) } }, t('Fiche du projet')) : null,
         e.projet ? h('button', { class: 'petit', type: 'button', on: { click: () => this.ui.lecteur.documents(e.id) } }, t('Documents .md')) : null,
+        e.projet && !fixe ? h('button', { class: 'petit', type: 'button', title: t('Ajouter ou retirer des dossiers de cet étage'), on: { click: () => this.formulaireEtage(e) } }, t('Dossiers…')) : null,
         fixe ? null : h('button', { class: 'petit danger', type: 'button', on: { click: async () => { if (window.confirm(t('Retirer l’étage {nom} ? Le projet lui-même n’est pas touché.', { nom: e.nom })) && (await this.poster('/api/etages/' + encodeURIComponent(e.id) + '/retirer', {}))) { this.projets = null; this.rendre(); } } } }, t('Retirer'))));
+  }
+
+  // « ＋ Nouvel étage » (sans `e`) : nom, type et un ou plusieurs dossiers, même sans projet détecté.
+  // Avec `e` : ajouter ou retirer des dossiers d'un étage existant. Le premier dossier est le principal
+  // (dossier de travail des agents) ; les autres leur sont ouverts aussi.
+  formulaireEtage(e = null) {
+    const dossiers = e ? [...(e.dossiers || [e.projet])].filter(Boolean) : [];
+    const m = ouvrirModale({ titre: e ? t('Dossiers — {nom}', { nom: e.nom }) : t('Nouvel étage'), classe: 'nouvel-etage' });
+    const nom = champ({ placeholder: t('Nom de l’étage (ex. Dev)'), maxlength: '40', 'aria-label': t('Nom de l’étage') });
+    const type = h('select', { class: 'champ', 'aria-label': t('Type') },
+      h('option', { value: '' }, t('Automatique (type détecté, sinon Projet)')),
+      TYPES_CHOIX.map((k) => h('option', { value: k }, t(TYPES_PROJET[k]))));
+    const liste = h('ul', { class: 'param-liste' });
+    const manuel = champ({ placeholder: t('ou colle un chemin, ex. D:\\Projets') });
+    const dessiner = () => liste.replaceChildren(...(dossiers.length
+      ? dossiers.map((d, i) => h('li', {},
+        h('code', {}, d),
+        i === 0 ? h('span', { class: 'badge perso', title: t('Dossier de travail des agents') }, t('principal')) : null,
+        dossiers.length > 1 ? h('button', { class: 'petit danger', type: 'button', on: { click: () => { dossiers.splice(i, 1); dessiner(); } } }, t('Retirer')) : null))
+      : [h('div', { class: 'vide' }, t('Aucun dossier pour l’instant.'))]));
+    const ajouter = (chemin) => {
+      chemin = String(chemin || '').trim();
+      if (!chemin || dossiers.some((d) => d.toLowerCase() === chemin.toLowerCase())) return;
+      dossiers.push(chemin);
+      if (!e && !nom.value.trim()) nom.value = chemin.replace(/[\\/]+$/, '').split(/[\\/]/).pop();
+      dessiner();
+    };
+    dessiner();
+    const valider = async (ev) => {
+      if (manuel.value.trim()) ajouter(manuel.value);
+      manuel.value = '';
+      if (!dossiers.length) return this.ui.toast('erreur', t('Ajoute au moins un dossier.'));
+      const b = ev.currentTarget;
+      b.disabled = true;
+      const r = e
+        ? await this.poster('/api/etages/' + encodeURIComponent(e.id) + '/modifier', { dossiers }, t('Dossiers de l’étage enregistrés.'))
+        : await this.poster('/api/etages/ajouter', { dossiers, nom: nom.value.trim() || null, type: type.value || null }, t('Étage ajouté.'));
+      b.disabled = false;
+      if (!r) return;
+      m.fermer();
+      this.projets = null;
+      if (this.m) this.rendre();
+    };
+    m.corps.append(
+      h('p', { class: 'meta' }, e
+        ? t('Le premier dossier est le dossier de travail des agents ; ils écrivent aussi librement dans les autres.')
+        : t('Un étage peut couvrir un dossier entier (même sans projet reconnu) ou plusieurs dossiers. Le premier est le dossier de travail des agents ; ils écrivent aussi librement dans les autres. Une fiche est créée automatiquement.')),
+      e ? null : ligne(t('Nom'), nom),
+      e ? null : ligne(t('Type'), type),
+      h('h4', {}, t('Dossiers')),
+      liste,
+      h('div', { class: 'param-ajout' },
+        h('button', { class: 'petit', type: 'button', on: { click: async (ev) => { const b = ev.currentTarget; if (b.disabled) return; const txt = b.textContent; b.disabled = true; b.textContent = t('Fenêtre ouverte…'); let r = null; try { r = await this.poster('/api/choisir-dossier', { titre: t('Choisis un dossier pour cet étage') }); } finally { b.disabled = false; b.textContent = txt; } if (r && r.chemin) ajouter(r.chemin); } } }, t('Choisir un dossier…')),
+        manuel,
+        h('button', { class: 'petit', type: 'button', on: { click: () => { ajouter(manuel.value); manuel.value = ''; } } }, t('Ajouter'))),
+      h('div', { class: 'boutons' },
+        h('button', { class: 'petit ok', type: 'button', on: { click: valider } }, e ? t('Enregistrer') : t('Créer l’étage')),
+        h('button', { class: 'petit', type: 'button', on: { click: () => m.fermer() } }, t('Annuler'))));
+    (e ? manuel : nom).focus();
   }
 
   async editerFiche(e) {
@@ -621,6 +914,10 @@ export class Parametres {
     return sectionSkills(this);
   }
 
+  priorites() {
+    return sectionPriorites(this);
+  }
+
   // ---------------------------------------------------------------- happiness manager
   bonheur() {
     const S = this.store;
@@ -748,11 +1045,14 @@ export class Parametres {
     return [
       h('h4', {}, t('Dictée')),
       dic.disponible
-        ? h('p', {}, t('Transcription locale disponible ({appareil}). Bouton 🎤 en bas de l’écran, ou Alt+M.', { appareil: dic.appareil || t('chargement du modèle…') }))
-        : h('div', {},
-          h('p', {}, t('La dictée locale (Whisper, sur ton PC, gratuite et privée) n’est pas installée.')),
-          h('p', { class: 'meta' }, t('Installation : environ 4 Go avec une carte NVIDIA (rapide), 1,5 Go sans (plus lent). En attendant, la dictée de Windows marche partout : Win+H.')),
-          h('div', { class: 'boutons' }, h('button', { class: 'petit ok', type: 'button', on: { click: () => this.poster('/api/dictee/installer', {}, t('L’installation s’ouvre dans une fenêtre à part. Relance le QG quand elle est finie.')) } }, t('Installer la dictée locale')))),
+        ? h('p', {}, t('Transcription locale disponible ({appareil}). Bouton 🎤 en bas de l’écran, ou {raccourci}.', { appareil: dic.appareil || t('chargement du modèle…'), raccourci: infosPlateforme(this.store).raccourciDictee }))
+        : !infosPlateforme(this.store).dicteeLocale
+          // Mac : pas encore d'installation de Whisper ; la dictée du système fait le travail
+          ? h('p', { class: 'meta' }, t('La dictée locale (Whisper) n’est pas encore disponible sur Mac. Utilise {systeme} dans la zone de saisie : ça marche partout.', { systeme: dicteeSysteme() }))
+          : h('div', {},
+            h('p', {}, t('La dictée locale (Whisper, sur ton PC, gratuite et privée) n’est pas installée.')),
+            h('p', { class: 'meta' }, t('Installation : environ 4 Go avec une carte NVIDIA (rapide), 1,5 Go sans (plus lent). En attendant, la dictée de Windows marche partout : Win+H.')),
+            h('div', { class: 'boutons' }, h('button', { class: 'petit ok', type: 'button', on: { click: () => this.poster('/api/dictee/installer', {}, t('L’installation s’ouvre dans une fenêtre à part. Relance le QG quand elle est finie.')) } }, t('Installer la dictée locale')))),
       h('h4', {}, t('Notifications')),
       h('p', { class: 'meta' }, t('Navigateur : {etat}. Quand le QG est au premier plan, la cloche suffit.', { etat: libPerm })),
       perm === 'default' ? h('button', { class: 'petit', type: 'button', on: { click: () => this.ui.notifs.activer() } }, t('Activer les notifications')) : null,
@@ -763,7 +1063,7 @@ export class Parametres {
   apropos() {
     const R = this.store.reglages;
     return [
-      h('p', {}, t('QG des agents : une société d’agents Claude que tu regardes travailler, étage par étage.')),
+      h('p', {}, t('QG des agents : une société d’agents IA que tu regardes travailler, étage par étage.')),
       h('dl', {},
         h('dt', {}, t('Version')), h('dd', {}, R.version || '—'),
         h('dt', {}, t('Dossier du QG')), h('dd', {}, h('code', {}, R.qg || '—')),
@@ -838,11 +1138,12 @@ export class Parametres {
           lancer.disabled = false;
         }
       } } }, t('Mettre à jour maintenant'));
-      boite.replaceChildren(
+      boite.replaceChildren(...[
         h('p', {}, h('b', {}, t('Version {version} disponible', { version: m.derniere })), date ? h('span', { class: 'meta' }, ' · ' + t('publiée le {date}', { date })) : null, h('span', { class: 'meta' }, ' · ' + t('tu as la {version}', { version: m.actuelle }))),
         m.notes ? h('details', { class: 'notes-maj', open: true }, h('summary', {}, t('Nouveautés')), md(m.notes, { titres: 'compact' })) : null,
         h('div', { class: 'boutons' }, lancer, h('a', { class: 'petit bouton-lien', href: m.url, target: '_blank', rel: 'noopener noreferrer' }, t('Voir sur GitHub'))),
-        m.dev ? h('p', { class: 'meta' }, t('Installation de développement (dossiers tests ou SPEC.md présents) : la mise à jour automatique est désactivée ici pour ne pas écraser ton travail.')) : null);
+        m.dev ? h('p', { class: 'meta' }, t('Installation de développement (dossiers tests ou SPEC.md présents) : la mise à jour automatique est désactivée ici pour ne pas écraser ton travail.')) : null,
+      ].filter(Boolean));
     };
     if (this.majInfo) afficher(this.majInfo);
     else boite.append(h('button', { class: 'petit', type: 'button', on: { click: () => verifier(true) } }, t('Vérifier les mises à jour')));

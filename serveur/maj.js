@@ -1,9 +1,10 @@
 // Mises à jour : la dernière version publiée sur GitHub, et le lancement de outils/mettre-a-jour.ps1
-// (le QG se ferme proprement, le script attend sa fin, met à jour, puis relance le QG).
-import { spawn } from 'node:child_process';
+// (outils/mettre-a-jour.sh sur Mac) : le QG se ferme proprement, le script attend sa fin, met à jour,
+// puis relance le QG.
 import fs from 'node:fs';
 import path from 'node:path';
 import { RACINE } from './config.js';
+import * as plateforme from './plateforme.js';
 import { t } from './i18n.js';
 
 export const DEPOT = 'Ishine93/agents-hq';
@@ -69,13 +70,11 @@ export async function verifierMaj({ forcer = false, delaiMs = 10000 } = {}) {
  */
 export function lancerMaj(arreter, { ouvrir = false, delaiMs = 1500 } = {}) {
   if (installationDev()) throw new Error(t('Installation de développement : la mise à jour automatique est désactivée ici.'));
-  const ps1 = path.join(RACINE, 'outils', 'mettre-a-jour.ps1');
-  const ligne = `start "Mise a jour du QG" powershell -NoProfile -ExecutionPolicy Bypass -File "${ps1}" -AttendrePid ${process.pid} -Relancer${ouvrir ? ' -Ouvrir' : ''}`;
-  spawn('cmd.exe', ['/d', '/c', ligne], { detached: true, stdio: 'ignore', windowsVerbatimArguments: true, cwd: RACINE }).unref();
+  plateforme.lancerMiseAJour({ pid: process.pid, ouvrir });
   setTimeout(arreter, delaiMs);
 }
 
-// Code de sortie qui dit à lancer.bat « mise à jour en cours, ferme ta fenêtre » (la mise à jour relance le QG).
+// Code de sortie qui dit à lancer.bat (lancer.command) « mise à jour en cours, ferme ta fenêtre » (la mise à jour relance le QG).
 export const CODE_MISE_A_JOUR = 42;
 
 /**

@@ -5,15 +5,49 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { RACINE } from './config.js';
-import { trouverCompte, envPour } from './comptes.js';
+import { trouverCompte, envPour, fournisseur as fournisseurDuCompte, adaptateur as adaptateurDuCompte } from './comptes.js';
+import { lireAppServer, modelesDe } from './ia/codex-app-server.js';
 
 const CACHE = path.join(RACINE, 'runtime', 'decouverte');
 
 // Nom du serveur tel qu'il apparaît dans les noms d'outils : mcp__<nom normalisé>__<outil>
 export const prefixeOutils = (nom) => `mcp__${nom.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
 
+// Codex : forfait, e-mail et modèles par `codex app-server` (account/read, model/list), sans tokens.
+// Si le protocole ne répond pas, la liste des équivalences sert de modèles.
+async function decouvrirCodex(compte, cwd) {
+  const r = await lireAppServer({ env: envPour(compte), cwd, methodes: ['account/read', 'model/list'] });
+  const c = r['account/read'] || {};
+  const compteInfo = c.account || c;
+  const resultat = {
+    compte: compte.id,
+    date: Date.now(),
+    fournisseur: 'codex',
+    abonnement: compte.cleApi ? 'API' : compteInfo.planType || compteInfo.plan_type || compteInfo.plan || null,
+    email: compteInfo.email || null,
+    organisation: compteInfo.organization || null,
+    modeles: modelesDe(r['model/list']) || adaptateurDuCompte(compte).modeles(compte),
+    mcp: [],
+    erreur: r.erreur || null,
+  };
+  fs.mkdirSync(CACHE, { recursive: true });
+  fs.writeFileSync(path.join(CACHE, `${compte.id}.json`), JSON.stringify(resultat, null, 2));
+  return resultat;
+}
+
+// Agent ACP : initialize + session/new sans message (modèles, efforts, modes, reprise), par l'adaptateur.
+async function decouvrirAcp(compte, cwd) {
+  const resultat = await adaptateurDuCompte(compte).decouvrir(compte, { cwd });
+  fs.mkdirSync(CACHE, { recursive: true });
+  fs.writeFileSync(path.join(CACHE, `${compte.id}.json`), JSON.stringify(resultat, null, 2));
+  return resultat;
+}
+
 export async function decouvrir(compteId, { cwd = path.join(RACINE, 'runtime'), attenteMcpMs = 25000 } = {}) {
   const compte = trouverCompte(compteId);
+  if (!compte) throw new Error('compte inconnu');
+  if (fournisseurDuCompte(compte) === 'codex') return decouvrirCodex(compte, cwd);
+  if (fournisseurDuCompte(compte) === 'acp') return decouvrirAcp(compte, cwd);
   let liberer;
   const silence = new Promise((r) => (liberer = r));
   async function* aucunMessage() {

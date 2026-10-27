@@ -2,10 +2,13 @@
 // Une tâche a des champs publics (protocole, docs/protocole.md) et un sous-objet `x` interne
 // (prompt, dépendances détaillées, sessions…) qui n'est jamais envoyé au site.
 import fs from 'node:fs';
+import { etatInstallation as etatInstallationCodex } from './ia/codex-installation.js';
 import path from 'node:path';
 import os from 'node:os';
 import { RACINE, REGLAGES, etages, racines } from './config.js';
-import { chargerComptes, compteConnecte, dossierConfig } from './comptes.js';
+import * as plateforme from './plateforme.js';
+import { chargerComptes, compteConnecte, dossierConfig, fournisseur as fournisseurDuCompte, adaptateur as adaptateurDuCompte } from './comptes.js';
+import { listeFournisseurs, FOURNISSEURS } from './ia/fournisseurs.js';
 import { decouverteEnCache } from './decouverte.js';
 import { vueMcp } from './mcp.js';
 import { etatDictee } from './dictee.js';
@@ -15,6 +18,8 @@ import { consoPublique } from './conso.js';
 import { t } from './i18n.js';
 import { appInstallee } from './navigateur.js';
 import { listeSkills } from './skills.js';
+import { noterReflexion } from './pensees.js';
+import { travailReglages, profilsTravail } from './travail.js';
 
 export let DOSSIERS_DIR = path.join(RACINE, 'dossiers');
 const VERSION = (() => {
@@ -46,6 +51,7 @@ export const etat = {
   terminaux: new Map(), // tacheId → dernières commandes Bash de l'agent (avec leur sortie)
   modifications: new Map(), // tacheId → derniers fichiers écrits par l'agent, avec leur diff
   pensees: new Map(), // cible ('dg' ou tacheId) → dernière pensée en direct
+  reflexions: new Map(), // cible → texte complet des derniers blocs de réflexion (plafonné)
   messages: [],
   dg: { etat: 'libre', dossier: null, etage: 'direction', action: null },
   ordonnanceur: { pause: null },
@@ -87,18 +93,33 @@ export function comptesPublics() {
   const { defaut, comptes } = chargerComptes();
   return {
     compteDefaut: defaut,
+    // compte qui exécute les tâches des nouvelles demandes (null = le compte du DG)
+    compteAgents: REGLAGES.compteAgents && comptes.some((c) => c.id === REGLAGES.compteAgents) ? REGLAGES.compteAgents : null,
+    fournisseurs: listeFournisseurs(),
+    // Codex installé à la demande (Réglages › Comptes IA) : absent, installation, installe, erreur
+    installationCodex: etatInstallationCodex(),
+    // agents ACP connus (Grok, Cursor…), présents ou non sur ce PC, pour l'ajout d'un compte « Autres agents »
+    agentsAcp: FOURNISSEURS.acp.cataloguePublic(),
     comptes: comptes.map((c) => {
       const d = decouverteEnCache(c.id);
+      const f = fournisseurDuCompte(c);
+      const cap = adaptateurDuCompte(c).capacites(c);
       return {
         id: c.id,
         nom: c.nom,
+        fournisseur: f,
+        acces: c.cleApi ? 'cle' : 'abonnement',
         connecte: compteConnecte(c),
         type: c.cleApi ? 'api' : 'abonnement',
         abonnement: c.cleApi ? 'API' : d?.abonnement || null,
         email: d?.email || null,
         dossier: dossierConfig(c),
         // Compte partagé avec Claude Code installé sur ce PC (~/.claude).
-        partage: path.resolve(dossierConfig(c)).toLowerCase() === path.join(os.homedir(), '.claude').toLowerCase(),
+        partage: f === 'claude' && plateforme.memeChemin(dossierConfig(c), path.join(os.homedir(), '.claude')),
+        // agent ACP du compte (grok, cursor… ou personnalise)
+        ...(f === 'acp' ? { agent: cap.agent, qualification: cap.qualification } : {}),
+        // ce que le fournisseur garantit (profils, mode prudent…), résumé pour le site
+        capacites: { profils: cap.profils, modePrudent: cap.modePrudent, fork: cap.fork, sessionsParCompte: cap.sessionsParCompte, compaction: cap.compaction !== false, plafondBudget: cap.plafondBudget !== false, sousAgents: cap.sousAgents !== false, filtreTests: cap.filtreTests !== false, modeles: cap.modeles !== false, effort: cap.effort !== false },
       };
     }),
   };
@@ -109,6 +130,9 @@ export function reglagesPublics() {
   return {
     langueInterface: REGLAGES.langueInterface,
     langueIA: REGLAGES.langueIA,
+    travail: travailReglages(REGLAGES),
+    niveauxTravail: profilsTravail().cout, // valeurs de chaque niveau (Réglages › Général › Coût › Personnaliser)
+    filtreTests: REGLAGES.filtreTests !== false,
     utilisateur: REGLAGES.utilisateur || '',
     racines: REGLAGES.racines || [],
     racinesValides: racines(),
@@ -119,6 +143,7 @@ export function reglagesPublics() {
     recolteAuto: REGLAGES.recolteAuto !== false,
     rojoPortsAuto: !!REGLAGES.rojoPortsAuto,
     gitAuto: REGLAGES.gitAuto === true,
+    traduireReflexion: REGLAGES.traduireReflexion === true,
     validationUtilisateur: REGLAGES.validationUtilisateur === true,
     ouvrirEnApp: REGLAGES.ouvrirEnApp !== false,
     entreeEnvoie: REGLAGES.entreeEnvoie === true,
@@ -132,7 +157,10 @@ export function reglagesPublics() {
     qg: RACINE,
     version: VERSION,
     demo: process.argv.includes('--demo'),
-    claudeCodeLocal: fs.existsSync(path.join(os.homedir(), '.claude', '.credentials.json')),
+    // Claude Code déjà connecté sur ce poste (~/.claude) : fichier sur Windows, trousseau sur Mac
+    claudeCodeLocal: compteConnecte({ id: 'local', configDir: null }),
+    // Windows ou Mac : noms des scripts, dictée locale possible, raccourci de dictée (voir plateforme.infos)
+    plateforme: plateforme.infos(),
   };
 }
 
@@ -149,8 +177,11 @@ export function modelesPublics() {
   return Object.fromEntries(
     comptes.map((c) => {
       const d = decouverteEnCache(c.id);
-      const liste = (d?.modeles || []).filter((m) => m.id !== 'default' && m.efforts.length).map((m) => ({ id: m.id, nom: m.nom, efforts: m.efforts }));
-      return [c.id, liste.length ? liste : [{ id: 'opus', nom: 'Opus 5.5', efforts: ['low', 'medium', 'high', 'xhigh', 'max'] }]];
+      // un agent ACP peut n'avoir aucun réglage d'effort : ses modèles restent proposés
+      const liste = (d?.modeles || []).filter((m) => m.id !== 'default' && (m.efforts?.length || fournisseurDuCompte(c) === 'acp')).map((m) => ({ id: m.id, nom: m.nom, efforts: m.efforts }));
+      // repli par fournisseur : Opus pour Claude (comme avant), la liste des équivalences pour les autres
+      const repli = fournisseurDuCompte(c) === 'claude' ? [{ id: 'opus', nom: 'Opus 5.5', efforts: ['low', 'medium', 'high', 'xhigh', 'max'] }] : adaptateurDuCompte(c).modeles(c).map(({ id, nom, efforts }) => ({ id, nom, efforts }));
+      return [c.id, liste.length ? liste : repli];
     }),
   );
 }
@@ -194,6 +225,7 @@ export function instantane() {
     services: [...etat.services.values()].map(({ lignes, ...s }) => ({ ...s, dernieresLignes: (lignes || []).slice(-20) })),
     terminaux: Object.fromEntries([...etat.terminaux].filter(([id]) => ids.has(id.split('-')[0]))),
     pensees: Object.fromEntries([...etat.pensees].filter(([, p]) => Date.now() - p.t < 120000)),
+    reflexions: Object.fromEntries(etat.reflexions),
     dictee: { disponible: etatDictee.disponible, appareil: etatDictee.appareil },
     messages: etat.messages.slice(-200),
     dg: etat.dg,
@@ -250,10 +282,20 @@ export function majDg(dg) {
 }
 
 // Pensée en direct d'un agent (cible = id de tâche) ou du DG (cible = 'dg').
+// Une réflexion arrive par morceaux (bloc, pos, ajout, fin) : on garde son texte complet pour l'état initial.
 export function pensee(cible, dossierId, p) {
   const ev = { cible, dossier: dossierId, ...p, t: Date.now() };
-  etat.pensees.set(cible, ev);
+  noterReflexion(etat.reflexions, cible, ev);
+  const { ajout, pos, ...dernier } = ev; // l'état initial porte déjà le texte complet
+  etat.pensees.set(cible, dernier);
   emettre('pensee', ev, dossierId);
+}
+
+// Traduction d'un bloc de réflexion terminé (Réglages › Général) : gardée avec le bloc, le texte d'origine reste.
+export function traductionPensee(cible, dossierId, bloc, traduction) {
+  const b = (etat.reflexions.get(cible) || []).find((x) => x.bloc === bloc);
+  if (b) b.traduction = traduction;
+  emettre('pensee_traduction', { cible, dossier: dossierId, bloc, traduction }, dossierId);
 }
 
 // Terminal d'un agent : chaque commande Bash (début puis fin avec sa sortie).
@@ -343,7 +385,10 @@ export function effacerDossier(id) {
     etat.terminaux.delete(tid);
     etat.modifications.delete(tid);
     etat.pensees.delete(tid);
+    etat.reflexions.delete(tid);
   }
+  const blocsDg = etat.reflexions.get('dg');
+  if (blocsDg) etat.reflexions.set('dg', blocsDg.filter((b) => b.dossier !== id));
   for (const [k, p] of etat.permissions) if (taches.has(p.tache)) etat.permissions.delete(k);
   for (const [k, x] of etat.decisions) if (taches.has(x.tache)) etat.decisions.delete(k);
   for (const [k, n] of etat.notifications) if (n.dossier === id || taches.has(n.tache)) etat.notifications.delete(k);

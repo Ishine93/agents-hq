@@ -11,6 +11,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { RACINE } from './config.js';
+import * as plateforme from './plateforme.js';
 import { chargerComptes, dossierConfig } from './comptes.js';
 
 // (QG_SKILLS_DOSSIER / QG_SKILLS_REGLAGES : une bibliothèque à part, pour les tests)
@@ -19,7 +20,8 @@ const LISTE = path.join(DOSSIER_SKILLS, 'skills');
 const FICHIER_REGLAGES = process.env.QG_SKILLS_REGLAGES || path.join(RACINE, 'config', 'skills.json');
 const PLUGIN = 'qg';
 const MAX_IMPORT = 8 * 1024 * 1024;
-const TAR = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe');
+// tar capable de lire un zip (bsdtar : System32\tar.exe sur Windows, /usr/bin/tar sur Mac)
+const TAR = plateforme.tar();
 
 // ---------------------------------------------------------------- fichiers
 function assurerBibliotheque() {
@@ -67,6 +69,8 @@ function composer(id, description, corps) {
 }
 
 const cheminSkill = (id) => path.join(LISTE, slug(id), 'SKILL.md');
+// Dossier d'un skill (copié vers un dossier lisible pour les fournisseurs qui ne voient pas config/).
+export const dossierSkill = (id) => path.join(LISTE, slug(id));
 export const idsSkills = () => {
   try {
     return fs.readdirSync(LISTE, { withFileTypes: true }).filter((e) => e.isDirectory() && fs.existsSync(path.join(LISTE, e.name, 'SKILL.md'))).map((e) => e.name).sort();

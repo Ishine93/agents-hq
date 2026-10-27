@@ -2,6 +2,8 @@
 // et détail au clic (forfait de chaque compte, jour, 7 jours, dossiers, économies du cache).
 import { h, ouvrirModale, api, fmtTokens } from './modale.js';
 import { t, locale } from './i18n.js';
+import { montant, ecart, texteEcart, rapportAppris } from './estimation.js';
+import { nomNiveau } from './cout.js';
 
 const totalTokens = (a) => (a ? (a.entree || 0) + (a.sortie || 0) + (a.cacheLu || 0) + (a.cacheEcrit || 0) : 0);
 // Un token relu depuis le cache coûte un dixième d'un token d'entrée : 90 % économisés.
@@ -11,7 +13,7 @@ const NOMS_FENETRES = {
   five_hour: 'Session (5 h)', seven_day: 'Semaine (7 jours)', seven_day_opus: 'Semaine — Opus', seven_day_sonnet: 'Semaine — Sonnet',
   seven_day_overage_included: 'Semaine — modèles inclus', overage: 'Dépassement',
 };
-const NOMS_ROLES = { dg: 'DG', tache: 'Agents', verif: 'Vérificateurs', bonheur: 'Joy (blagues)', autre: 'Autre' };
+const NOMS_ROLES = { dg: 'DG', tache: 'Agents', verif: 'Vérificateurs', bonheur: 'Joy (blagues)', traduction: 'Traduction des réflexions', autre: 'Autre' };
 
 function quand(ms) {
   if (!ms) return '';
@@ -30,6 +32,39 @@ function nomForfait(c, l) {
   const lu = l?.abonnement;
   if (!lu || !c.abonnement || motForfait(c.abonnement) === motForfait(lu)) return c.abonnement || lu || null;
   return 'Claude ' + lu.charAt(0).toUpperCase() + lu.slice(1);
+}
+
+// Lot C : seconde ligne d'une rangée (dossier ou tâche), sur toute la largeur après la référence.
+const SOUS_LIGNE = { gridColumn: '2 / -1', whiteSpace: 'normal', fontSize: '11.5px', opacity: '0.85' };
+const k = (n) => Math.round((n || 0) / 1000);
+
+// « profil Équilibré · estimé ≈ 12 $ (15 % de la fenêtre) · réel 14 $ · écart +17 % »
+function ligneEstimation(d, a) {
+  const e = a?.estimation || d?.estimation || null;
+  const profil = a?.profil || d?.estimation?.profil || d?.travail?.cout || null;
+  if (!e && !profil) return null;
+  const unite = e?.unite || 'usd';
+  const estime = e && e.total != null ? e.total : null;
+  const reel = a ? (unite === 'usd' ? a.cout || 0 : totalTokens(a)) : null;
+  const enCours = d && !['termine', 'annule', 'echec'].includes(d.etat);
+  return [
+    profil ? t('profil {profil}', { profil: nomNiveau(profil) }) : null,
+    t('estimé {estimation}', { estimation: estime != null ? '≈ ' + montant(estime, unite) + (e.pct != null ? ' (' + t('{n} % de la fenêtre', { n: Math.round(e.pct) }) + ')' : '') : t('non estimable pour ce compte') }),
+    t('réel {reel}', { reel: reel != null ? montant(reel, unite) : '—' }) + (enCours ? ' ' + t('(en cours)') : ''),
+    t('écart {ecart}', { ecart: texteEcart(ecart(estime, reel)) }),
+    a?.compactions ? t('{n} compaction(s)', { n: a.compactions }) : null,
+  ].filter(Boolean).join(' · ');
+}
+
+// « 12 tours · contexte max 84 k · 1 compaction · cache 91 % » (annotations de fin de tâche dans conso.json)
+function ligneMesures(x) {
+  const m = [
+    x.tours ? t('{n} tour(s)', { n: x.tours }) : null,
+    x.contexteMax ? t('contexte max {n} k', { n: k(x.contexteMax) }) : null,
+    x.compactions ? t('{n} compaction(s)', { n: x.compactions }) : null,
+    x.cache != null ? t('cache {n} %', { n: Math.round(x.cache * 100) }) : null,
+  ].filter(Boolean);
+  return m.length ? m.join(' · ') : null;
 }
 
 function barre(pct) {
@@ -149,6 +184,12 @@ export class Conso {
           h('span', { class: 'pct' }, Math.round(f.utilisation) + ' %'),
           h('span', { class: 'meta' }, f.reinit ? t('remise à zéro {quand}', { quand: quand(f.reinit) }) : '')));
       }
+      // C2 : rapport $ (ou jetons) -> points de la fenêtre de 5 h appris pour ce compte
+      const appris = rapportAppris(C.calibrage?.[c.id], 'usd') ? { u: 'usd', ...rapportAppris(C.calibrage?.[c.id], 'usd') } : rapportAppris(C.calibrage?.[c.id], 'jetons') ? { u: 'jetons', ...rapportAppris(C.calibrage?.[c.id], 'jetons') } : null;
+      if (appris) {
+        const v = { p: appris.rapport.toLocaleString(locale(), { maximumFractionDigits: 2 }), n: appris.intervalles };
+        lignes.push(h('div', { class: 'meta' }, appris.u === 'usd' ? t('1 $ d’équivalent API ≈ {p} point(s) de la fenêtre de 5 h (appris sur {n} intervalles)', v) : t('1 M jetons ≈ {p} point(s) de la fenêtre de 5 h (appris sur {n} intervalles)', v)));
+      }
       blocForfaits.append(h('div', { class: 'conso-compte' },
         h('div', { class: 'conso-compte-tete' },
           h('b', {}, c.nom),
@@ -188,6 +229,8 @@ export class Conso {
 
     // --- dossiers
     const dossiers = Object.entries(C.dossiers || {}).reverse();
+    // dossiers estimés sans consommation enregistrée (démo, plan tout juste fait) : estimation seule
+    for (const d of S.dossiers.values()) if (d.estimation && !C.dossiers?.[d.id]) dossiers.unshift([d.id, null]);
     const blocDossiers = h('section', { class: 'conso-section' }, h('h4', {}, t('Par dossier')));
     if (!dossiers.length) blocDossiers.append(h('div', { class: 'vide' }, t('Aucun dossier mesuré pour l’instant.')));
     for (const [id, a] of dossiers) {
@@ -196,8 +239,9 @@ export class Conso {
       const ligne = h('button', { class: 'conso-dossier', type: 'button', on: { click: () => this.basculerDossier(id) } },
         h('span', { class: 'ref' }, id),
         h('span', { class: 'titre' }, d ? d.titre || d.texte || '' : ''),
-        h('span', { class: 'nb' }, fmtTokens(totalTokens(a))),
-        h('span', { class: 'meta' }, dollars(a.cout)));
+        h('span', { class: 'nb' }, a ? fmtTokens(totalTokens(a)) : '—'),
+        h('span', { class: 'meta' }, a ? dollars(a.cout) : ''),
+        ligneEstimation(d, a) ? h('span', { class: 'meta', style: SOUS_LIGNE }, ligneEstimation(d, a)) : null);
       blocDossiers.append(ligne);
       if (ouvert) {
         const taches = this.tachesDossier.get(id);
@@ -209,7 +253,8 @@ export class Conso {
                 h('span', { class: 'ref' }, ta ? S.nom(ta) + ' · ' + ta.ref : tid.split('-').pop()),
                 h('span', { class: 'titre' }, ta ? ta.titre || '' : ''),
                 h('span', { class: 'nb' }, fmtTokens(totalTokens(x))),
-                h('span', { class: 'meta' }, dollars(x.cout)));
+                h('span', { class: 'meta' }, dollars(x.cout)),
+                ligneMesures(x) ? h('span', { class: 'meta', style: SOUS_LIGNE }, ligneMesures(x)) : null);
             })));
       }
     }

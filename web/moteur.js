@@ -1,7 +1,9 @@
 // Moteur de rendu : canvas plein écran, caméra (zoom entier quand c'est possible), boucle,
 // tri en profondeur, transitions d'étage (effet d'ascenseur) et entrées souris.
+// Cadence et résolution interne suivent le réglage graphique (graphismes.js, logique dans cadence.js).
 import { OX, OY, LARGEUR_MONDE, HAUTEUR_MONDE } from './decor.js';
 import { W, H, HW } from './carte.js';
+import { Cadence, diviseurRendu, sceneEnMouvement } from './cadence.js';
 
 const BORNES = {
   x0: OX - H * 32 - 10,
@@ -13,8 +15,13 @@ const BORNES = {
 const ease = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
 
 export class Moteur {
-  constructor(canvas, directeur) {
+  constructor(canvas, directeur, graphismes = null) {
     this.canvas = canvas;
+    this.gfx = graphismes;
+    this.cadence = new Cadence();
+    this.raf = 0;
+    this.minuteur = 0;
+    this.division = 1;
     this.g = canvas.getContext('2d', { alpha: false });
     this.dir = directeur;
     this.zoom = 1;
@@ -32,10 +39,15 @@ export class Moteur {
     window.addEventListener('resize', () => this.redimensionner());
     this.brancherSouris();
     this.derniereImage = 0;
-    requestAnimationFrame((t) => this.boucle(t));
-    // Si l'onglet est masqué, requestAnimationFrame s'arrête : on garde la scène à jour à petit pas.
+    this.pret = true;
+    this.programmer();
+    // Si l'onglet est masqué (ou la page couverte), requestAnimationFrame s'arrête : on garde la scène à jour
+    // à petit pas, sans la dessiner puisque personne ne la voit (sauf en Maximum, qui dessine comme avant).
     setInterval(() => {
-      if (performance.now() - this.derniereImage > 400) this.image(performance.now());
+      const t = performance.now();
+      if (t - this.derniereImage <= 400) return;
+      if (this.gfx && !this.gfx.dessinerMasque()) this.avancerSeul(t);
+      else this.image(t);
     }, 250);
   }
 
@@ -45,36 +57,52 @@ export class Moteur {
   }
 
   redimensionner() {
-    const dpr = window.devicePixelRatio || 1;
-    this.dpr = dpr;
-    const w = Math.max(1, Math.round(window.innerWidth * dpr));
-    const h = Math.max(1, Math.round(window.innerHeight * dpr));
-    if (this.canvas.width !== w || this.canvas.height !== h) {
-      this.canvas.width = w;
-      this.canvas.height = h;
-    }
-    this.canvas.style.width = window.innerWidth + 'px';
-    this.canvas.style.height = window.innerHeight + 'px';
+    this.dprEcran = window.devicePixelRatio || 1;
     this.fond = null;
     this.calculerCamera();
   }
 
+  // La caméra se calcule à pleine résolution (pixels de l'écran : zoomAuto, zoomManuel et pan y restent),
+  // puis se rapporte à la résolution interne : le canvas fait 1/k de l'écran (k = this.division, diviseur
+  // entier du zoom, voir diviseurRendu) et le navigateur l'agrandit k fois en pixels nets.
+  // this.dpr = pixels du canvas par pixel CSS (versArt) ; this.zoom, this.ox, this.oy : dans le canvas.
   calculerCamera() {
-    const d = this.dpr || 1;
+    const de = this.dprEcran || 1;
+    const L = Math.max(1, Math.round(window.innerWidth * de));
+    const Hc = Math.max(1, Math.round(window.innerHeight * de));
     const m = this.marges;
-    const fx0 = m.gauche * d;
-    const fy0 = m.haut * d;
-    const fw = Math.max(50, this.canvas.width - (m.gauche + m.droite) * d);
-    const fh = Math.max(50, this.canvas.height - (m.haut + m.bas) * d);
+    const fx0 = m.gauche * de;
+    const fy0 = m.haut * de;
+    const fw = Math.max(50, L - (m.gauche + m.droite) * de);
+    const fh = Math.max(50, Hc - (m.haut + m.bas) * de);
     const bw = BORNES.x1 - BORNES.x0;
     const bh = BORNES.y1 - BORNES.y0;
     const fit = Math.min(fw / bw, fh / bh);
     this.zoomAuto = fit >= 1 ? Math.floor(fit) : Math.max(0.4, fit);
-    this.zoom = this.zoomManuel || this.zoomAuto;
+    const zp = this.zoomManuel || this.zoomAuto;
+    const k = this.gfx ? diviseurRendu(zp, L, Hc, this.gfx.profil) : 1;
+    const w = Math.ceil(L / k);
+    const hc = Math.ceil(Hc / k);
+    const c = this.canvas;
+    const change = c.width !== w || c.height !== hc;
+    if (change) {
+      c.width = w;
+      c.height = hc;
+    }
+    // k > 1 : la taille CSS couvre k pixels d'écran par pixel du canvas (dépasse d'au plus k-1 pixels, masqués)
+    const sw = (k === 1 ? window.innerWidth : (w * k) / de) + 'px';
+    const sh = (k === 1 ? window.innerHeight : (hc * k) / de) + 'px';
+    if (c.style.width !== sw) c.style.width = sw;
+    if (c.style.height !== sh) c.style.height = sh;
+    this.division = k;
+    this.dpr = de / k;
+    this.zoom = zp / k;
     const cx = (BORNES.x0 + BORNES.x1) / 2;
     const cy = (BORNES.y0 + BORNES.y1) / 2;
-    this.ox = Math.round(fx0 + fw / 2 - cx * this.zoom + this.pan.x);
-    this.oy = Math.round(fy0 + fh / 2 - cy * this.zoom + this.pan.y);
+    this.ox = Math.round((fx0 + fw / 2 - cx * zp + this.pan.x) / k);
+    this.oy = Math.round((fy0 + fh / 2 - cy * zp + this.pan.y) / k);
+    // un canvas redimensionné est vide : on le redessine tout de suite (sinon noir jusqu'à la prochaine image)
+    if (change && this.pret) this.image(performance.now());
   }
 
   versArt(clientX, clientY) {
@@ -95,8 +123,8 @@ export class Moteur {
         const dy = e.clientY - this.glisse.y;
         if (Math.abs(dx) + Math.abs(dy) > 5) this.glisse.bouge = true;
         if (this.glisse.bouge) {
-          this.pan.x = this.glisse.px + dx * this.dpr;
-          this.pan.y = this.glisse.py + dy * this.dpr;
+          this.pan.x = this.glisse.px + dx * this.dprEcran;
+          this.pan.y = this.glisse.py + dy * this.dprEcran;
           this.calculerCamera();
         }
         return;
@@ -137,11 +165,13 @@ export class Moteur {
     this.calculerCamera();
     const ax = OX + (gx - gy) * 32;
     const ay = OY + (gx + gy) * 16 - 24;
-    const d = this.dpr || 1;
+    // en pixels de l'écran, comme le pan
+    const d = this.dprEcran || 1;
+    const k = this.division;
     const m = this.marges;
-    const cx = m.gauche * d + (this.canvas.width - (m.gauche + m.droite) * d) / 2;
-    const cy = m.haut * d + (this.canvas.height - (m.haut + m.bas) * d) / 2;
-    this.pan = { x: cx - (this.ox + ax * z), y: cy - (this.oy + ay * z) };
+    const cx = m.gauche * d + (Math.round(window.innerWidth * d) - (m.gauche + m.droite) * d) / 2;
+    const cy = m.haut * d + (Math.round(window.innerHeight * d) - (m.haut + m.bas) * d) / 2;
+    this.pan = { x: cx - (this.ox * k + ax * z), y: cy - (this.oy * k + ay * z) };
     this.calculerCamera();
   }
 
@@ -161,6 +191,8 @@ export class Moteur {
       img.getContext('2d').drawImage(this.canvas, 0, 0);
     }
     reconstruire();
+    // changement d'étage : rythme du niveau tout de suite, même en veille
+    if (this.gfx) this.gfx.reveiller(800);
     if (sens) this.transition = { img, t0: performance.now(), duree: 560, sens };
     else this.dir.ouvrirAscenseur(0);
   }
@@ -230,13 +262,65 @@ export class Moteur {
     g.setTransform(1, 0, 0, 1, 0, 0);
   }
 
+  // Une image par intervalle du réglage graphique (Maximum ou sans réglage : à chaque rafraîchissement).
   boucle(t) {
-    this.image(t);
-    requestAnimationFrame((tt) => this.boucle(tt));
+    this.raf = 0;
+    const intervalle = this.gfx ? this.gfx.intervalle(t) : 0;
+    const cache = document.hidden && this.gfx && !this.gfx.dessinerMasque();
+    if (!cache && this.cadence.doitDessiner(t, intervalle)) {
+      const a = performance.now();
+      this.image(t);
+      if (this.gfx) this.gfx.apresImage(t, performance.now() - a, intervalle, !!this.transition || sceneEnMouvement(this.dir));
+    }
+    this.programmer();
+  }
+
+  // Prochaine image : au prochain rafraîchissement, ou après un minuteur quand la cadence est basse
+  // (la page ne se réveille alors pas à chaque rafraîchissement de l'écran pour rien).
+  programmer() {
+    if (this.raf || this.minuteur) return;
+    const t = performance.now();
+    const attente = this.cadence.attente(t, this.gfx ? this.gfx.intervalle(t) : 0);
+    if (attente > 25) {
+      this.minuteur = setTimeout(() => {
+        this.minuteur = 0;
+        this.programmer();
+      }, attente - 10);
+    } else {
+      this.raf = requestAnimationFrame((tt) => this.boucle(tt));
+    }
+  }
+
+  // Activité (souris, événement, changement de réglage) : la prochaine image part tout de suite.
+  reveiller() {
+    this.cadence.reveiller();
+    if (this.minuteur) {
+      clearTimeout(this.minuteur);
+      this.minuteur = 0;
+    }
+    this.programmer();
+  }
+
+  // Onglet masqué : l'état avance (avatars, programme, bulles, transition), rien n'est dessiné.
+  avancerSeul(t) {
+    this.derniereImage = t;
+    const dt = Math.max(0, Math.min(1000, t - this.dernier));
+    this.dernier = t;
+    try {
+      this.dir.maj(Date.now(), dt);
+      const tr = this.transition;
+      if (tr && t - tr.t0 >= tr.duree) {
+        this.transition = null;
+        this.dir.ouvrirAscenseur(tr.sens);
+      }
+    } catch (e) {
+      console.error(e);
+    }
   }
 
   image(t) {
     this.derniereImage = performance.now();
+    if (this.gfx) this.dir.vitesseDecor = this.gfx.profil.decor;
     const dt = Math.max(0, Math.min(1000, t - this.dernier));
     this.dernier = t;
     const now = Date.now();
@@ -256,7 +340,8 @@ export class Moteur {
         // dalle entre les deux étages
         const yb = tr.sens > 0 ? Math.round(e * h) : Math.round(h - e * h);
         g.fillStyle = '#05070d';
-        g.fillRect(0, yb - 6, this.canvas.width, 12);
+        const ep = Math.max(1, Math.round(6 / this.division));
+        g.fillRect(0, yb - ep, this.canvas.width, 2 * ep);
         if (u >= 1) {
           this.transition = null;
           this.dir.ouvrirAscenseur(tr.sens);

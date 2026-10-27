@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "note": "Priorités des comptes IA (docs/multi-ia/conception.md §5). Une entrée vise un « compte » précis ou un « fournisseur » (ses comptes dans l'ordre de la liste), et peut fixer un « modele » ou un « niveau » (jamais plus bas que celui demandé par le DG). Listes vides : tout tourne sur le compte de la demande, comme en 1.0.5. Ton fichier config/priorites.json remplace ces valeurs.",
+  "types": {
+    "code": { "natures": ["impl", "test", "review", "ops"], "ordre": [] },
+    "recherche": { "natures": ["analyse", "bench"], "ordre": [] },
+    "redaction": { "natures": ["doc", "synthese"], "ordre": [] },
+    "image": { "natures": ["asset"], "ordre": [] },
+    "defaut": { "ordre": [] }
+  },
+  "roles": {
+    "verif": { "ordre": [] },
+    "ambiance": { "ordre": [] }
+  },
+  "dg": { "compte": null, "modele": null, "effort": null },
+  "consigneDg": "",
+  "quota": { "pause": "compte", "proposerBascule": true },
+  "delegation": {
+    "images": {
+      "actif": false,
+      "accord": true,
+      "limites": { "defaut": 3, "etages": {} },
+      "api": { "actif": false, "compte": null, "plafondMensuelUsd": null }
+    }
+  }
+}

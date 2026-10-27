@@ -1,6 +1,7 @@
 {
+  "version": 2,
   "defaut": "claude1",
   "comptes": [
-    { "id": "claude1", "nom": "Claude 1", "configDir": "{HOME}\\.claude-qg\\claude1" }
+    { "id": "claude1", "nom": "Claude 1", "fournisseur": "claude", "acces": "abonnement", "configDir": "{HOME}\\.claude-qg\\claude1" }
   ]
 }

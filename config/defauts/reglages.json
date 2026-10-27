@@ -3,6 +3,7 @@
   "hote": "127.0.0.1",
   "port": 4747,
   "langueInterface": "fr",
+  "filtreTests": true,
   "langueIA": "fr",
   "utilisateur": "",
   "racines": [],
@@ -30,6 +31,7 @@
   },
   "dureeBulles": 1,
   "gitAuto": false,
+  "traduireReflexion": false,
   "validationUtilisateur": false,
   "miseAJourAuto": true,
   "gardeFable": {
@@ -46,5 +48,10 @@
     "modeleDiscussion": "sonnet",
     "modeleBavardage": "haiku"
   },
-  "ecritureHorsProjet": false
+  "ecritureHorsProjet": false,
+  "compteAgents": null,
+  "codex": {
+    "lectureStricte": false,
+    "sessionsParCompte": 1
+  }
 }

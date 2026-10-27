@@ -28,4 +28,4 @@ if (fs.existsSync(webNext) && !SANS_SITE) {
   console.log('site : web-next/ → web/ (ancien site gardé dans runtime/web-precedent/)');
   n++;
 }
-console.log(n ? 'Bascule terminée : relance lancer.bat.' : 'Rien à basculer.');
+console.log(n ? `Bascule terminée : relance ${process.platform === 'win32' ? 'lancer.bat' : 'lancer.command'}.` : 'Rien à basculer.');

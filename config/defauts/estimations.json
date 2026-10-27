@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "note": "Table de départ de l'estimation d'un plan (lot C1 de la 1.0.6), utilisée tant que le QG n'a pas d'historique pour une nature, un niveau de modèle et un mode de vérification. Valeurs tirées du dossier D4 (01-diagnostic.md de la 1.0.7), ramenées à un effort medium et à une vérification self : coût réel ÷ facteur d'effort ÷ facteur de vérification. Ce sont des ordres de grandeur, remplacés par les coûts réels dès qu'il y a 2 tâches comparables.",
+  "facteursEffort": { "low": 0.7, "medium": 1, "high": 1.3, "xhigh": 1.6, "max": 2 },
+  "facteurVerifAgent": 1.25,
+  "historique": { "minEchantillons": 2, "maxEchantillons": 20 },
+  "usd": {
+    "note": "$ équivalent API pour une tâche Claude de niveau « fort » (Opus), effort medium, vérification self. Les autres niveaux suivent les prix par token (Haiku ≈ 0,2, Sonnet ≈ 0,6, Fable ≈ 3 fois Opus : T4 a relu 41 M de tokens en cache pour 59 $).",
+    "niveaux": { "eco": 0.2, "standard": 0.6, "fort": 1, "max": 3 },
+    "natures": { "impl": 6, "analyse": 3.5, "bench": 2, "test": 2, "review": 1.5, "doc": 4, "asset": 3, "synthese": 1.5, "ops": 2 },
+    "dg": 5
+  },
+  "jetons": {
+    "note": "Jetons (entrée + sortie + cache) pour une tâche à l'effort medium, vérification self, quel que soit le modèle : sert aux comptes sans coût en $ (Codex, la plupart des agents ACP). Volumes de D4 (T3 : 8 M, T7 : 4,7 M, T5 et T6 : 2,6 M, T2 : 4,4 M, T11 : 18,8 M).",
+    "natures": { "impl": 8000000, "analyse": 4500000, "bench": 2000000, "test": 3000000, "review": 1500000, "doc": 5000000, "asset": 4000000, "synthese": 1500000, "ops": 2000000 },
+    "dg": 1500000
+  },
+  "pointsParDollar": {
+    "note": "Points de la fenêtre de 5 h par $ d'équivalent API, avant que le QG ait appris le rapport du compte (C2). Max : la fenêtre est passée à 100 % pour environ 100 à 105 $ le 26/10/2026 (06-mesure.md §7, une seule observation, à confirmer). Forfait absent de cette liste : pas de % tant que le rapport n'est pas appris.",
+    "max": 0.97
+  },
+  "calibrage": { "intervalles": 20, "intervalleMaxMin": 30, "minIntervalles": 3, "minUsd": 1, "minJetons": 1000000 }
+}

@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { profils, etage as trouverEtage, etagesActifs, racines, sous, cheminRegle, RACINE, REGLAGES } from './config.js';
 import { chargerComptes, dossierConfig } from './comptes.js';
+import * as plateforme from './plateforme.js';
 import { expliquer } from './explication.js';
 import { etat, emettre, changerEtatTache } from './bus.js';
 import { notifier, notificationResolue } from './notifications.js';
@@ -18,42 +19,45 @@ export function zones() {
   return liste;
 }
 
-const meme = (a, b) => path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
+const listerDossier = (dossier) => fs.readdirSync(dossier, { withFileTypes: true });
 
 // Écrire hors des zones : toujours une demande (règles « ask », qui priment sur le mode auto).
-// Les règles ne savent pas dire « tout sauf », on énumère donc : les lecteurs sans zone en entier,
-// et, en descendant vers chaque zone, les dossiers et fichiers voisins qui n'en contiennent pas.
+// Les règles ne savent pas dire « tout sauf », on énumère donc : les lecteurs sans zone en entier
+// (Windows ; sur Mac, la racine « / » est la seule), et, en descendant vers chaque zone, les dossiers
+// et fichiers voisins qui n'en contiennent pas.
 // Jamais de règle « parent/* » : Claude Code l'applique aussi à tout ce qui est SOUS le dossier
 // enfant (comme un .gitignore), donc à la zone elle-même : chaque écriture dans un projet demandait.
-function explorer(dossier, zonesIci, cibles) {
+function explorer(dossier, zonesIci, cibles, { plat, lister }) {
+  const ch = plateforme.estWindows(plat) ? path.win32 : path.posix;
   let entrees = [];
   try {
-    entrees = fs.readdirSync(dossier, { withFileTypes: true });
+    entrees = lister(dossier);
   } catch {
     return;
   }
   for (const ent of entrees) {
-    const p = path.join(dossier, ent.name);
-    if (zonesIci.some((z) => meme(z, p))) continue;
+    const p = ch.join(dossier, ent.name);
+    if (zonesIci.some((z) => plateforme.memeChemin(z, p, plat))) continue;
     if (!ent.isDirectory()) {
-      cibles.push(cheminRegle(p)); // fichier existant posé à côté d'une zone
+      cibles.push(plateforme.cheminRegle(p, plat)); // fichier existant posé à côté d'une zone
       continue;
     }
-    const dessous = zonesIci.filter((z) => sous([p], z));
-    if (dessous.length) explorer(p, dessous, cibles);
-    else cibles.push(`${cheminRegle(p)}/**`);
+    const dessous = zonesIci.filter((z) => plateforme.sousChemin([p], z, plat));
+    if (dessous.length) explorer(p, dessous, cibles, { plat, lister });
+    else cibles.push(`${plateforme.cheminRegle(p, plat)}/**`);
   }
 }
 
-/** Règles « demander » pour toute écriture hors des zones données. */
-export function reglesPourZones(zs) {
+/**
+ * Règles « demander » pour toute écriture hors des zones données.
+ * (plat, lister, existe : plateforme et système de fichiers injectables, pour les tests)
+ */
+export function reglesPourZones(zs, { plat = plateforme.PLATEFORME, lister = listerDossier, existe = fs.existsSync } = {}) {
   const cibles = [];
-  for (const l of 'ABCDEFGHIJKLMNOPQRSTUVWXYZ') {
-    const lecteur = `${l}:\\`;
-    if (!fs.existsSync(lecteur)) continue;
-    const ici = zs.filter((z) => path.resolve(z)[0].toUpperCase() === l);
-    if (ici.length) explorer(lecteur, ici, cibles);
-    else cibles.push(`//${l.toLowerCase()}/**`);
+  for (const racine of plateforme.racinesRegles(plat, existe)) {
+    const ici = zs.filter((z) => plateforme.surRacine(z, racine, plat));
+    if (ici.length) explorer(racine, ici, cibles, { plat, lister });
+    else cibles.push(`${plateforme.cheminRegle(racine, plat)}/**`);
   }
   return cibles.flatMap((c) => ['Edit', 'Write', 'NotebookEdit'].map((o) => `${o}(${c})`));
 }

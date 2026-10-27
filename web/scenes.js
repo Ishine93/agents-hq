@@ -2323,7 +2323,8 @@ export class Directeur {
     }
     const nom = S.nom(t);
     // le prénom seul ; la ref et le titre au survol ou à la sélection
-    if (sel) return { texte: (nom !== t.ref ? nom + ' · ' : '') + t.ref + ' ' + (t.titre || ''), couleur: modele(t.modele).c };
+    // plusieurs IA : le compte qui fait la tâche, à la sélection (badge « pas encore qualifié » compris)
+    if (sel) return { texte: (nom !== t.ref ? nom + ' · ' : '') + t.ref + ' ' + (t.titre || '') + (S.multiIa && t.compte ? ' — ' + S.libelleCompte(t.compte) : ''), couleur: modele(t.modele).c };
     return { texte: nom, couleur: modele(t.modele).c };
   }
 
@@ -2333,6 +2334,8 @@ export class Directeur {
     const dessus = [];
     if (!this.carte) return { monde, dessus };
     const carte = this.carte;
+    // petites animations du décor (machines, jeux, voyants), ralenties en graphismes Léger
+    const td = now * (this.vitesseDecor || 1);
     const typeTheme = carte.type;
     // --- surcouches murales ---
     const plan = carte.tableau ? this.planAffiche() : null;
@@ -2408,10 +2411,10 @@ export class Directeur {
       // un meuble de plusieurs cases se trie sur sa case la plus en avant
       const k = it.x + it.y + (it.w || 1) + (it.h || 1) - 1 - 0.02;
       const extra = [];
-      if (['baie', 'imprimante3d', 'machine_cafe', 'poste_machine', 'arcade', 'jukebox'].includes(it.type)) extra.push((g) => animerMeuble(g, it, tx, ty, now));
+      if (['baie', 'imprimante3d', 'machine_cafe', 'poste_machine', 'arcade', 'jukebox'].includes(it.type)) extra.push((g) => animerMeuble(g, it, tx, ty, td));
       if (it.jeu) {
         const n = joueurs[it.jeu] || 0;
-        extra.push((g) => animerJeu(g, it, tx, ty, now, it.jeu === 'billard' ? n >= 1 : n >= 2));
+        extra.push((g) => animerJeu(g, it, tx, ty, td, it.jeu === 'billard' ? n >= 1 : n >= 2));
       }
       if (it.type === 'bureau_dg' && it.x === premierBureauDG.x && it.y === premierBureauDG.y && depots.length) {
         extra.push((g) => pileDossiers(g, tx, ty, depots));
@@ -2435,7 +2438,7 @@ export class Directeur {
         const [tx, ty] = coinTuile(e.x, e.y);
         const fl = sv ? this.flashBaie.get(sv.id) : 0;
         const flash = fl && now - fl < 700 && now >= fl ? 1 - (now - fl) / 700 : 0;
-        monde.push({ k: e.x + e.y + 1 - 0.02, img: s.c, x: tx + s.dx, y: ty + s.dy, extra: [(g) => ledsService(g, tx, ty, now, sv ? sv.etat : null, flash)] });
+        monde.push({ k: e.x + e.y + 1 - 0.02, img: s.c, x: tx + s.dx, y: ty + s.dy, extra: [(g) => ledsService(g, tx, ty, td, sv ? sv.etat : null, flash)] });
         if (!sv) return;
         const nomEtage = (S.etage(sv.etage) || {}).nom || sv.etage;
         const lab = etiquette(nomEtage + ' · ' + sv.type + (sv.port ? ' :' + sv.port : ''), COUL_SERVICE[sv.etat] || '#646c88', 150);

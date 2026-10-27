@@ -8,15 +8,17 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
-import { RACINE, NODE_DIR } from './config.js';
+import { RACINE } from './config.js';
+import * as plateforme from './plateforme.js';
 import { t } from './i18n.js';
 
 // ---------- fenêtre « application » (Electron) : un vrai navigateur dans le QG, pour TOUS les sites ----------
 // Installée à la demande (≈ 100 Mo) dans runtime/navigateur : jamais publiée, jamais écrasée par une mise à jour.
 export const VERSION_ELECTRON = '44.7.0';
 const DOSSIER_APP = path.join(RACINE, 'runtime', 'navigateur');
-const ELECTRON = path.join(DOSSIER_APP, 'node_modules', 'electron', 'dist', 'electron.exe');
-export const appInstallee = () => fs.existsSync(ELECTRON);
+// electron.exe sur Windows ; sur Mac, le binaire dans Electron.app (chemin noté par le paquet après l'installation)
+const ELECTRON = () => plateforme.electronExe(DOSSIER_APP);
+export const appInstallee = () => fs.existsSync(ELECTRON());
 // Lancé depuis une application Electron (VS Code, Claude…), le QG peut hériter de ELECTRON_RUN_AS_NODE :
 // présente, même vide, elle ferait tourner notre Electron comme un simple Node.
 function lancerElectron(args) {
@@ -28,7 +30,7 @@ function lancerElectron(args) {
   } catch {
     /* journal facultatif */
   }
-  spawn(ELECTRON, [path.join(RACINE, 'app'), ...args], { detached: true, stdio: ['ignore', sortie, sortie], cwd: RACINE, env, windowsHide: false }).unref();
+  spawn(ELECTRON(), [path.join(RACINE, 'app'), ...args], { detached: true, stdio: ['ignore', sortie, sortie], cwd: RACINE, env, windowsHide: false }).unref();
   if (typeof sortie === 'number') fs.closeSync(sortie);
 }
 let installation = null; // { etat: 'en_cours' | 'ok' | 'erreur', texte, debut }
@@ -39,13 +41,13 @@ export function installerApp(publier) {
   fs.mkdirSync(DOSSIER_APP, { recursive: true });
   const pj = path.join(DOSSIER_APP, 'package.json');
   if (!fs.existsSync(pj)) fs.writeFileSync(pj, JSON.stringify({ name: 'qg-navigateur', private: true, description: 'Electron pour la fenêtre application du QG' }, null, 2));
-  const node = path.join(NODE_DIR, 'node.exe');
-  const npm = path.join(NODE_DIR, 'node_modules', 'npm', 'bin', 'npm-cli.js');
+  const node = plateforme.nodeOuCourant();
+  const npm = plateforme.npmCli();
   installation = { etat: 'en_cours', texte: t('Téléchargement du navigateur (≈ 100 Mo)…'), debut: Date.now() };
   publier();
   let journal = '';
   const executer = (args, suite) => {
-    const p = spawn(fs.existsSync(node) ? node : process.execPath, args, { cwd: DOSSIER_APP, windowsHide: true, env: { ...process.env, npm_config_update_notifier: 'false' } });
+    const p = spawn(node, args, { cwd: DOSSIER_APP, windowsHide: true, env: { ...process.env, npm_config_update_notifier: 'false' } });
     p.stdout.on('data', (d) => (journal = (journal + d).slice(-4000)));
     p.stderr.on('data', (d) => (journal = (journal + d).slice(-4000)));
     p.on('close', suite);
@@ -202,6 +204,8 @@ function regLire(cle, valeur) {
   });
 }
 async function navigateurParDefaut() {
+  // (registre Windows ; sur Mac, pas de fenêtre « application » : un onglet du navigateur par défaut, via open)
+  if (!plateforme.estWindows()) return null;
   const progId = await regLire('HKCU\\Software\\Microsoft\\Windows\\Shell\\Associations\\UrlAssociations\\https\\UserChoice', 'ProgId');
   const connu = PROGIDS.find(([re]) => re.test(progId || ''));
   if (!connu) return null;
@@ -220,8 +224,8 @@ export async function ouvrirFenetre(url) {
     spawn(nav.exe, args, { detached: true, stdio: 'ignore', windowsHide: false }).unref();
     return { navigateur: nav.exe.split(/[\\/]/).pop(), mode: nav.mode };
   }
-  // navigateur inconnu : un onglet normal du navigateur par défaut
-  spawn('cmd.exe', ['/d', '/c', 'start', '', url], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+  // navigateur inconnu (ou Mac) : un onglet normal du navigateur par défaut
+  plateforme.ouvrirUrl(url);
   return { navigateur: null, mode: 'onglet' };
 }
 

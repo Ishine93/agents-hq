@@ -6,9 +6,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { RACINE, REGLAGES, LANGUES_IA } from './config.js';
+import { ambianceCoupee } from './travail.js';
 import { emettre } from './bus.js';
-import { chargerComptes, compteConnecte } from './comptes.js';
 import { executerSession, raisonEchec } from './session.js';
+import { choisirAmbiance } from './routeur.js';
 import { ecrireXlsx, lireXlsx, ecrireCsv, lireCsv } from './tableur.js';
 
 const PERIODE_MS = 12 * 3600 * 1000;
@@ -224,15 +225,19 @@ const THEMES = [
 const LANGUES_JOKEAPI = ['cs', 'de', 'en', 'es', 'fr', 'pt'];
 const LANGUES_FAITS = ['en', 'de'];
 
-async function appelHaiku(compteId, prompt, schema) {
+// amb : compte et modèle de l'ambiance (routeur.choisirAmbiance) ; sur Claude, Haiku comme en 1.0.5.
+async function appelHaiku(amb, prompt, schema) {
+  const cwd = path.join(RACINE, 'runtime');
   const s = await executerSession({
     prompt,
-    compte: compteId,
+    compte: amb.compte,
     conso: { role: 'bonheur', etage: 'hall' },
     options: {
-      model: 'haiku', effort: 'low', maxTurns: 3, tools: [], settingSources: [], mcpServers: {}, strictMcpConfig: true,
-      permissionMode: 'dontAsk', cwd: path.join(RACINE, 'runtime'), outputFormat: { type: 'json_schema', schema }, persistSession: false,
+      ...(amb.modele ? { model: amb.modele } : {}), effort: 'low', maxTurns: 3, tools: [], settingSources: [], mcpServers: {}, strictMcpConfig: true,
+      permissionMode: 'dontAsk', cwd, outputFormat: { type: 'json_schema', schema }, persistSession: false,
     },
+    // autres IA (Claude s'en passe) : rôle utilitaire, lecture seule, sans recherche web
+    demande: { role: 'utilitaire', profil: 'lecture', cwd, consignes: '', schema, titre: 'QG Joy' },
   });
   return raisonEchec(s) ? null : s.result.structured_output;
 }
@@ -247,7 +252,8 @@ export async function recolter({ sansModele = false } = {}) {
 export async function recolterMassif({ maxAppels = 40, journal = console.log } = {}) {
   const l = langue();
   const nomLangue = LANGUES_IA[l] || l;
-  const compte = chargerComptes().comptes.find((x) => compteConnecte(x));
+  // compte de l'ambiance : priorités « ambiance », sinon le premier compte connecté (n'importe quelle IA)
+  const compte = choisirAmbiance({ modeleClaude: 'haiku', defautDabord: false });
   const c = { ...charger() };
   // Le filtre peut s'être durci depuis la dernière récolte : on le repasse sur tout le stock.
   const ok = (e) => !MOTS_INTERDITS.test(typeof e === 'string' ? e : `${e.setup} ${e.chute}`);
@@ -288,7 +294,7 @@ export async function recolterMassif({ maxAppels = 40, journal = console.log } =
   while (c.faits.length < CIBLES.faits && appels < maxAppels) {
     const bruts = (await Promise.all(Array.from({ length: 60 }, () => sur(`https://uselessfacts.jsph.pl/api/v2/facts/random?language=${langueFaits}`)))).filter(Boolean).map((f) => f.text);
     appels++;
-    const r = await appelHaiku(compte.id, `Réécris en ${nomLangue}, en une phrase claire chacune, les anecdotes amusantes ET vraies ci-dessous. Écarte celles qui sont fausses, vulgaires, morbides, politiques ou religieuses.\n${JSON.stringify([...new Set(bruts)])}`, SCHEMA_FAITS);
+    const r = await appelHaiku(compte, `Réécris en ${nomLangue}, en une phrase claire chacune, les anecdotes amusantes ET vraies ci-dessous. Écarte celles qui sont fausses, vulgaires, morbides, politiques ou religieuses.\n${JSON.stringify([...new Set(bruts)])}`, SCHEMA_FAITS);
     journal(`anecdotes : +${ajouter('faits', r?.faits)} → ${c.faits.length}`);
     sauver();
   }
@@ -297,7 +303,7 @@ export async function recolterMassif({ maxAppels = 40, journal = console.log } =
   while (c.ambiance.length < CIBLES.ambiance && appels < maxAppels) {
     appels++;
     const theme = THEMES[appels % THEMES.length];
-    const r = await appelHaiku(compte.id, `Écris 120 petites phrases différentes qu'échangent des collègues d'un studio (jeux vidéo, logiciels, création) en pause café (thème du lot : ${theme} ; mais aussi météo, week-end, café). Langue : ${nomLangue}. Courtes (moins de 90 caractères), naturelles, bon enfant, sans rien de vulgaire ni de politique.`, SCHEMA_AMB);
+    const r = await appelHaiku(compte, `Écris 120 petites phrases différentes qu'échangent des collègues d'un studio (jeux vidéo, logiciels, création) en pause café (thème du lot : ${theme} ; mais aussi météo, week-end, café). Langue : ${nomLangue}. Courtes (moins de 90 caractères), naturelles, bon enfant, sans rien de vulgaire ni de politique.`, SCHEMA_AMB);
     journal(`phrases de pause : +${ajouter('ambiance', r?.phrases)} → ${c.ambiance.length}`);
     sauver();
   }
@@ -308,7 +314,7 @@ export async function recolterMassif({ maxAppels = 40, journal = console.log } =
     const theme = THEMES[appels % THEMES.length];
     const deja = c.blagues.slice(-40).map((j) => j.setup);
     const r = await appelHaiku(
-      compte.id,
+      compte,
       `Écris 120 blagues courtes en ${nomLangue}, format question / chute, sur le thème : ${theme}. Bon enfant, drôles, jeux de mots bienvenus, jamais vulgaires, politiques, religieuses, morbides ni blessantes. Toutes différentes, et différentes de celles-ci : ${JSON.stringify(deja)}`,
       { type: 'object', additionalProperties: false, properties: { blagues: SCHEMA_BLAGUES }, required: ['blagues'] },
     );
@@ -324,7 +330,7 @@ export async function recolterMassif({ maxAppels = 40, journal = console.log } =
 export function demarrerBonheur({ demo = false } = {}) {
   bonheurPublic();
   if (demo) return;
-  const lancer = () => (REGLAGES.recolteAuto === false ? null : recolter().catch((e) => console.error('bonheur', e.message)));
+  const lancer = () => (REGLAGES.recolteAuto === false ? null : recolter({ sansModele: ambianceCoupee() }).catch((e) => console.error('bonheur', e.message)));
   const c = charger();
   if (!c.maj || Date.now() - c.maj > PERIODE_MS) setTimeout(lancer, 20000).unref();
   setInterval(lancer, PERIODE_MS).unref();

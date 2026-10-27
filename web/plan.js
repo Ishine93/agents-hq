@@ -7,6 +7,7 @@ import { modele } from './sprites.js';
 import { COULEUR_ETAT } from './decor.js';
 import { t as tr } from './i18n.js';
 import { Fenetre } from './fenetres.js';
+import { texteEstimation } from './estimation.js';
 
 const SVG = 'http://www.w3.org/2000/svg';
 const CW = 216; // carte
@@ -14,7 +15,7 @@ const CH = 100;
 const GX = 84; // écart entre colonnes (place des flèches)
 const GY = 18;
 const MARGE = 22;
-const IGNORES = new Set(['outil', 'activite', 'pensee', 'commande', 'service_log', 'message']);
+const IGNORES = new Set(['outil', 'activite', 'pensee', 'pensee_traduction', 'commande', 'service_log', 'message']);
 
 function el(tag, cls, texte) {
   const e = document.createElement(tag);
@@ -200,10 +201,11 @@ export class PlanDossier {
     this.fen.definirTitre(tr('Plan du dossier {id}', { id }));
     const lignes = p ? p.taches.map((pt) => ({ pt, t: S.tacheParRef(id, pt.ref) })) : [];
     const faites = lignes.filter(({ t }) => t && t.etat === 'done').length;
-    this.sous.textContent = (d ? libelleDossier(d.etat) : '') + (lignes.length ? (d ? ' · ' : '') + tr('{faites}/{total} tâche(s) terminée(s)', { faites, total: lignes.length }) : '');
+    this.sous.textContent = (d ? libelleDossier(d.etat) : '') + (lignes.length ? (d ? ' · ' : '') + tr('{faites}/{total} tâche(s) terminée(s)', { faites, total: lignes.length }) : '')
+      + (d && d.estimation ? ' · ' + tr('estimé {estimation}', { estimation: texteEstimation(d.estimation) }) : '');
     const sig = JSON.stringify(lignes.map(({ pt, t }) => [
       pt.ref, pt.titre, pt.deps, pt.modele, pt.effort, pt.etage,
-      t ? [t.id, t.etat, S.nom(t), t.agent, t.modele, t.effort, t.titre, t.inputsFrom, t.reembauche, t.motifFile] : null,
+      t ? [t.id, t.etat, S.nom(t), t.agent, t.modele, t.effort, t.titre, t.inputsFrom, t.reembauche, t.motifFile, t.verif && t.verif.ajustement] : null,
     ]));
     if (sig === this.sig) return;
     this.sig = sig;
@@ -318,7 +320,7 @@ export class PlanDossier {
     } else if (t && t.motifFile) agent = t.motifFile;
     const pa = el('div', 'pc-agent', agent);
     b.append(haut, titre, badges, pa);
-    b.title = t ? tr('Ouvrir la fiche de {nom} ({ref})', { nom, ref: pt.ref }) : tr('{ref} : pas encore lancée', { ref: pt.ref });
+    b.title = (t ? tr('Ouvrir la fiche de {nom} ({ref})', { nom, ref: pt.ref }) : tr('{ref} : pas encore lancée', { ref: pt.ref })) + (t && t.verif && t.verif.ajustement ? '\n' + t.verif.ajustement : '');
     b.addEventListener('click', () => {
       if (!t) {
         this.ui.toast('info', tr('{ref} n’a pas encore de fiche.', { ref: pt.ref }));

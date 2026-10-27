@@ -1,5 +1,6 @@
 // État client : reflète le serveur à partir des événements du protocole (docs/protocole.md).
 import { t as tr } from './i18n.js';
+import { noterReflexion, noterTraduction, chargerReflexions } from './reflexions.js';
 
 export const TERMINAUX = new Set(['done', 'failed', 'cancelled', 'skipped']);
 export const PAS_DEMARREE = new Set(['planned', 'waiting', 'ready', 'queued', 'briefing']);
@@ -63,7 +64,7 @@ export class Etat {
     this.actionsService = [];
     // v1.5 : pensées en direct, happiness manager
     this.pensees = new Map(); // cible ('dg' ou id de tâche) -> dernière pensée
-    this.historiquePensees = new Map(); // cible -> 8 derniers extraits
+    this.reflexions = new Map(); // cible -> derniers blocs de réflexion complets (web/reflexions.js)
     this.bonheur = { blagues: [], faits: [], ambiance: [], maj: null, source: null };
     // v2 : réglages, personnalisation (prénoms, skins), consommation
     this.reglages = { langueInterface: 'fr', langueIA: 'fr', racines: [], onboarding: true, modeTravail: 'auto' };
@@ -78,7 +79,7 @@ export class Etat {
     if (!id) return;
     const taches = new Set([...this.taches.values()].filter((t) => t.dossier === id).map((t) => t.id));
     for (const tid of taches) {
-      for (const m of [this.taches, this.verifs, this.outils, this.fileDepuis, this.transitions, this.terminaux, this.modifications, this.pensees, this.historiquePensees]) m.delete(tid);
+      for (const m of [this.taches, this.verifs, this.outils, this.fileDepuis, this.transitions, this.terminaux, this.modifications, this.pensees, this.reflexions]) m.delete(tid);
     }
     for (const [k, p] of this.permissions) if (taches.has(p.tache)) this.permissions.delete(k);
     for (const [k, x] of this.decisions) if (taches.has(x.tache)) this.decisions.delete(k);
@@ -147,16 +148,8 @@ export class Etat {
 
   noterPensee(p) {
     if (!p || !p.cible) return;
-    this.pensees.set(p.cible, p);
-    if (p.phase === 'reflexion' && p.extrait) {
-      const h = this.historiquePensees.get(p.cible) || [];
-      const dernier = h[h.length - 1];
-      // une pensée qui s'allonge remplace la précédente ; une nouvelle s'ajoute
-      if (dernier && (p.extrait.startsWith(dernier.extrait.slice(0, 40)) || dernier.extrait.endsWith(p.extrait.slice(0, 40)))) h[h.length - 1] = { extrait: p.extrait, t: p.t };
-      else h.push({ extrait: p.extrait, t: p.t });
-      if (h.length > 8) h.splice(0, h.length - 8);
-      this.historiquePensees.set(p.cible, h);
-    }
+    this.pensees.set(p.cible, p); // dernier état (phase, extrait court pour les bulles)
+    if (p.phase === 'reflexion' && (p.bloc || p.extrait)) noterReflexion(this.reflexions, p.cible, p);
   }
 
   ecouter(fn) {
@@ -199,6 +192,21 @@ export class Etat {
       if (m) return m.nom;
     }
     return id.charAt(0).toUpperCase() + id.slice(1);
+  }
+
+  // Plusieurs IA (1.0.6) : un compte autre que Claude est présent ? Sinon le site reste celui de la 1.0.5.
+  get multiIa() {
+    return (this.comptes || []).some((c) => (c.fournisseur || 'claude') !== 'claude');
+  }
+
+  // « Codex perso · ChatGPT · Codex » : nom du compte et de son IA (agent ACP : son nom court).
+  libelleCompte(id) {
+    const c = (this.comptes || []).find((x) => x.id === id);
+    if (!c) return id || '';
+    const f = (this.fournisseurs || []).find((x) => x.id === (c.fournisseur || 'claude'));
+    const agent = c.fournisseur === 'acp' ? (this.agentsAcp || []).find((a) => a.id === c.agent) : null;
+    const ia = agent ? agent.nomCourt : f ? f.nom : c.fournisseur || 'Claude';
+    return c.nom + ' · ' + ia + (c.qualification === 'non-faite' ? ' · ' + tr('pas encore qualifié') : '');
   }
 
   agentsEtage(id) {
@@ -364,7 +372,7 @@ export class Etat {
         break;
       }
       case 'plan':
-        this.plans.set(ev.dossier, { dossier: ev.dossier, taches: ev.taches || [], t });
+        this.plans.set(ev.dossier, { dossier: ev.dossier, taches: ev.taches || [], estimation: ev.estimation || null, t });
         break;
       case 'dg':
         if (ev.dg) {
@@ -387,6 +395,12 @@ export class Etat {
       case 'activite': {
         const ta = this.taches.get(ev.tache);
         if (ta) ta.derniereActivite = t;
+        break;
+      }
+      case 'mesures': {
+        // lot C3 : contexte actuel, compactions et coût d'une tâche en cours (fiche de la tâche et de l'agent)
+        const ta = this.taches.get(ev.tache);
+        if (ta) ta.mesures = ev.mesures || null;
         break;
       }
       case 'passation':
@@ -450,6 +464,13 @@ export class Etat {
       case 'comptes':
         if (Array.isArray(ev.comptes)) this.comptes = ev.comptes;
         if (ev.compteDefaut) this.compteDefaut = ev.compteDefaut;
+        if (Array.isArray(ev.fournisseurs)) this.fournisseurs = ev.fournisseurs;
+        if ('compteAgents' in ev) this.compteAgents = ev.compteAgents || null;
+        if (ev.installationCodex) this.installationCodex = ev.installationCodex;
+        if (Array.isArray(ev.agentsAcp)) this.agentsAcp = ev.agentsAcp;
+        break;
+      case 'codex-installation':
+        this.installationCodex = { etat: ev.etat, version: ev.version, lignes: ev.lignes || [], erreur: ev.erreur || null, present: !!ev.present };
         break;
       case 'reglages':
         if (ev.reglages) this.reglages = { ...this.reglages, ...ev.reglages };
@@ -462,6 +483,9 @@ export class Etat {
         break;
       case 'pensee':
         this.noterPensee({ ...ev, t: ev.t || t });
+        break;
+      case 'pensee_traduction':
+        if (ev.cible) noterTraduction(this.reflexions, ev.cible, ev.bloc, ev.traduction);
         break;
       case 'bonheur':
         if (ev.bonheur) this.bonheur = { blagues: [], faits: [], ambiance: [], ...ev.bonheur };
@@ -552,6 +576,10 @@ export class Etat {
     this.etages = Array.isArray(ev.etages) ? ev.etages.slice() : [];
     this.comptes = Array.isArray(ev.comptes) ? ev.comptes : [];
     this.compteDefaut = ev.compteDefaut || (this.comptes[0] && this.comptes[0].id) || null;
+    this.fournisseurs = Array.isArray(ev.fournisseurs) ? ev.fournisseurs : [];
+    this.compteAgents = ev.compteAgents || null;
+    this.installationCodex = ev.installationCodex || null;
+    this.agentsAcp = Array.isArray(ev.agentsAcp) ? ev.agentsAcp : [];
     for (const d of ev.dossiers || []) this.dossiers.set(d.id, d);
     for (const t of ev.taches || []) {
       this.taches.set(t.id, { ...t });
@@ -574,6 +602,8 @@ export class Etat {
       this.journauxServices.set(sv.id, [...(sv.dernieresLignes || [])]);
     }
     for (const [tache, liste] of Object.entries(ev.terminaux || {})) if (Array.isArray(liste)) this.terminaux.set(tache, liste.slice(-40));
+    chargerReflexions(this.reflexions, ev.reflexions);
+    // dernier état (sans `ajout` : le texte complet vient de `reflexions` ; un ancien serveur n'envoie que l'extrait)
     for (const [cible, p] of Object.entries(ev.pensees || {})) if (p) this.noterPensee({ cible, ...p });
     if (ev.bonheur && typeof ev.bonheur === 'object') this.bonheur = { blagues: [], faits: [], ambiance: [], ...ev.bonheur };
     if (ev.reglages && typeof ev.reglages === 'object') this.reglages = { ...this.reglages, ...ev.reglages };
@@ -655,7 +685,10 @@ export class Etat {
       case 'permission_resolue':
         return ev.decision === 'allow' ? tr('Permission {id} : autorisée', { id: ev.id }) : tr('Permission {id} : refusée', { id: ev.id });
       case 'ordonnanceur':
-        return ev.ordonnanceur && ev.ordonnanceur.pause ? tr('Pause : {raison}', { raison: ev.ordonnanceur.pause.raison || '' }) : tr('Reprise de l’ordonnanceur');
+        if (ev.ordonnanceur && ev.ordonnanceur.pause) return tr('Pause : {raison}', { raison: ev.ordonnanceur.pause.raison || '' });
+        // multi-IA (D4) : comptes en pause, le reste du QG continue
+        if (ev.ordonnanceur && ev.ordonnanceur.pauses && Object.keys(ev.ordonnanceur.pauses).length) return tr('Comptes en pause : {comptes}', { comptes: Object.keys(ev.ordonnanceur.pauses).join(', ') });
+        return tr('Reprise de l’ordonnanceur');
       case 'alerte':
         return tr('Alerte {niveau} : {texte}', { niveau: ev.niveau, texte: ev.texte });
       case 'decision':
@@ -675,6 +708,7 @@ export class Etat {
           faits: ((ev.bonheur && ev.bonheur.faits) || []).length,
         });
       case 'pensee':
+      case 'pensee_traduction':
         return null;
       case 'agent': {
         const a = ev.agent;

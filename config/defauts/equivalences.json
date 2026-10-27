@@ -1,0 +1,14 @@
+{
+  "note": "Niveaux communs des modèles de chaque fournisseur (eco, standard, fort, max). Le DG et les agents raisonnent avec les alias Claude ; quand une tâche tourne sur un autre fournisseur, le modèle du même niveau est pris. Noms Codex relevés le 26/10/2026 (docs/multi-ia/bench-openai.md). Un modèle inconnu est rangé « standard ».",
+  "niveaux": ["eco", "standard", "fort", "max"],
+  "claude": { "haiku": "eco", "sonnet": "standard", "opus": "fort", "fable": "max" },
+  "codex": { "gpt-6-luna": "eco", "gpt-6.1-terra": "standard", "gpt-6.1-sol": "fort", "gpt-6-astra": "max" },
+  "modeles": {
+    "codex": [
+      { "id": "gpt-6-luna", "nom": "GPT-6 Luna", "efforts": ["low", "medium", "high"], "niveau": "eco" },
+      { "id": "gpt-6.1-terra", "nom": "GPT-6.1 Terra", "efforts": ["low", "medium", "high", "xhigh"], "niveau": "standard" },
+      { "id": "gpt-6.1-sol", "nom": "GPT-6.1 Sol", "efforts": ["low", "medium", "high", "xhigh", "max"], "niveau": "fort" },
+      { "id": "gpt-6-astra", "nom": "GPT-6 Astra", "efforts": ["low", "medium", "high", "xhigh", "max"], "niveau": "max" }
+    ]
+  }
+}

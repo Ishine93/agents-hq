@@ -1,10 +1,11 @@
 // Serveurs longs (rojo serve…) : le QG les lance, les surveille et garde leurs journaux.
 // Ils vivent au « sous-sol » : ils survivent à la fin de la tâche de l'agent qui les a démarrés.
 // Le QG repère aussi ceux lancés en dehors de lui (port déjà en écoute) pour éviter les conflits.
-import { spawn, execFile } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { RACINE, etages, etage as trouverEtage } from './config.js';
+import * as plateforme from './plateforme.js';
 import { emettre, etat } from './bus.js';
 import { portEnregistre } from './ports.js';
 import { t as tr } from './i18n.js';
@@ -88,21 +89,8 @@ function ajouterLignes(s, texte) {
   }
 }
 
-// Ports en écoute sur la machine → PID (netstat), pour repérer les serveurs lancés hors du QG.
-function portsEnEcoute() {
-  return new Promise((resolve) => {
-    execFile('netstat', ['-ano', '-p', 'tcp'], { windowsHide: true, timeout: 8000 }, (err, sortie) => {
-      const ports = new Map();
-      if (!err) {
-        for (const l of sortie.split('\n')) {
-          const m = l.trim().match(/^TCP\s+\S+:(\d+)\s+\S+\s+LISTENING\s+(\d+)/i);
-          if (m) ports.set(Number(m[1]), Number(m[2]));
-        }
-      }
-      resolve(ports);
-    });
-  });
-}
+// Ports en écoute sur la machine → PID (netstat sur Windows, lsof sur Mac), pour repérer les serveurs lancés hors du QG.
+const portsEnEcoute = () => plateforme.portsEnEcoute();
 
 async function surveiller() {
   if (simules) return;
@@ -142,7 +130,8 @@ export async function demarrer(etageId, type, par = 'toi', attenteMs = 20000) {
   ajouterLignes(s, `> ${s.commande}${def.portArg && s.port ? ` ${def.portArg} ${s.port}` : ''}   ${tr('(dans {dossier})', { dossier: e.projet })}`);
   // Le port est toujours passé explicitement : il vaut celui du registre, même si le projet dit autre chose.
   const args = def.portArg && s.port ? [...def.args, def.portArg, String(s.port)] : def.args;
-  const enfant = spawn(def.exe, args, { cwd: e.projet, windowsHide: true, env: process.env });
+  // (Windows : fenêtre cachée ; POSIX : groupe de processus à part, pour arrêter tout l'arbre d'un coup)
+  const enfant = spawn(def.exe, args, { cwd: e.projet, ...plateforme.optionsSpawnService(), env: process.env });
   processus.set(s.id, enfant);
   s.pid = enfant.pid;
   publier(s);
@@ -186,8 +175,8 @@ export function arreter(etageId, type) {
   const enfant = s && processus.get(s.id);
   if (!enfant) return false;
   s.arretDemande = true;
-  // taskkill /T : tue aussi les processus enfants (le raccourci rokit lance le vrai rojo.exe).
-  execFile('taskkill', ['/PID', String(enfant.pid), '/T', '/F'], { windowsHide: true }, () => {});
+  // tout l'arbre : le raccourci rokit lance le vrai rojo (taskkill /T sur Windows, groupe de processus sur Mac).
+  plateforme.tuerArbre(enfant.pid);
   return true;
 }
 
@@ -211,7 +200,7 @@ export function journaux(etageId, type, n = 80) {
 export function arreterTout() {
   for (const [id, enfant] of processus) {
     try {
-      execFile('taskkill', ['/PID', String(enfant.pid), '/T', '/F'], { windowsHide: true }, () => {});
+      plateforme.tuerArbre(enfant.pid);
     } catch {
       /* rien */
     }

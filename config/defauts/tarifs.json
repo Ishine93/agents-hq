@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "note": "Tarifs datés de l'API Images d'OpenAI, en dollars par million de jetons, tarif standard (docs/multi-ia/bench-openai.md §5.2, page Pricing lue le 26/10/2026). Le prix par image n'est pas publié pour Images 2.5 : « jetonsSortieAuPire » est une estimation prudente du QG (pas un chiffre publié), utilisée seulement pour l'accord avant l'appel ; le coût réel est calculé d'après l'usage renvoyé par l'API.",
+  "date": "2026-10-26",
+  "images": {
+    "gpt-image-2.5-flare": { "entreeTexte": 5, "entreeImage": 8, "sortieImage": 30 },
+    "gpt-image-2.5-sunburst": { "entreeTexte": 5, "entreeImage": 8, "sortieImage": 30 }
+  },
+  "jetonsSortieAuPire": {
+    "low": { "1024x1024": 400, "1536x1024": 600, "1024x1536": 600 },
+    "medium": { "1024x1024": 1600, "1536x1024": 2400, "1024x1536": 2400 },
+    "high": { "1024x1024": 6400, "1536x1024": 9600, "1024x1536": 9600 }
+  },
+  "jetonsEntreeParReference": 1600
+}

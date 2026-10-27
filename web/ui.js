@@ -18,10 +18,13 @@ import { ChoixSkills } from './skills.js';
 import { carteDemandes, grouperPermissions, clePermissions } from './permis.js';
 import { etageJoy, etageVisibleTache, etageVisibleAgent } from './scenes.js';
 import { md } from './markdown.js';
+import { FilPensees } from './fil-pensees.js';
 import { Lecteur } from './lecteur.js';
 import { Conso } from './conso.js';
 import { Parametres } from './parametres.js';
 import { Accueil } from './accueil.js';
+import { NIVEAUX, nomNiveau, phraseNiveau, travailDe, sansCapacite } from './cout.js';
+import { texteEstimation, montant, texteMesures } from './estimation.js';
 import { brancherRedimensionnement } from './redim.js';
 import { modaleOuverte, api } from './modale.js';
 import { t as tr, definirLangue, langueCourante, locale, traduireStatique, LANGUES_INTERFACE, LANGUES_IA } from './i18n.js';
@@ -101,6 +104,7 @@ export class Interface {
     this.mode = null; // { type: 'completer' | 'repondre' | 'nouveau', dossier }
     this.modeEffectif = null;
     this.dgChoix = null;
+    this.coutChoix = null; // niveau de coût choisi pour la prochaine demande (pastille) ; null = celui des réglages
     this.decouvertes = new Set();
     this.mcpEnCours = new Map();
     this.brouillons = new Map(); // texte en cours de saisie dans les cartes de question
@@ -115,6 +119,7 @@ export class Interface {
     this.dialogue = null; // { cle: id de tâche | 'dg', type: 'question' | 'consigne' } : saisie ouverte dans la fiche
     this.composeurs = new Map(); // `${cle}|${type}` -> { el, champ, aide, bEnvoyer } (gardés : la saisie survit aux mises à jour)
     this.zonesFiche = null;
+    this.filPensees = new FilPensees(); // fil des réflexions de la fiche ouverte (mis à jour sans être redessiné)
     this.signatureCibles = '';
   }
 
@@ -225,6 +230,7 @@ export class Interface {
     this.accueil = new Accueil(this.store, this);
     traduireStatique();
     $('#btn-reglages').addEventListener('click', () => this.parametres.ouvrir());
+    $('#btn-nouvel-etage').addEventListener('click', () => this.parametres.formulaireEtage());
     $('#btn-documents').addEventListener('click', () => this.ouvrirDocuments());
     this.brancherLangues();
     brancherRedimensionnement(() => this.majMarges());
@@ -261,6 +267,10 @@ export class Interface {
     };
     $('#dg-modele').addEventListener('change', choixDg);
     $('#dg-effort').addEventListener('change', choixDg);
+    $('#cout-demande').addEventListener('change', () => {
+      this.coutChoix = $('#cout-demande').value;
+      this.majReglageCout();
+    });
     $('#cible-saisie').addEventListener('change', () => this.choisirCible($('#cible-saisie').value));
     const saisie = $('#saisie');
     saisie.addEventListener('keydown', (e) => {
@@ -578,9 +588,9 @@ export class Interface {
       const def = S.comptes.find((c) => c.id === S.compteDefaut && c.connecte) || S.comptes.find((c) => c.connecte);
       this.compte = def ? def.id : S.compteDefaut;
     }
-    const sel = h('select', { class: 'choix-compte', 'aria-label': tr('Compte Claude de la prochaine demande') },
-      S.comptes.map((c) => h('option', { value: c.id, selected: c.id === this.compte ? true : null }, c.nom + (c.connecte ? '' : ' — ' + tr('non connecté')))),
-      h('option', { value: '__ajouter' }, '＋ ' + tr('Ajouter un Claude…')),
+    const sel = h('select', { class: 'choix-compte', 'aria-label': tr('Compte IA de la prochaine demande') },
+      S.comptes.map((c) => h('option', { value: c.id, selected: c.id === this.compte ? true : null }, c.nom + (c.fournisseur && c.fournisseur !== 'claude' ? ' · ' + c.fournisseur : '') + (c.connecte ? '' : ' — ' + tr('non connecté')))),
+      h('option', { value: '__ajouter' }, '＋ ' + tr('Ajouter un compte IA…')),
       h('option', { value: '__gerer' }, '⚙ ' + tr('Gérer les comptes…')));
     const choisi = S.comptes.find((c) => c.id === this.compte);
     sel.title = choisi ? tr('Envoyer avec {nom}', { nom: choisi.nom }) : tr('Aucun compte connecté');
@@ -588,15 +598,9 @@ export class Interface {
     sel.addEventListener('change', async () => {
       const v = sel.value;
       if (v === '__ajouter') {
+        // choix du fournisseur et du type d'accès : dans Réglages › Comptes IA
         sel.value = this.compte || '';
-        const nom = window.prompt(tr('Nom du nouveau compte (ex. « Claude pro ») :'), tr('Claude {n}', { n: S.comptes.length + 1 }));
-        if (nom === null) return;
-        try {
-          await api('/api/comptes/ajouter', { nom });
-          this.toast('info', tr('Compte ajouté : une fenêtre de connexion s’est ouverte, connecte-toi dans ton navigateur.'));
-        } catch (e) {
-          this.toast('erreur', e.message);
-        }
+        this.parametres.ouvrir('comptes');
         return;
       }
       if (v === '__gerer') {
@@ -791,6 +795,7 @@ export class Interface {
     document.body.classList.toggle('complement', !!(m && m.type === 'completer'));
     // Le modèle et l'effort du DG ne servent qu'à un nouveau dossier.
     $('#reglage-dg').hidden = !(S.modeles[this.compte] || []).length || !!m;
+    $('#reglage-cout').hidden = !!m;
     $('#au-dessus').hidden = q.hidden && !(this.jointes && this.jointes.liste.length);
   }
 
@@ -811,8 +816,11 @@ export class Interface {
         const corps = { texte, etageAffiche: this.etageId, compte: this.compte, ...this.choixSkills.pourEnvoi() };
         const dg = this.reglageDg();
         if (dg) corps.dg = dg;
+        corps.travail = { cout: this.coutDemande() };
         await envoyer('/api/dossiers', avecPieces(corps));
         this.choixSkills.vider(); // les skills choisis valent pour ce dossier-là
+        this.coutChoix = null; // le niveau choisi vaut pour cette demande-là
+        this.majReglageCout();
       }
       s.value = '';
       this.jointes.vider();
@@ -840,7 +848,26 @@ export class Interface {
     return m ? { modele: m, effort: e || null } : null;
   }
 
+  // ---------- coût de la demande (pastille, 1.0.6 B2) ----------
+  coutDemande() {
+    return NIVEAUX.includes(this.coutChoix) ? this.coutChoix : travailDe(this.store.reglages).cout;
+  }
+
+  majReglageCout() {
+    const box = $('#reglage-cout');
+    box.hidden = !!this.calculerMode();
+    const def = travailDe(this.store.reglages).cout;
+    const choix = this.coutDemande();
+    const sel = $('#cout-demande');
+    sel.replaceChildren(...NIVEAUX.map((n) => h('option', { value: n, title: phraseNiveau(n) }, nomNiveau(n))));
+    sel.value = choix;
+    box.classList.toggle('modifie', choix !== def);
+    const vars = { niveau: nomNiveau(choix), phrase: phraseNiveau(choix) };
+    box.title = choix === def ? tr('Coût de la prochaine demande : {niveau}, {phrase} (par défaut)', vars) : tr('Coût de la prochaine demande : {niveau}, {phrase} (choisi pour cette demande)', vars);
+  }
+
   majReglageDg() {
+    this.majReglageCout();
     const S = this.store;
     const box = $('#reglage-dg');
     const liste = S.modeles[this.compte] || [];
@@ -861,6 +888,14 @@ export class Interface {
     box.classList.toggle('modifie', !parDefaut);
     const varsDg = { modele: mod.nom || mod.id, effort: eff };
     box.title = parDefaut ? tr('DG de la prochaine demande : {modele} · {effort} (par défaut)', varsDg) : tr('DG de la prochaine demande : {modele} · {effort} (réglé pour cette demande)', varsDg);
+  }
+
+  // Niveau de coût d'un dossier, avec ce qui est sans effet pour le fournisseur qui exécute ses tâches (Codex).
+  texteCoutDossier(d) {
+    const S = this.store;
+    const c = S.comptes.find((x) => x.id === (d.compteAgents || d.compte));
+    const sans = c ? sansCapacite(S, 'compaction', [c]) : [];
+    return nomNiveau(d.travail.cout) + ' — ' + phraseNiveau(d.travail.cout) + (sans.length ? ' (' + tr('compaction, plafond par tâche et sous-agent d’exploration sans effet pour {fournisseurs}', { fournisseurs: sans.join(', ') }) + ')' : '');
   }
 
   async action(route, corps, confirmer) {
@@ -983,7 +1018,8 @@ export class Interface {
           (d.etages || []).map((x) => S.etage(x)?.nom || x).join(' · ') || '—',
           taches.length ? ' — ' + tr('{faites}/{total} tâche(s)', { faites, total: taches.length }) : '',
           d.compte ? ' — ' + (S.comptes.find((c) => c.id === d.compte)?.nom || d.compte) : '',
-          d.dg && d.dg.modele ? ' — ' + tr('DG : {modele}', { modele: S.nomModele(d.dg.modele, d.compte) }) + (d.dg.effort ? ' · ' + d.dg.effort : '') : '',
+          d.dg && d.dg.modele ? ' — ' + tr('DG : {modele}', { modele: S.nomModele(d.dg.modele, d.dg.compte || d.compte) }) + (d.dg.effort ? ' · ' + d.dg.effort : '') : '',
+          d.travail && d.travail.cout ? ' — ' + tr('Coût : {niveau}', { niveau: nomNiveau(d.travail.cout) }) : '',
           d.skills && d.skills.length ? ' — 🧩 ' + d.skills.map((x) => x.id).join(', ') : ''),
         ouvert && d.question ? h('div', { class: 'question' }, h('b', {}, tr('Question :') + ' '), md(d.question, { fichier: (c) => this.ouvrirFichier(c) })) : null,
         ouvert && d.synthese ? md(d.synthese, { classe: 'synthese', fichier: (c) => this.ouvrirFichier(c, (d.etages || [])[0] || null) }) : null,
@@ -1146,27 +1182,32 @@ export class Interface {
     return [...refs].sort(parRef);
   }
 
-  // Bloc « Réflexion en direct » : dernier extrait en entier + les 8 précédents.
+  // Bloc « Réflexion en direct » : fil des blocs de réflexion complets, avec les actions faites entre deux.
   blocPensees(cible, actif = true) {
     const S = this.store;
     const p = S.pensees.get(cible);
     // la phase (« rédige son rapport »…) n'a de sens que pendant le travail
     const recent = actif && p && Date.now() - (p.t || 0) < 120000 ? p : null;
-    const hist = (S.historiquePensees.get(cible) || []).slice();
-    if (!recent && !hist.length) return null;
     let phase = '';
     if (recent) {
       phase = PHASES[recent.phase] ? tr(PHASES[recent.phase]) : recent.phase || '';
       if (recent.phase === 'outil' && recent.outil) phase += ' (' + recent.outil + ')';
       if (recent.taille) phase += ' · ' + tr('{n} car.', { n: fmtN(recent.taille) });
       if (recent.verificateur) phase = tr('vérificateur : {phase}', { phase });
+      phase += ' · ' + heure(recent.t, true);
     }
-    const extrait = recent && recent.extrait ? recent.extrait : hist.length ? hist[hist.length - 1].extrait : '';
-    const anciens = hist.filter((x) => x.extrait !== extrait).slice(-8).reverse();
-    return h('div', { class: 'bloc pensees' },
-      h('h4', {}, actif ? tr('Réflexion en direct') : tr('Dernières réflexions'), recent ? h('span', { class: 'phase' }, ' — ' + phase + ' · ' + heure(recent.t, true)) : null),
-      extrait ? h('p', { class: 'pensee-extrait' }, extrait) : null,
-      anciens.length ? h('ul', { class: 'pensees-hist' }, anciens.map((x) => h('li', {}, h('span', { class: 'heure' }, x.t ? heure(x.t, true) : ''), ' ', x.extrait))) : null);
+    const outils = cible === 'dg' ? [] : (S.outils.get(cible) || []).map((o) => ({ ...o, nom: ICONE_OUTIL(o.nom) }));
+    return this.filPensees.maj({ cible, blocs: S.reflexions.get(cible) || [], outils, titre: actif ? tr('Réflexion en direct') : tr('Dernières réflexions'), phase });
+  }
+
+  // Zone des pensées de la fiche : le fil reste le même nœud (défilement et blocs ouverts conservés).
+  majPensees(z, cible, actif) {
+    const el = this.blocPensees(cible, actif);
+    if (!el) z.pensees.replaceChildren();
+    else if (el.parentNode !== z.pensees) {
+      z.pensees.replaceChildren(el);
+      this.filPensees.restaurer();
+    }
   }
 
   ficheJoy(box) {
@@ -1245,7 +1286,8 @@ export class Interface {
           h('dt', {}, tr('Dossier')), h('dd', {}, d ? d.id + ' — ' + (d.titre || d.texte || '') : '—')),
         d && S.plans.has(d.id) ? h('div', { class: 'boutons' }, h('button', { class: 'petit', on: { click: () => this.plan.ouvrir(d.id) } }, tr('Voir le plan'))) : null);
       this.majDialogue(z.dialogue, this.dialogueDg());
-      remplir(z.bas, this.blocPensees('dg', dg.etat === 'reflechit'));
+      this.majPensees(z, 'dg', dg.etat === 'reflechit');
+      remplir(z.bas);
       return;
     }
     if (String(this.fiche).startsWith('ag:')) {
@@ -1326,8 +1368,8 @@ export class Interface {
     const donne = this.donneA(t);
     const orig = agent && agent.cloneDe ? S.equipe.get(agent.cloneDe) : null;
     const prenom = nomT !== t.ref ? nomT : null;
-    // Trois zones : la saisie « Demander / Nouvelle consigne » (au milieu) n'est jamais redessinée,
-    // pour garder le texte et le focus pendant que la fiche se met à jour (pensées, outils…).
+    // Quatre zones : la saisie « Demander / Nouvelle consigne » n'est jamais redessinée, pour garder le texte
+    // et le focus pendant que la fiche se met à jour ; le fil des pensées n'est que complété.
     const z = this.zones(box);
     remplir(z.haut,
       this.boutonRetour(),
@@ -1341,25 +1383,37 @@ export class Interface {
         h('dt', {}, tr('État')), h('dd', {}, h('span', { class: 'badge t-' + t.etat }, libelleEtat(t.etat)), depuis ? ' ' + tr('depuis {heure}', { heure: heure(depuis.t, true) }) : ''),
         h('dt', {}, tr('Demandé')), h('dd', {}, M.nom + ' · ' + (t.effort || '?')),
         h('dt', {}, tr('Réel')), h('dd', {}, t.modeleReel || t.effortReel ? (t.modeleReel || '?') + ' · ' + (t.effortReel || '?') : '—'),
+        // plusieurs IA : compte qui fait la tâche, et pourquoi s'il n'est pas celui attendu
+        S.multiIa && t.compte ? [h('dt', {}, tr('IA')), h('dd', {}, S.libelleCompte(t.compte),
+          t.routage && t.routage.bascule ? h('div', { class: 'meta' }, tr('à la place de {compte}, avec ton accord', { compte: S.libelleCompte(t.routage.bascule) })) : null,
+          t.routage && t.routage.repli ? h('div', { class: 'meta' }, tr('repli : aucun compte des priorités ne pouvait la faire')) : null,
+          t.routage && t.routage.justification ? h('div', { class: 'meta' }, t.routage.justification) : null)] : null,
         t.attend && t.attend.length ? [h('dt', {}, tr('Attend')), h('dd', { class: 'refs' }, this.listeRefs(t.dossier, t.attend))] : null,
         t.inputsFrom && t.inputsFrom.length ? [h('dt', {}, tr('Reçoit de')), h('dd', { class: 'refs' }, this.listeRefs(t.dossier, t.inputsFrom))] : null,
         donne.length ? [h('dt', {}, tr('Donne à')), h('dd', { class: 'refs' }, this.listeRefs(t.dossier, donne))] : null,
         t.motifFile ? [h('dt', {}, tr('File')), h('dd', {}, t.motifFile)] : null,
-        h('dt', {}, tr('Vérification')), h('dd', {}, t.verif ? t.verif.mode + (t.verif.modele ? ' (' + t.verif.modele + ')' : '') + (v && v.verdict ? ' — ' + tr('dernier verdict : {verdict}', { verdict: v.verdict }) : '') : '—'),
+        h('dt', {}, tr('Vérification')), h('dd', {}, t.verif ? t.verif.mode + (t.verif.modele ? ' (' + t.verif.modele + ')' : '') + (S.multiIa && t.verif.compte ? ' — ' + S.libelleCompte(t.verif.compte) : '') + (v && v.verdict ? ' — ' + tr('dernier verdict : {verdict}', { verdict: v.verdict }) : '') : '—',
+          t.verif && t.verif.ajustement ? h('div', { class: 'meta' }, t.verif.ajustement) : null,
+          t.verif && t.verif.controles ? h('div', { class: 'meta' }, t.verif.controles === 'passes' ? tr('Contrôles du projet passés') : tr('Contrôles du projet en échec')) : null),
         h('dt', {}, tr('Tentative')), h('dd', {}, String(t.tentative || 1)),
         t.skills && t.skills.length ? [h('dt', {}, tr('Skills')), h('dd', {}, t.skills.join(', '))] : null,
         t.lignes ? [h('dt', {}, tr('Code')), h('dd', {},
           h('button', { class: 'lien', on: { click: () => { this.ficheOnglet = 'code'; this.majFiche(); } } }, compteLignes(t.lignes.ajouts, t.lignes.suppressions)),
           ' ' + tr('dans {n} fichier(s)', { n: t.lignes.fichiers || 0 }))] : null,
-        dos && dos.dg && dos.dg.modele ? [h('dt', {}, tr('DG du dossier')), h('dd', {}, S.nomModele(dos.dg.modele, dos.compte) + (dos.dg.effort ? ' · ' + dos.dg.effort : ''))] : null,
+        dos && dos.dg && dos.dg.modele ? [h('dt', {}, tr('DG du dossier')), h('dd', {}, S.nomModele(dos.dg.modele, dos.dg.compte || dos.compte) + (dos.dg.effort ? ' · ' + dos.dg.effort : '') + (S.multiIa ? ' — ' + S.libelleCompte(dos.dg.compte || dos.compte) : ''))] : null,
+        dos && dos.travail && dos.travail.cout ? [h('dt', {}, tr('Coût du dossier')), h('dd', {}, this.texteCoutDossier(dos))] : null,
+        // lot C : estimation (tâche, plan) et mesures de la session (contexte, compactions, coût)
+        t.estimation ? [h('dt', {}, tr('Estimation')), h('dd', {}, '≈ ' + montant(t.estimation.valeur, t.estimation.unite))] : null,
+        t.mesures ? [h('dt', {}, tr('Mesures')), h('dd', {}, texteMesures(t.mesures))] : null,
+        dos && dos.estimation ? [h('dt', {}, tr('Plan estimé')), h('dd', {}, texteEstimation(dos.estimation))] : null,
         t.agent ? [h('dt', {}, tr('Agent')), h('dd', {},
           h('button', { class: 'lien', on: { click: () => this.ouvrirFicheDepuis('ag:' + t.agent) } }, agent && agent.prenom ? agent.prenom + ' (' + t.agent + ')' : t.agent),
           t.reembauche ? (agent && agent.cloneDe ? ' — ' + tr('clone de {nom}', { nom: (orig && orig.prenom) || agent.cloneDe }) : ' — ' + tr('réembauché')) : ' — ' + tr('nouvelle recrue'),
           agent ? ' · ' + tr('{n} mission(s)', { n: agent.missions || 0 }) : '')] : null),
-      agent ? this.jaugeContexte(agent) : null);
+      agent ? this.jaugeContexte(agent, ['running', 'rework', 'verifying'].includes(t.etat) ? t.mesures?.contexte : null) : null);
     this.majDialogue(z.dialogue, this.dialogueTache(t));
+    this.majPensees(z, t.id, ['running', 'rework', 'verifying'].includes(t.etat));
     remplir(z.bas,
-      this.blocPensees(t.id, ['running', 'rework', 'verifying'].includes(t.etat)),
       q ? h('div', { class: 'bloc question-agent' }, h('h4', {}, tr('Question en attente')), h('p', {}, q.question || ''),
         h('button', { class: 'petit', on: { click: () => this.montrerCarte('q-' + q.id, true) } }, tr('Répondre'))) : null,
       perms.length ? h('div', { class: 'bloc' }, h('h4', {}, perms.length > 1 ? tr('Permissions demandées') : tr('Permission demandée')), grouperPermissions(perms).map((g) => this.cartePermission(g, true))) : null,
@@ -1390,12 +1444,13 @@ export class Interface {
   }
 
   // ---------- parler à un agent ou au DG sans l'interrompre ----------
-  // Fiche en trois zones persistantes : haut et bas sont redessinés (remplir), le dialogue garde sa saisie.
+  // Fiche en zones persistantes : haut et bas sont redessinés (remplir), le dialogue garde sa saisie,
+  // le fil des pensées est mis à jour sur place.
   zones(box) {
     let z = this.zonesFiche;
-    if (!z || box.children.length !== 3 || box.children[0] !== z.haut || box.children[1] !== z.dialogue || box.children[2] !== z.bas) {
-      z = this.zonesFiche = { haut: h('div', { class: 'fiche-zone' }), dialogue: h('div', { class: 'fiche-dialogue' }), bas: h('div', { class: 'fiche-zone' }) };
-      box.replaceChildren(z.haut, z.dialogue, z.bas);
+    if (!z || box.children.length !== 4 || box.children[0] !== z.haut || box.children[1] !== z.dialogue || box.children[2] !== z.pensees || box.children[3] !== z.bas) {
+      z = this.zonesFiche = { haut: h('div', { class: 'fiche-zone' }), dialogue: h('div', { class: 'fiche-dialogue' }), pensees: h('div', { class: 'fiche-zone' }), bas: h('div', { class: 'fiche-zone' }) };
+      box.replaceChildren(z.haut, z.dialogue, z.pensees, z.bas);
     }
     return z;
   }
@@ -1636,8 +1691,9 @@ export class Interface {
   }
 
   // ---------- réserve d'agents ----------
-  jaugeContexte(a) {
-    const c = Math.max(0, a.contexte || 0);
+  // enDirect : contexte de la session en cours (mesures de la tâche), plus à jour que celui gardé par l'agent
+  jaugeContexte(a, enDirect = null) {
+    const c = Math.max(0, enDirect || a.contexte || 0);
     const r = Math.min(1, c / CONTEXTE_MAX);
     return h('div', { class: 'jauge-boite', title: tr('Contexte de la conversation : au-delà de 150 000 tokens, l’agent part à la retraite') },
       h('div', { class: 'jauge-lib' }, tr('Contexte : {n} k / {max} k tokens', { n: Math.round(c / 1000), max: CONTEXTE_MAX / 1000 })),
@@ -1665,10 +1721,11 @@ export class Interface {
         h('dt', {}, tr('Missions')), h('dd', {}, String(n)),
         a.cloneDe ? [h('dt', {}, tr('Clone de')), h('dd', {}, orig && orig.prenom ? orig.prenom + ' (' + a.cloneDe + ')' : a.cloneDe)] : null,
         h('dt', {}, tr('Dernière')), h('dd', {}, a.titre || '—'),
+        tache && tache.mesures ? [h('dt', {}, tr('Mission en cours')), h('dd', {}, texteMesures(tache.mesures))] : null,
         complet && a.depuis ? [h('dt', {}, tr('Depuis')), h('dd', {}, heure(a.depuis, true))] : null),
       a.specialite ? h('p', { class: 'specialite' }, a.specialite) : null,
       a.fichiers && a.fichiers.length ? h('div', { class: 'bloc' }, h('h4', {}, tr('Fichiers connus')), h('ul', { class: 'fichiers' }, a.fichiers.map((f) => h('li', {}, h('code', {}, f))))) : null,
-      this.jaugeContexte(a),
+      this.jaugeContexte(a, tache && tache.agent === a.id && ['running', 'rework', 'verifying'].includes(tache.etat) ? tache.mesures?.contexte : null),
       h('div', { class: 'boutons' },
         tache ? h('button', { class: 'petit', on: { click: () => (complet ? this.ouvrirFicheDepuis(tache.id) : this.voirTache(tache.id)) } }, tr('Voir {ref}', { ref: tache.ref })) : null,
         this.boutonPerso(a.prenom || null, a.prenom || null),
@@ -1939,9 +1996,16 @@ export class Interface {
   majPause() {
     const p = this.store.ordonnanceur && this.store.ordonnanceur.pause;
     const b = $('#bandeau-pause');
-    b.hidden = !p;
+    // multi-IA (D4) : un compte en pause ne met pas le QG en pause ; le bandeau le dit, « Reprendre » le relance
+    const parCompte = Object.entries((this.store.ordonnanceur && this.store.ordonnanceur.pauses) || {});
+    b.hidden = !p && !parCompte.length;
     document.body.classList.toggle('en-pause', !!p);
-    if (!p) return;
+    if (!p) {
+      if (!parCompte.length) return;
+      const nom = (id) => ((this.store.comptes || []).find((c) => c.id === id) || { nom: id }).nom;
+      $('#pause-texte').textContent = parCompte.map(([id, x]) => tr('{compte} en pause : {raison}', { compte: nom(id), raison: x.raison || '' }) + (x.jusqua ? ' — ' + tr('reprise à {heure}', { heure: heure(x.jusqua, true) }) : '')).join(' · ');
+      return;
+    }
     let txt = tr('Pause : {raison}', { raison: p.raison || tr('ordonnanceur en pause') });
     if (p.jusqua) {
       const reste = Math.max(0, Math.round((p.jusqua - Date.now()) / 1000));
@@ -1964,9 +2028,13 @@ export class Interface {
   surEvenement(ev) {
     const S = this.store;
     const now = Date.now();
-    // pensées : jusqu'à une par seconde et par agent ; seule la fiche concernée se met à jour
-    if (ev.type === 'pensee') {
-      if (this.onglet === 'fiche' && this.ficheOnglet === 'infos' && this.fiche === ev.cible && !this.pointeurDansPanneau) this.majFiche();
+    // pensées : jusqu'à une par seconde et par agent ; seul le fil de la fiche concernée se met à jour
+    if (ev.type === 'pensee' || ev.type === 'pensee_traduction') {
+      const z = this.zonesFiche;
+      if (this.onglet === 'fiche' && this.fiche === ev.cible && z && z.pensees.isConnected) {
+        const t = ev.cible === 'dg' ? null : S.taches.get(ev.cible);
+        this.majPensees(z, ev.cible, ev.cible === 'dg' ? S.dg.etat === 'reflechit' : !!t && ['running', 'rework', 'verifying'].includes(t.etat));
+      }
       return;
     }
     if (ev.type === 'bonheur') {
@@ -1976,6 +2044,11 @@ export class Interface {
     }
     if (ev.type === 'conso') {
       this.conso.maj();
+      return;
+    }
+    if (ev.type === 'codex-installation') {
+      this.parametres.maj();
+      this.accueil.maj();
       return;
     }
     if (ev.type === 'comptes') {
@@ -1988,6 +2061,7 @@ export class Interface {
     }
     if (ev.type === 'reglages') {
       this.majLangues();
+      this.majReglageCout();
       this.parametres.maj();
       return;
     }

@@ -9,9 +9,15 @@
     "Bash(shutdown *)",
     "Bash(reg *)",
     "Bash(setx *)",
+    "Bash(security *)",
+    "Bash(sudo *)",
+    "Bash(launchctl *)",
+    "Bash(defaults write *)",
     "Read(//c/Users/*/.claude/.credentials.json)",
+    "Read(//Users/*/.claude/.credentials.json)",
     "Read({COMPTES})",
     "Read({HOME}/.claude/.credentials.json)",
+    "Read({HOME}/.codex/auth.json)",
     "Read({QG}/runtime/jeton.txt)",
     "Read({QG}/config/*.json)",
     "Edit({QG}/config/**)",
@@ -165,6 +171,8 @@
         "Bash(npm test *)",
         "Bash(python tools/*)",
         "Bash(python -m pytest *)",
+        "Bash(python3 tools/*)",
+        "Bash(python3 -m pytest *)",
         "WebSearch",
         "WebFetch"
       ]
@@ -199,10 +207,12 @@
         "Bash(npm test *)",
         "Bash(python tools/*)",
         "Bash(python -m pytest *)",
+        "Bash(python3 tools/*)",
+        "Bash(python3 -m pytest *)",
         "WebSearch",
         "WebFetch"
       ]
     }
   },
-  "note": "Profils de permissions. {ZONES} = tes dossiers racines et les dossiers des étages (écriture libre), {QG} = le dossier du QG (protégé), {COMPTES} = les dossiers de connexion des comptes Claude (illisibles pour les agents). Le serveur ajoute une règle « demander » pour toute écriture hors des zones. En mode prudent (Réglages), le mode auto est remplacé par une demande pour chaque action non couverte."
+  "note": "Profils de permissions. {ZONES} = tes dossiers racines et les dossiers des étages (écriture libre), {QG} = le dossier du QG (protégé), {COMPTES} = les dossiers de connexion des comptes IA, Claude et Codex (illisibles pour les agents). Le serveur ajoute une règle « demander » pour toute écriture hors des zones. En mode prudent (Réglages), le mode auto est remplacé par une demande pour chaque action non couverte."
 }

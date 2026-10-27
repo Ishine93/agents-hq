@@ -5,7 +5,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { RACINE } from './config.js';
-import { chargerComptes, compteConnecte, envPour, trouverCompte } from './comptes.js';
+import { chargerComptes, compteConnecte, envPour, trouverCompte, fournisseur as fournisseurDuCompte } from './comptes.js';
+import { lireAppServer, fenetresDe } from './ia/codex-app-server.js';
 import { t } from './i18n.js';
 
 // QG_CONSO_FICHIER : pour les tests (ne pas mélanger leurs appels à ta vraie consommation).
@@ -109,6 +110,14 @@ export function enregistrerCout(meta, delta) {
   repartir(meta, { cout: delta });
 }
 
+/** Compaction automatique d'une session (lot A2) : nombre et tokens résumés. */
+export function enregistrerCompaction(avant) {
+  etat.compactions ||= { nombre: 0, tokens: 0 };
+  etat.compactions.nombre += 1;
+  etat.compactions.tokens += avant || 0;
+  changement();
+}
+
 /** Un agent réembauché réutilise son contexte au lieu d'en reconstruire un. */
 export function enregistrerReemploi(contexte) {
   etat.reemplois.nombre += 1;
@@ -166,6 +175,24 @@ export function appliquerLecture(compteId, u) {
   return l;
 }
 
+/** Lecture Codex (app-server) rangée au même format : fenêtres `codex:primary` / `codex:secondary` avec leur nom. */
+export function appliquerLectureCodex(compteId, lecture, compte = null) {
+  const { fenetres, forfait, credits } = fenetresDe(lecture);
+  const lu = Date.now();
+  const l = { maj: lu, essai: lu, abonnement: compte?.cleApi ? 'API' : forfait, disponible: !!Object.keys(fenetres).length, fenetres };
+  if (credits && typeof credits === 'object') l.extra = { credits: credits.balance ?? credits.used ?? null, devise: null };
+  etat.limites[compteId] = l;
+  changement();
+  for (const fn of abonnesLimites) {
+    try {
+      fn(compteId, l);
+    } catch (e) {
+      console.error('limites', compteId, e.message);
+    }
+  }
+  return l;
+}
+
 /** Lecture ratée : on garde les dernières valeurs, mais marquées comme anciennes (maj = dernière lecture réussie). */
 export function echecLecture(compteId, e) {
   etat.limites[compteId] = { ...(etat.limites[compteId] || { fenetres: {} }), erreur: String(e?.message || e), essai: Date.now() };
@@ -190,6 +217,24 @@ export function lireLimites(compteId) {
   const p = (async () => {
     const compte = trouverCompte(compteId);
     if (!compteConnecte(compte)) return null;
+    // Agent ACP : le protocole ne donne pas les limites du forfait (seulement le coût par session, s'il le donne).
+    if (fournisseurDuCompte(compte) === 'acp') {
+      enCours.delete(compteId);
+      return null;
+    }
+    if (fournisseurDuCompte(compte) === 'codex') {
+      // Codex : `codex app-server` › account/rateLimits/read (fenêtres primary/secondary avec leur durée), sans tokens.
+      try {
+        const r = await lireAppServer({ env: envPour(compte), cwd: path.join(RACINE, 'runtime'), methodes: ['account/rateLimits/read'] });
+        if (r.erreur && !r['account/rateLimits/read']) throw new Error(r.erreur);
+        return appliquerLectureCodex(compteId, r['account/rateLimits/read'], compte);
+      } catch (e) {
+        echecLecture(compteId, e);
+        return null;
+      } finally {
+        enCours.delete(compteId);
+      }
+    }
     let liberer;
     const silence = new Promise((r) => (liberer = r));
     async function* aucunMessage() {
@@ -266,6 +311,8 @@ export function consoPublique() {
     dossiers: Object.fromEntries(Object.entries(etat.dossiers).slice(-30)),
     limites: etat.limites,
     reemplois: etat.reemplois,
+    compactions: etat.compactions || { nombre: 0, tokens: 0 },
+    calibrage: etat.calibrage || {},
   };
 }
 
@@ -277,3 +324,17 @@ export function oublierDossier(id) {
 }
 
 export const consoTaches = (dossierId) => Object.fromEntries(Object.entries(etat.taches).filter(([k]) => k.startsWith(`${dossierId}-`)));
+
+// ---------------------------------------------------------------- lot C : estimation et calibrage (logique dans estimation.js)
+export const donneesConso = () => etat;
+/** Annotations d'un dossier (profil, estimation, compactions) ou d'une tâche (contexteMax, tours, compactions, cache). */
+export function annoterConso(groupe, id, champs) {
+  if (!id || !['dossiers', 'taches'].includes(groupe)) return;
+  Object.assign((etat[groupe][id] = etat[groupe][id] || vide()), champs);
+  limiter(etat[groupe], groupe === 'dossiers' ? 60 : 400);
+  changement();
+}
+export function enregistrerCalibrage(compteId, cal) {
+  (etat.calibrage ||= {})[compteId] = cal;
+  changement();
+}

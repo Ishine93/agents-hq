@@ -70,6 +70,14 @@ body.redimensionne, body.redimensionne * { cursor: inherit !important; user-sele
 .param-choix.choisi { border-color: var(--accent); background: rgba(58, 134, 255, 0.1); }
 .param-choix small { color: var(--dim); line-height: 1.4; }
 .param-case { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; }
+.param-niveaux { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 6px 0; }
+.param-niveau { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; padding: 9px 12px; border: 2px solid #2c3454; border-radius: 8px; background: transparent; color: var(--texte); cursor: pointer; }
+.param-niveau small { color: var(--dim); line-height: 1.35; }
+.param-niveau.choisi { border-color: var(--accent); background: rgba(58, 134, 255, 0.1); }
+.param-cout-perso { margin: 8px 0; border: 1px solid var(--bord-clair); border-radius: 8px; padding: 6px 10px; }
+.param-cout-perso summary { cursor: pointer; font-weight: 600; font-size: 13px; }
+.param-cout-perso .param-ligne { margin: 6px 0; }
+@media (max-width: 700px) { .param-niveaux { grid-template-columns: 1fr; } }
 .param-compte, .param-etage { border: 1px solid var(--bord-clair); border-radius: 8px; padding: 8px 10px; margin: 8px 0; background: rgba(255, 255, 255, 0.025); }
 .param-compte.connecte { border-left: 4px solid var(--vert); }
 .param-etage.inactif { opacity: 0.6; }
@@ -307,6 +315,14 @@ body.redimensionne, body.redimensionne * { cursor: inherit !important; user-sele
   .choix-langue select { max-width: 70px; }
   #btn-documents span, #btn-reglages span { display: none; }
   .cible-saisie { max-width: 180px; }
+}
+/* la pastille Coût (1.0.6) tient dans la barre : icône au lieu du libellé, compte, cible et saisie plus étroits */
+@media (max-width: 1600px) {
+  .reglage-cout .lib { display: none; }
+  .reglage-cout::before { content: '💰'; font-size: 13px; }
+  .choix-compte { max-width: 150px; }
+  .cible-saisie { max-width: 140px; }
+  .zone-saisie { min-width: 150px; }
 }
 
 /* plan du dossier ouvert depuis un tableau blanc : choix du dossier affiché sur ce tableau */

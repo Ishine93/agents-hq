@@ -5,13 +5,19 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import * as plateforme from './plateforme.js';
 
 export const RACINE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CONFIG = path.join(RACINE, 'config');
 const DEFAUTS = path.join(CONFIG, 'defauts');
 const lire = (...p) => fs.readFileSync(path.join(RACINE, ...p), 'utf8');
 const lireJson = (...p) => JSON.parse(lire(...p));
-export const NODE_DIR = path.join(RACINE, 'runtime', 'node');
+// Dossier des binaires du Node portable (runtime/node sur Windows, runtime/node/bin sur Mac).
+export const NODE_DIR = plateforme.nodeBin();
+
+// Les défauts (config/defauts/*.json) écrivent leurs chemins à la façon Windows (« \\ » dans le JSON).
+// Sur Mac, ces séparateurs deviennent des « / » au moment de la création du fichier personnel.
+export const adapterDefauts = (brut, plat = plateforme.PLATEFORME) => (plateforme.estWindows(plat) ? brut : brut.replaceAll('\\\\', '/'));
 
 // Fichiers personnels : créés depuis config/defauts au premier lancement.
 const PERSONNELS = ['reglages.json', 'comptes.json', 'etages.json', 'mcp.json', 'ports.json'];
@@ -37,7 +43,7 @@ function assurerConfig() {
     const cible = path.join(CONFIG, f);
     if (fs.existsSync(cible)) continue;
     // Les défauts peuvent citer le dossier du QG ({QG}) et ton dossier personnel ({HOME}).
-    const brut = fs.readFileSync(path.join(DEFAUTS, f), 'utf8')
+    const brut = adapterDefauts(fs.readFileSync(path.join(DEFAUTS, f), 'utf8'))
       .replaceAll('{QG}', RACINE.replace(/\\/g, '\\\\'))
       .replaceAll('{HOME}', os.homedir().replace(/\\/g, '\\\\'));
     fs.writeFileSync(cible, brut);
@@ -107,7 +113,7 @@ export function utiliserImmeubleDemo(dossierDemo, { neuf = false } = {}) {
   FICHIER_ETAGES = path.join(dossierDemo, 'etages.json');
   if (neuf || !fs.existsSync(FICHIER_ETAGES)) {
     fs.mkdirSync(dossierDemo, { recursive: true });
-    const brut = fs.readFileSync(path.join(DEFAUTS, 'etages-demo.json'), 'utf8').replaceAll('{DEMO}', societeDemo.replace(/\\/g, '\\\\'));
+    const brut = adapterDefauts(fs.readFileSync(path.join(DEFAUTS, 'etages-demo.json'), 'utf8')).replaceAll('{DEMO}', societeDemo.replace(/\\/g, '\\\\'));
     fs.writeFileSync(FICHIER_ETAGES, brut);
   }
   for (const e of JSON.parse(fs.readFileSync(FICHIER_ETAGES, 'utf8')).etages) {
@@ -150,6 +156,12 @@ export const LANGUES_IA = {
 };
 export const langueIA = () => LANGUES_IA[REGLAGES.langueIA] || REGLAGES.langueIA || 'français';
 
+// Ligne de la délégation d'images ({IMAGES}) : fournie par delegation.js, vide tant que la délégation est coupée.
+let ligneImages = () => '';
+export const definirLigneImages = (f) => {
+  ligneImages = f;
+};
+
 // Les directives citent les racines, le dossier du QG, ton prénom et la langue de travail.
 export function directive(nom) {
   const r = racines();
@@ -158,6 +170,9 @@ export function directive(nom) {
     .replaceAll('{QG}', RACINE)
     .replaceAll('{UTILISATEUR}', REGLAGES.utilisateur ? `L'utilisateur, ${REGLAGES.utilisateur},` : "L'utilisateur")
     .replaceAll('{LANGUE}', langueIA())
+    // ligne « Système : … » sur Mac ; sous Windows, la ligne disparaît (consignes inchangées)
+    .replace(/\{SYSTEME\}\r?\n?/g, plateforme.consigneSysteme() ? plateforme.consigneSysteme() + '\n' : '')
+    .replace(/\{IMAGES\}\r?\n?/g, () => (ligneImages() ? ligneImages() + '\n' : ''))
     .replaceAll(
       '{GIT}',
       REGLAGES.gitAuto === true
@@ -198,16 +213,9 @@ export function mcpEtage(e) {
   }
 }
 
-const normaliser = (p) => path.resolve(p).replace(/\\/g, '/').toLowerCase().replace(/\/+$/, '');
-
-// Un chemin est-il sous un des dossiers donnés ?
+// Un chemin est-il sous un des dossiers donnés ? (comparaison selon la plateforme : plateforme.cleChemin)
 export function sous(dossiers, chemin) {
-  if (!chemin) return false;
-  const cible = normaliser(chemin);
-  return dossiers.filter(Boolean).some((d) => {
-    const base = normaliser(d);
-    return cible === base || cible.startsWith(base + '/');
-  });
+  return plateforme.sousChemin(dossiers, chemin);
 }
 
 // Un chemin est-il dans un des dossiers de l'étage ?
@@ -216,9 +224,7 @@ export function dansEtage(e, chemin) {
   return sous(e.dossiers || [e.projet], chemin);
 }
 
-// Chemin Windows → forme des règles de permission de Claude Code (D:\Dev → //d/Dev).
+// Chemin → forme des règles de permission de Claude Code (Windows : D:\Dev → //d/Dev ; Mac : /Users/x → //Users/x).
 export function cheminRegle(p) {
-  const abs = path.resolve(p).replace(/\\/g, '/').replace(/\/+$/, '');
-  const m = abs.match(/^([A-Za-z]):(.*)$/);
-  return m ? `//${m[1].toLowerCase()}${m[2]}` : abs;
+  return plateforme.cheminRegle(p);
 }

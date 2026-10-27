@@ -5,7 +5,7 @@
 // Lancement (par le serveur) : electron.exe <ce dossier> --qg-url=http://127.0.0.1:PORT/?jeton=…
 // ou, pour le navigateur complet d'un QG affiché dans un navigateur ordinaire : --qg-moteur=… (moteur.cjs).
 // Un seul processus : un QG relancé, la démo (autre port) ou le moteur arrivent ici (« second-instance »).
-const { app, BrowserWindow, session, shell } = require('electron');
+const { app, BrowserWindow, Menu, session, shell } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 const { lireArgument, demarrerMoteur, moteursActifs } = require('./moteur.cjs');
@@ -19,7 +19,10 @@ const argUrl = (argv) => {
 
 // profil (cookies des sites, taille de la fenêtre) dans le dossier du QG, jamais publié
 app.setPath('userData', path.join(RACINE, 'runtime', 'navigateur', 'profil'));
-app.setAppUserModelId('QG des agents');
+// identifiant d'application (barre des tâches, notifications) : API Windows seulement
+if (process.platform === 'win32') app.setAppUserModelId('QG des agents');
+// Mac : sans menu Édition, ⌘C / ⌘V / ⌘A ne marchent plus dans les champs ; on garde un menu minimal.
+if (process.platform === 'darwin') Menu.setApplicationMenu(Menu.buildFromTemplate([{ role: 'appMenu' }, { role: 'editMenu' }, { role: 'windowMenu' }]));
 
 // Les sites voient un Chrome ordinaire (Google refuse sinon la connexion : « navigateur non sécurisé »).
 const UA = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${process.versions.chrome} Safari/537.36`;

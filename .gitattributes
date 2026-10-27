@@ -1,0 +1,6 @@
+# Fins de ligne : les scripts Mac (bash) exigent LF, les scripts Windows CRLF.
+# (core.autocrlf=true sur un poste Windows transformerait sinon les .sh en CRLF : « bad interpreter »)
+*.sh       text eol=lf
+*.command  text eol=lf
+*.bat      text eol=crlf
+*.ps1      text eol=crlf

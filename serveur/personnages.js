@@ -6,10 +6,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { RACINE, REGLAGES, langueIA, etage as trouverEtage } from './config.js';
+import { ambianceCoupee } from './travail.js';
 import { etat, emettre, nbClients, fournirMiniJeu } from './bus.js';
 import { agentsPublics, personnalisation } from './equipe.js';
-import { chargerComptes, compteConnecte, envPour, trouverCompte } from './comptes.js';
+import { envPour } from './comptes.js';
 import { enregistrerAppel } from './conso.js';
+import { executerSession, raisonEchec } from './session.js';
+import { choisirAmbiance } from './routeur.js';
 import { t } from './i18n.js';
 
 const FICHIER_PERSOS = path.join(RACINE, 'config', 'personnalites.json');
@@ -181,16 +184,14 @@ export function presents() {
 }
 
 // ---------------------------------------------------------------- appel au modèle (sans outils, sans connecteurs)
-function compteMiniJeu() {
-  const { defaut, comptes } = chargerComptes();
-  const c = trouverCompte(defaut);
-  if (compteConnecte(c)) return c;
-  return comptes.find((x) => compteConnecte(x)) || null;
-}
-
+// Compte du mini-jeu : priorités « ambiance », sinon le compte par défaut s'il est connecté, sinon le premier
+// compte connecté (n'importe quelle IA). Sur Claude, le modèle des réglages du mini-jeu, comme en 1.0.5.
 async function appeler(prompt, schema, modele, role) {
-  const compte = compteMiniJeu();
-  if (!compte) throw new Error(t('aucun compte Claude connecté'));
+  const amb = choisirAmbiance({ modeleClaude: modele, defautDabord: true });
+  if (!amb) throw new Error(t('aucun compte IA connecté'));
+  if (amb.fournisseur !== 'claude') return appelerAutreIa(amb, prompt, schema, role);
+  const compte = amb.c;
+  modele = amb.modele;
   const q = query({
     prompt,
     options: {
@@ -206,6 +207,24 @@ async function appeler(prompt, schema, modele, role) {
   if (res?.usage) enregistrerAppel({ compte: compte.id, role, etage: 'hall' }, res.usage, modele, true);
   if (!res?.structured_output) throw new Error(res?.subtype || t('pas de réponse'));
   return res.structured_output;
+}
+
+// Codex, agent ACP : session courte de rôle utilitaire, lecture seule, sans outils ni recherche web.
+async function appelerAutreIa(amb, prompt, schema, role) {
+  const cwd = path.join(RACINE, 'runtime');
+  const s = await executerSession({
+    prompt,
+    compte: amb.compte,
+    conso: { role, etage: 'hall' },
+    options: {
+      ...(amb.modele ? { model: amb.modele } : {}), effort: 'low', maxTurns: 2, tools: [], settingSources: [], permissionMode: 'dontAsk',
+      strictMcpConfig: true, mcpServers: {}, persistSession: false, cwd, outputFormat: { type: 'json_schema', schema },
+    },
+    demande: { role: 'utilitaire', profil: 'lecture', cwd, consignes: '', schema, titre: 'QG mini-jeu' },
+  });
+  const raison = raisonEchec(s);
+  if (raison) throw new Error(raison);
+  return s.result.structured_output;
 }
 
 const SCHEMA_DISCUSSION = {
@@ -493,7 +512,7 @@ function sceneSimulee(qui) {
 // Une scène : choix des personnages, écriture (modèle, ou toute prête en démo), mémoire, rumeurs, histoires.
 export async function bavarder({ force = false } = {}) {
   const mj = reglagesMiniJeu();
-  if (!force && (!mj.actif || !mj.bavardages || nbClients() === 0)) return null;
+  if (!force && (!mj.actif || !mj.bavardages || nbClients() === 0 || (!demo && ambianceCoupee()))) return null;
   const choix = choisirScene();
   if (!choix) return null;
   const dejaPris = occupes(); // ceux qui jouent déjà une autre scène ne font pas les témoins

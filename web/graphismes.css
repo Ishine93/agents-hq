@@ -1,0 +1,40 @@
+/* Réglage graphique (1.0.6) : classes posées sur <html> par graphismes.js.
+   gfx-leger / gfx-equilibre / gfx-haute / gfx-maximum : niveau en cours ; gfx-sans-focus : la fenêtre n'est
+   pas au premier plan (hors Maximum). Une animation de box-shadow redessine son élément à chaque image :
+   on la remplace par une version en opacité (calculée par le compositeur) ou on la coupe. */
+
+@keyframes gfx-respire { 50% { opacity: 0.55; } }
+@keyframes gfx-clignote { 50% { opacity: 0.35; } }
+
+/* ---------- Équilibré et Léger ---------- */
+/* voyants « au travail » : la pulsation en box-shadow devient une respiration en opacité */
+.gfx-equilibre .mq.vert,
+.gfx-equilibre .mq.serveur.s-actif { animation: gfx-respire 1.6s ease-in-out infinite; }
+/* carte d'autorisation : lueur fixe au lieu d'une lueur qui pulse */
+.gfx-equilibre .carte-perm,
+.gfx-leger .carte-perm { animation: apparait 0.25s ease-out; box-shadow: inset 0 0 0 1px var(--bord-clair), 0 0 14px rgba(255, 154, 31, 0.4); }
+/* écran cathodique : pas de scintillement (8 fois par seconde), lignes en mélange normal (même rendu) */
+.gfx-equilibre .crt-lignes,
+.gfx-leger .crt-lignes { animation: none; mix-blend-mode: normal; }
+
+/* ---------- Léger ---------- */
+.gfx-leger .mq.vert,
+.gfx-leger .mq.serveur.s-actif { animation: none; }
+.gfx-leger .cloche.attente .icone-cloche::before { animation: gfx-clignote 1.6s steps(2) infinite; }
+.gfx-leger .echange .points { width: 22px; animation: gfx-clignote 1.2s steps(2) infinite; }
+
+/* ---------- fenêtre pas au premier plan (hors Maximum) ---------- */
+/* les animations décoratives s'arrêtent ; les signaux « on t'attend » (orange, cloche, flèche) continuent */
+.gfx-sans-focus .mq.vert,
+.gfx-sans-focus .mq.serveur.s-actif,
+.gfx-sans-focus .echange .points,
+.gfx-sans-focus .crt-curseur,
+.gfx-sans-focus .crt-lignes { animation-play-state: paused; }
+
+/* ---------- Réglages › Général › Affichage ---------- */
+/* libellé au-dessus, boutons sur toute la largeur : autant de colonnes que le panneau en permet */
+.gfx-ligne { grid-template-columns: 1fr; gap: 2px; }
+.gfx-niveaux { flex-basis: 100%; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); }
+.gfx-niveaux .param-niveau { min-width: 0; }
+.gfx-niveaux .param-niveau b { overflow-wrap: anywhere; }
+.gfx-etat { display: block; margin-top: 4px; }

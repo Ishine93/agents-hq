@@ -9,12 +9,10 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { RACINE } from './config.js';
+import * as plateforme from './plateforme.js';
 
-const NAVIGATEURS = [
-  'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
-  'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
-  'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-];
+// Edge ou Chrome sur Windows ; Chrome, Edge, Brave ou Chromium dans /Applications sur Mac.
+const NAVIGATEURS = plateforme.navigateursCapture();
 const PROFIL_ISOLE = path.join(RACINE, 'runtime', 'navigateur-capture');
 const TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
 const TAILLE_MAX = 10 * 1024 * 1024;

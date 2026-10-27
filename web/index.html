@@ -57,6 +57,7 @@
   <aside id="immeuble" data-t-aria="Vue globale de l'immeuble" aria-label="Vue globale de l'immeuble">
     <div class="titre-bloc">
       <span data-t>Immeuble</span>
+      <button id="btn-nouvel-etage" class="discret mini" data-t-title="Nouvel étage" title="Nouvel étage">＋</button>
       <button id="btn-immeuble" class="discret mini" data-t-title="Réduire / agrandir" title="Réduire / agrandir">≡</button>
     </div>
     <div class="coupe-boite">
@@ -114,6 +115,10 @@
     <input id="fichier-joindre" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden>
     <button id="btn-dictee" class="outil-saisie dictee" type="button" data-t-aria="Dicter" aria-label="Dicter"><span class="micro" aria-hidden="true">🎤</span><span class="etiquette"></span></button>
     <div id="comptes" role="group" data-t-aria="Compte Claude" aria-label="Compte Claude"></div>
+    <div id="reglage-cout" class="reglage-dg reglage-cout" hidden>
+      <span class="lib" data-t>Coût :</span>
+      <select id="cout-demande" data-t-aria="Coût de cette demande" aria-label="Coût de cette demande"></select>
+    </div>
     <div id="reglage-dg" class="reglage-dg" hidden>
       <span class="lib" data-t>DG :</span>
       <select id="dg-modele" data-t-aria="Modèle du DG pour cette demande" aria-label="Modèle du DG pour cette demande"></select>

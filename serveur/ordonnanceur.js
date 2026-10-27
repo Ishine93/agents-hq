@@ -6,19 +6,31 @@ import path from 'node:path';
 import { REGLAGES, etage as trouverEtage } from './config.js';
 import { etat, majDossier, changerEtatTache, majTache, message, majDg, emettre, alerte, effacerDossier } from './bus.js';
 import { canUseToolPour, refuserPour, demander } from './permissions.js';
-import { validerTaches } from './dg.js';
-import { promptProduction, promptRework } from './taches.js';
+import { validerTaches, compteDg } from './dg.js';
+import { sansPrefixe, prefixeModele, choisirProduction, choisirVerif, chargerPriorites, pauseCompte, leverPauseCompte, pauseDe, surPauses, motifPause, viderPauses, enDemo, multiIa, heureReprise, fournisseurDuModele } from './routeur.js';
+import { promptProduction, promptRework, compteTache } from './taches.js';
 import { ERREURS_FATALES } from './session.js';
+import { trouverCompte, fournisseur as fournisseurDuCompte, adaptateur as adaptateurDuCompte } from './comptes.js';
 import { sauverPiecesUtilisateur, piecePublique } from './pieces.js';
 import { notifier, notificationResolue } from './notifications.js';
-import { enregistrerReemploi, surLimitesLues, oublierDossier as oublierDossierConso, quotaFable, lireLimites } from './conso.js';
-import { demanderDecision } from './decisions.js';
+import { enregistrerReemploi, surLimitesLues, oublierDossier as oublierDossierConso, quotaFable, lireLimites, limitesDe, annoterConso, donneesConso } from './conso.js';
+import { demanderDecision, abandonnerDecisionsPour } from './decisions.js';
+import { estimerDossier, resumePublic, texteEstimation, demarrerCalibrage, jetonsDe } from './estimation.js';
 import { skillsAttribuables } from './skills.js';
 import { recruter, reembaucher, occuper, liberer, agent as agentEquipe, tirerPrenom, libererPrenom } from './equipe.js';
 import { t as tr } from './i18n.js';
+import { verdictEffectif, repriseVerif } from './economie.js';
+import { niveauValide, travailReglages, profilEffectif, verificationProfil, missionDirecte, nomNiveau } from './travail.js';
+import { verificationsEtage, promptReworkControles, raisonControle } from './controles.js';
 
 const notifierQuestionDg = (d) =>
   notifier({ id: `QD-${d.id}`, type: 'question', titre: tr('Le DG a une question'), texte: d.question, dossier: d.id, etage: d.etages[0] || 'direction', actions: [{ id: 'repondre', libelle: tr('Répondre') }] });
+
+// Nom lisible d'un compte pour les messages (le compte a pu être retiré entre-temps).
+const nomCompte = (id) => {
+  const c = trouverCompte(id);
+  return c && c.id === id ? c.nom : id || tr('le compte');
+};
 
 const ACTIFS = new Set(['briefing', 'running', 'permission', 'verifying', 'rework']);
 const TERMINAUX = new Set(['done', 'failed', 'cancelled', 'skipped', 'interrupted']);
@@ -34,6 +46,21 @@ const reveils = new Map(); // dossierId → { evenements, minuterie }
 const dgOccupe = new Set(); // dossiers dont le DG travaille
 const canaux = new Map(); // tacheId → { injecter(texte) } tant que sa session productrice tourne
 let minuteriePause = null;
+// Plusieurs IA (D4) : une limite d'usage ou une déconnexion met en pause le compte concerné, pas tout le QG.
+// Les tâches de ce compte attendent ; les autres continuent. Tout Claude, démo, ou quota.pause « globale » :
+// pause de tout le QG, comme en 1.0.5.
+const minuteriesComptes = new Map(); // compteId → minuterie de levée à la remise à zéro
+let minuterieAttente = null;
+let pausesVues = new Set();
+const pauseParCompte = () => !enDemo() && chargerPriorites().quota?.pause !== 'globale' && multiIa();
+const motifCompte = (id) => {
+  const c = trouverCompte(id);
+  return motifPause(c && c.id === id ? c : null, pauseDe(id) || { type: 'quota' }, id);
+};
+const surClaude = (id) => {
+  const c = trouverCompte(id);
+  return !c || c.id !== id || fournisseurDuCompte(c) === 'claude';
+};
 
 export function initialiser(m, dernierId) {
   moteur = m;
@@ -57,14 +84,20 @@ function tableau(d) {
 
 // skills : choisis à l'envoi ([{id, pour: 'dg' | 'tous' | 'demande'}]) ; skillsExclus : skills de partout à ne pas utiliser ici.
 // scenario : grand scénario de la démo (simulation), choisi par la démo elle-même
-export function creerDossier({ texte, etageAffiche, compte, dg = null, pieces = [], skills = [], skillsExclus = [], scenario = null }) {
+export function creerDossier({ texte, etageAffiche, compte, compteAgents = null, compteImpose = null, dg = null, pieces = [], skills = [], skillsExclus = [], scenario = null, travail = null }) {
   const e = trouverEtage(etageAffiche);
   const d = {
     id: `D${++compteurDossiers}`,
     texte,
     titre: texte.length > 50 ? texte.slice(0, 49) + '…' : texte,
     compte,
-    dg: { modele: dg?.modele || REGLAGES.dg.modele, effort: dg?.effort || REGLAGES.dg.effort },
+    // compte qui exécute les tâches (Réglages › Comptes IA › Agents de la demande) ; null = celui du DG
+    compteAgents: compteAgents && compteAgents !== compte ? compteAgents : null,
+    // plusieurs IA : compte choisi sur la demande pour toutes ses tâches (jamais remplacé sans ton accord)
+    ...(compteImpose ? { compteImpose } : {}),
+    // compte du DG (routeur.choisirDg) ; absent : celui de la demande, comme en 1.0.5
+    dg: { ...(dg?.compte ? { compte: dg.compte } : {}), modele: dg?.modele || REGLAGES.dg.modele, effort: dg?.effort || REGLAGES.dg.effort },
+    travail: { cout: niveauValide(travail?.cout || travailReglages().cout) }, // niveau de coût figé à l'envoi (lot B)
     etat: 'planification',
     etages: e?.actif && e.projet && e.id !== 'direction' ? [e.id] : [],
     question: null,
@@ -118,6 +151,7 @@ export function completer(d, texte, pieces = []) {
 }
 
 async function planifierDossier(d, opts) {
+  if (attendreCompteDg(d, () => planifierDossier(d, opts), `${d.id}:plan`)) return;
   dgOccupe.add(d.id);
   majDg({ etat: 'reflechit', dossier: d.id, etage: 'direction', action: 'plan' });
   let r;
@@ -142,7 +176,19 @@ async function planifierDossier(d, opts) {
     notifierQuestionDg(d);
     return;
   }
-  const erreurs = validerTaches(p.taches, []);
+  const profil = profilEffectif(d);
+  const mode = p.mode === 'direct' ? 'direct' : 'plan';
+  d.x.relectureDemandee = p.relectureDemandee === true;
+  const erreurs = validerTaches(p.taches, [], { profil, mode });
+  // B4 : en direct, la tâche reçoit la demande telle que tapée, se vérifie elle-même et ne dépend de rien
+  if (mode === 'direct' && !erreurs.length) {
+    const [x] = p.taches;
+    x.prompt = missionDirecte(d.texte, x.prompt);
+    x.deps = [];
+    x.inputsFrom = [];
+    x.verification = { ...x.verification, mode: 'self' };
+    d.x.modePlan = 'direct';
+  }
   // demande qui n'était qu'une création de skill : le DG l'a faite lui-même, pas de tâche, le dossier est fini
   if (!p.taches.length && d.x.skillsCrees?.length && !erreurs.length) {
     d.etat = 'termine';
@@ -153,7 +199,7 @@ async function planifierDossier(d, opts) {
   }
   if (!p.taches.length) erreurs.push('Le plan est vide.');
   // le plan affiché montre la vérification qui aura vraiment lieu (IA si la validation par toi est coupée)
-  for (const x of p.taches) x.verification = verificationEffective(x.verification);
+  for (const x of p.taches) x.verification = verificationEffective(x, d);
   if (erreurs.length) {
     if (d.x.essaisPlan++ < 2) return planifierDossier(d, { erreurs });
     d.etat = 'echec';
@@ -173,23 +219,25 @@ function echecDg(d, r, reessayer) {
   if (ERREURS_FATALES.has(r.erreur)) {
     d.etat = 'echec';
     majDossier(d);
-    const c = d.compte === 'claude2' ? 2 : 1;
-    alerte('erreur', tr('Compte non connecté ou problème de facturation : lance connexion-compte-{n}.bat', { n: c }), d.id);
-    message(d.id, 'systeme', tr("Le DG n'a pas pu démarrer ({erreur}). Connecte le compte avec connexion-compte-{n}.bat puis renvoie ta demande.", { erreur: r.erreur, n: c }));
+    const nom = nomCompte(compteDg(d));
+    alerte('erreur', tr('{nom} non connecté ou problème de facturation : reconnecte-le dans Réglages › Comptes IA', { nom }), d.id);
+    message(d.id, 'systeme', tr("Le DG n'a pas pu démarrer ({erreur}). Reconnecte {nom} dans Réglages › Comptes IA puis renvoie ta demande.", { erreur: r.erreur, nom }));
     return;
   }
   if (r.erreur === 'rate_limit' || r.limite) {
     const jusqua = finLimite(r.limite);
+    const id = compteDg(d);
+    if (pauseParCompte()) {
+      // D4 : seul le compte du DG s'arrête ; le DG reprend quand ce compte reprend
+      message(d.id, 'systeme', tr("Limite d'usage de {nom} : le DG reprend vers {heure}.", { nom: nomCompte(id), heure: quandReprise(jusqua) }));
+      mettreCompteEnPause(id, { type: 'quota', jusqua, raison: tr("Limite d'usage atteinte") });
+      relanceDg(d, id, reessayer, jusqua);
+      return;
+    }
     message(d.id, 'systeme', tr("Limite d'usage atteinte : le DG reprend vers {heure}.", { heure: quandReprise(jusqua) }));
-    pauseGlobale(tr("Limite d'usage atteinte"), jusqua, { limite: true, compte: d.compte });
+    pauseGlobale(tr("Limite d'usage atteinte"), jusqua, { limite: true, compte: id });
     // Le DG repart à la remise à zéro, ou plus tôt si la pause est levée (forfait changé, « Reprendre »).
-    const relance = () => {
-      if (!relancesDg.delete(relance)) return;
-      clearTimeout(minuterieRelance);
-      if (d.etat !== 'annule') reessayer();
-    };
-    const minuterieRelance = setTimeout(relance, Math.max(0, jusqua - Date.now()) + 30000);
-    relancesDg.add(relance);
+    relanceDg(d, null, reessayer, jusqua);
     return;
   }
   d.etat = 'echec';
@@ -199,11 +247,21 @@ function echecDg(d, r, reessayer) {
 
 // Vérification « par toi » (goût, visuel, gameplay) : seulement si tu l'as demandé dans les réglages.
 // Sinon un vérificateur IA s'en charge, avec ses critères : le dossier va de A à Z sans t'attendre.
-function verificationEffective(v) {
+// Puis le profil de travail du dossier (B5) : self ou agent selon verifDefaut, vérificateur borné.
+function verificationEffective(p, d) {
+  const v = verificationUtilisateur(p.verification);
+  // une validation « par toi » devenue IA reste un vérificateur séparé (goût, visuel : le self ne suffit pas)
+  const relecture = d?.x?.relectureDemandee === true || v?.depuisUtilisateur === true;
+  // ajustement : texte affiché sur le site, donc dans la langue de l'interface
+  return verificationProfil({ ...p, verification: v }, profilEffectif(d), { relecture, langue: REGLAGES.langueInterface === 'en' ? 'en' : 'fr' });
+}
+
+function verificationUtilisateur(v) {
   if (v?.mode !== 'user' || REGLAGES.validationUtilisateur === true) return v;
   return {
     ...v,
     mode: 'agent',
+    depuisUtilisateur: true,
     modele: v.modele || 'sonnet',
     effort: v.effort || 'medium',
     maxRework: Math.max(1, v.maxRework || 0),
@@ -215,7 +273,7 @@ function ajouterTaches(d, liste) {
   const nouvelles = [];
   const attribuables = new Set(skillsAttribuables(d));
   for (const p0 of liste) {
-    const p = { ...p0, verification: verificationEffective(p0.verification), skills: (p0.skills || []).filter((id) => attribuables.has(id)) };
+    const p = { ...p0, verification: verificationEffective(p0, d), skills: (p0.skills || []).filter((id) => attribuables.has(id)) };
     const t = {
       id: `${d.id}-${p.ref}`,
       dossier: d.id,
@@ -223,7 +281,7 @@ function ajouterTaches(d, liste) {
       titre: p.titre.length > 60 ? p.titre.slice(0, 59) + '…' : p.titre,
       etage: p.etage,
       nature: p.nature,
-      modele: p.modele,
+      modele: sansPrefixe(p.modele),
       effort: p.effort,
       modeleReel: null,
       effortReel: null,
@@ -233,7 +291,7 @@ function ajouterTaches(d, liste) {
       inputsFrom: p.inputsFrom,
       dernierOutil: null,
       derniereActivite: null,
-      verif: { mode: p.verification.mode, modele: p.verification.modele },
+      verif: { mode: p.verification.mode, modele: p.verification.modele, ...(p.verification.ajustement ? { ajustement: p.verification.ajustement } : {}) },
       resultat: null,
       tentative: 1,
       debut: null,
@@ -257,6 +315,9 @@ function ajouterTaches(d, liste) {
         enAttenteDg: false,
         agentDemande: p.agent || '',
         skills: p.skills,
+        // plusieurs IA : IA ou compte demandés par le DG (« fournisseur:modele » vaut une IA demandée)
+        iaDemandee: p.ia && p.ia !== 'auto' ? p.ia : prefixeModele(p.modele),
+        compteDemande: p.compte || null,
       },
       skills: p.skills, // affichés dans la fiche
       agent: null, // id de l'agent qui porte la tâche (réserve : A1, A2…)
@@ -270,15 +331,19 @@ function ajouterTaches(d, liste) {
     majTache(t, null);
     nouvelles.push(t);
   }
-  gardeFable(d, nouvelles).catch((e) => console.error('garde Fable', e.message));
+  const garde = gardeFable(d, nouvelles).catch((e) => console.error('garde Fable', e.message));
   d.etages = [...new Set(tachesDe(d).map((t) => t.etage))];
+  // C1 : estimation du plan, et accord demandé au-delà du seuil du profil (jamais bloquant sans estimation)
+  const accord = preparerAccord(d, nouvelles, poserEstimation(d));
   majDossier(d);
   emettre('plan', {
     dossier: d.id,
     taches: tachesDe(d)
       .sort((a, b) => numRef(a) - numRef(b))
-      .map((t) => ({ ref: t.ref, titre: t.titre, etage: t.etage, deps: t.x.deps.map((x) => x.ref), modele: t.modele, effort: t.effort })),
+      .map((t) => ({ ref: t.ref, titre: t.titre, etage: t.etage, deps: t.x.deps.map((x) => x.ref), modele: t.modele, effort: t.effort, estimation: t.estimation || null })),
+    estimation: d.estimation || null,
   }, d.id);
+  if (accord) accorderCout(d, garde).catch((e) => console.error('accord coût', e.message));
 }
 
 // ---------------------------------------------------------------- garde-fou Fable
@@ -354,6 +419,7 @@ export function annulerDossier(d) {
   d.etat = 'annule';
   notificationResolue(`QD-${d.id}`);
   majDossier(d);
+  abandonnerDecisionsPour(new Set(tachesDe(d).map((t) => t.id)));
   for (const t of tachesDe(d)) annulerTache(t, false);
   message(d.id, 'systeme', tr('Dossier annulé.'));
   majDg({ etat: 'libre', dossier: d.id, action: null });
@@ -421,14 +487,37 @@ function depsEtat(t) {
   return { manque, bloque, bloquePar };
 }
 
+// Compte qui exécute (ou exécutera) la tâche : celui de son lancement s'il est connu, sinon celui de son dossier.
+function idCompteDeTache(u) {
+  if (ACTIFS.has(u.etat) && u.compte) return u.compte;
+  // compte choisi par le routeur au dernier passage (tâche en file)
+  if (u.x?.route?.compte) return u.x.route.compte;
+  const d = etat.dossiers.get(u.dossier);
+  return d ? compteTache(d) : null;
+}
+
 // Une tâche qui attend ta validation n'occupe pas de session : elle ne compte pas dans les plafonds.
-const occupeUnePlace = (u) => ACTIFS.has(u.etat) && !(u.etat === 'verifying' && u.x.verification.mode === 'user');
+const occupeUnePlace = (u) => (ACTIFS.has(u.etat) || departsDifferes.has(u.id)) && !(u.etat === 'verifying' && u.x.verification.mode === 'user');
 
 function motifAttente(t) {
   const actifs = [...etat.taches.values()].filter((u) => occupeUnePlace(u) && u.id !== t.id);
   // 0 (ou moins) = illimité : seules les dépendances et les verrous font attendre.
   if (REGLAGES.plafondGlobal > 0 && actifs.length >= REGLAGES.plafondGlobal) return `plafond atteint (${actifs.length} en cours)`;
   if (REGLAGES.plafondEtage > 0 && actifs.filter((u) => u.etage === t.etage).length >= REGLAGES.plafondEtage) return 'étage plein';
+  // Plafond du compte (capacites().sessionsParCompte, ex. Codex abonnement : une session à la fois) : la tâche
+  // attend dans la file au lieu de partir et d'attendre dans l'adaptateur.
+  const resolus = new Map(); // un seul chargement des comptes par identifiant
+  const compteDe = (u) => {
+    const id = idCompteDeTache(u) ?? '';
+    if (!resolus.has(id)) resolus.set(id, trouverCompte(id || null) || null);
+    return resolus.get(id);
+  };
+  const compte = compteDe(t);
+  const max = compte ? adaptateurDuCompte(compte)?.capacites?.(compte)?.sessionsParCompte : null;
+  if (max >= 1) {
+    const surCompte = actifs.filter((u) => compteDe(u)?.id === compte.id).length;
+    if (surCompte >= max) return `${compte.nom} occupé (${surCompte} session${surCompte > 1 ? 's' : ''} en cours)`;
+  }
   if (!t.x.profil.startsWith('lecture')) {
     const autres = [...(verrous.get(cleProjet(t)) || [])].map((id) => etat.taches.get(id)).filter((u) => u && u.id !== t.id && u.dossier !== t.dossier);
     if (autres.length) return `${trouverEtage(t.etage)?.nom} occupé par ${autres[0].dossier} (${autres[0].ref})`;
@@ -436,6 +525,8 @@ function motifAttente(t) {
   return null;
 }
 
+const ECART_DEPARTS_MS = 5000;
+const departsDifferes = new Set(); // en mémoire seulement : un redémarrage relance normalement
 let tickEnCours = false;
 export function tick() {
   if (tickEnCours || etat.ordonnanceur.pause) return;
@@ -444,9 +535,10 @@ export function tick() {
     const candidats = [...etat.taches.values()]
       .filter((t) => ['planned', 'waiting', 'ready', 'queued'].includes(t.etat))
       .sort((a, b) => (etat.dossiers.get(a.dossier)?.creeLe ?? 0) - (etat.dossiers.get(b.dossier)?.creeLe ?? 0) || numRef(a) - numRef(b));
+    const departs = new Map(); // A10 : départs du même tick sur le même projet
     for (const t of candidats) {
       const d = etat.dossiers.get(t.dossier);
-      if (!d || d.etat !== 'en_cours') continue;
+      if (!d || d.etat !== 'en_cours' || departsDifferes.has(t.id)) continue;
       const { manque, bloque, bloquePar } = depsEtat(t);
       if (bloque) {
         terminer(t, 'skipped', { status: 'failed', summary: tr('Sautée : {raison}.', { raison: bloque }) });
@@ -459,20 +551,198 @@ export function tick() {
         continue;
       }
       if (t.x.gardeFable === 'attente') continue;
+      if (t.x.accordCout === 'attente') continue; // C1 : plan au-dessus du seuil, ton accord d'abord
       if (estFable(t) && REGLAGES.gardeFable?.actif !== false && (quotaFable(d.compte)?.reste ?? 100) <= 0) basculerOpus(t, tr('Fable est épuisé pour cette semaine'));
       if (!t.x.approuvee) {
         demanderApprobation(t);
         continue;
       }
+      // compte de la tâche (routeur) : un compte en pause ou aucun compte apte → la tâche attend dans la file
+      if (!router(t, d)) continue;
       const motif = motifAttente(t);
       if (motif) {
         if (t.etat !== 'queued' || t.motifFile !== motif) changerEtatTache(t, 'queued', { attend: [], motifFile: motif });
         continue;
       }
-      lancer(t);
+      const n = departs.get(cleProjet(t)) || 0;
+      departs.set(cleProjet(t), n + 1);
+      const delai = n * (REGLAGES.ecartDepartsMs ?? ECART_DEPARTS_MS);
+      if (delai > 0) differerDepart(t, delai);
+      else lancer(t);
     }
   } finally {
     tickEnCours = false;
+  }
+}
+
+// A10 : quand plusieurs tâches partent ensemble sur le même projet, on les espace de 5 s pour que les
+// suivantes lisent en cache le préfixe commun. La place est réservée pendant l'attente.
+function differerDepart(t, delai) {
+  departsDifferes.add(t.id);
+  setTimeout(() => {
+    departsDifferes.delete(t.id);
+    const d = etat.dossiers.get(t.dossier);
+    if (!etat.ordonnanceur.pause && d?.etat === 'en_cours' && ['planned', 'waiting', 'ready', 'queued'].includes(t.etat) && router(t, d) && !motifAttente(t)) lancer(t);
+    else tick();
+  }, delai).unref?.();
+}
+
+// ---------------------------------------------------------------- routage (plusieurs IA)
+
+// Nouveau passage dans 30 s tant qu'une tâche attend un compte (filet : aucun événement ne la réveillerait)
+function rearmer() {
+  if (minuterieAttente) return;
+  minuterieAttente = setTimeout(() => {
+    minuterieAttente = null;
+    tick();
+  }, 30000);
+  minuterieAttente.unref?.();
+}
+
+/**
+ * Compte, modèle et effort de la tâche (routeur.choisirProduction), mémorisés dans t.x.route. Faux : la tâche
+ * attend (compte en pause, aucun compte apte). Tout Claude sans priorités : le compte de la demande, avec le
+ * modèle et l'effort du DG, comme en 1.0.5. Jamais de bascule automatique (D4).
+ */
+function router(t, d) {
+  if (enDemo()) return true;
+  if (t.x.session && !t.x.compteSession) t.x.compteSession = t.compte || null;
+  if (t.x.reprise?.phase === 'verification') {
+    // vérification en attente : c'est le compte du vérificateur qui compte (routeur.choisirVerif)
+    if (!pauseParCompte()) return true;
+    const a = choisirVerif(t, d);
+    return a.attente ? attendreRoute(t, d, a.attente) : true;
+  }
+  const r = calculerRoute(t, d);
+  if (r.attente) return attendreRoute(t, d, r.attente);
+  t.x.route = r.route;
+  return true;
+}
+
+/** La route que router() poserait maintenant : { route } ou { attente } (aucun effet sur la tâche). */
+function calculerRoute(t, d) {
+  const a = choisirProduction(t, d);
+  if (a.attente) {
+    // tout Claude : rien ne change par rapport à la 1.0.5 (le compte de la demande, même non connecté)
+    if (a.attente.pause || multiIa() || (a.attente.compteBloque && a.attente.compteBloque !== compteTache(d))) return { attente: a.attente };
+    return { route: { compte: compteTache(d), modele: t.modele, effort: t.effort } };
+  }
+  // tout Claude : pas de repli vers un autre compte (le compte de la demande, sinon le défaut, comme en 1.0.5)
+  if (a.repli && !multiIa()) return { route: { compte: compteTache(d), modele: t.modele, effort: t.effort } };
+  // Claude avec un modèle Claude : modèle et effort du DG tels quels
+  const tel =(a.fournisseur || 'claude') === 'claude' && (fournisseurDuModele(t.modele) || 'claude') === 'claude';
+  return { route: {
+    compte: a.compte,
+    fournisseur: a.fournisseur || null,
+    modele: tel ? t.modele : a.modele,
+    effort: tel ? t.effort : a.effort,
+    justification: tel ? null : a.justification || null,
+    repli: !!a.repli,
+    bascule: a.bascule || null,
+  } };
+}
+
+/**
+ * Compte, modèle et effort qui feront la tâche : sa route si elle est déjà posée (t.x.route), sinon celle que
+ * router() poserait maintenant (tâche pas encore lancée). Sert à l'estimation et à l'accord de coût (lot C).
+ */
+function routePrevue(t, d) {
+  if (t.x.route?.compte) return t.x.route;
+  const base = { compte: compteTache(d), modele: t.modele, effort: t.effort };
+  if (enDemo()) return base;
+  const r = calculerRoute(t, d);
+  return r.route || { ...base, compte: r.attente?.compteBloque || base.compte };
+}
+
+/**
+ * Vérificateur de la tâche (routeur.choisirVerif), mémorisé dans t.x.routeVerif. Tout Claude : le compte de la
+ * demande, avec le modèle et l'effort de la fiche, comme en 1.0.5. null : aucun compte ne peut vérifier
+ * maintenant (compte en pause…) ; la vérification attend dans la file.
+ */
+function routerVerif(t, d) {
+  const v = t.x.verification;
+  if (enDemo() || !multiIa()) return (t.x.routeVerif = { compte: compteTache(d), modele: v.modele, effort: v.effort });
+  const a = choisirVerif(t, d);
+  if (a.attente) {
+    libererVerrou(t);
+    t.x.reprise = { phase: 'verification' };
+    attendreRoute(t, d, a.attente);
+    return null;
+  }
+  const tel = (a.fournisseur || 'claude') === 'claude' && (fournisseurDuModele(v.modele) || 'claude') === 'claude';
+  t.x.routeVerif = {
+    compte: a.compte,
+    fournisseur: a.fournisseur || null,
+    modele: tel ? v.modele : a.modele,
+    effort: tel ? v.effort : a.effort,
+    justification: tel ? null : a.justification || null,
+    croise: !!a.croise,
+    repli: !!a.repli,
+    bascule: a.bascule || null,
+  };
+  // multi-IA : le compte du vérificateur sur la fiche de la tâche (badge du site)
+  t.verif = { ...(t.verif || {}), compte: a.compte };
+  return t.x.routeVerif;
+}
+
+function attendreRoute(t, d, a) {
+  if (t.etat !== 'queued' || t.motifFile !== a.motif) changerEtatTache(t, 'queued', { attend: [], motifFile: a.motif });
+  if (a.pause && a.proposition?.compte && chargerPriorites().quota?.proposerBascule !== false) proposerBascule(t, d, a);
+  rearmer();
+  return false;
+}
+
+// D4 : une carte « Attendre / Passer sur {compte} » par dossier et par compte en pause, quand un autre compte peut
+// prendre ses tâches (quota.proposerBascule). Jamais de bascule sans l'accord de l'utilisateur ; l'accord vaut pour
+// ce dossier seulement et tombe quand le compte reprend.
+const cartesBascule = new Map(); // `${dossier}:${compte}` → { ctrl, tache }
+const cartesVues = new Set(); // une seule carte par dossier et par pause (pas de nouvelle carte après « Attendre »)
+
+function proposerBascule(t, d, a) {
+  const cle = `${d.id}:${a.compteBloque}`;
+  if (cartesVues.has(cle)) return;
+  cartesVues.add(cle);
+  const ctrl = new AbortController();
+  cartesBascule.set(cle, { ctrl, tache: t.id });
+  const nom = nomCompte(a.compteBloque);
+  const autre = a.proposition.nom || nomCompte(a.proposition.compte);
+  const quota = a.pause.type !== 'connexion';
+  const motif = a.motif.charAt(0).toUpperCase() + a.motif.slice(1);
+  const question = [
+    tr('{motif}. Les tâches de ce dossier prévues sur {nom} attendent. Tu peux attendre ou les passer sur {autre}.', { motif, nom, autre }),
+    quota ? tr("Attention : changer de compte pour contourner une limite peut être contraire aux conditions d'utilisation du fournisseur (OpenAI le déconseille).") : '',
+    tr('Les agents changent de conversation : le contexte de la réserve est perdu.'),
+  ].filter(Boolean).join(' ');
+  const attendre = quota ? (a.pause.jusqua ? tr('Attendre la remise à zéro ({heure})', { heure: heureReprise(a.pause.jusqua) }) : tr('Attendre la remise à zéro')) : tr('Attendre la reconnexion');
+  const choix = demanderDecision(t, { question, options: [{ libelle: attendre }, { libelle: tr('Passer ces tâches sur {compte}', { compte: autre }) }], brut: true }, ctrl.signal);
+  // la carte n'occupe pas de place : la tâche reste dans la file
+  changerEtatTache(t, 'queued', { attend: [], motifFile: a.motif });
+  choix.then((r) => {
+    if (cartesBascule.get(cle)?.ctrl === ctrl) cartesBascule.delete(cle);
+    if (r === 'O1') message(d.id, 'systeme', tr('Les tâches prévues sur {nom} attendent sa reprise.', { nom }));
+    if (r !== 'O2' || !pauseDe(a.compteBloque) || ['termine', 'annule', 'echec'].includes(d.etat)) return;
+    d.x = d.x || {};
+    d.x.bascules = { ...(d.x.bascules || {}), [a.compteBloque]: a.proposition.compte };
+    majDossier(d);
+    message(d.id, 'systeme', tr('Les tâches de ce dossier prévues sur {nom} passent sur {autre}, à ta demande, jusqu’à la reprise de {nom}.', { nom, autre }));
+    tick();
+  });
+}
+
+// Le compte reprend (ou la tâche de la carte est annulée) : la carte se ferme, la bascule acceptée tombe.
+function fermerCartes(compte, { tache = null } = {}) {
+  for (const [cle, c] of [...cartesBascule]) {
+    if (tache ? c.tache !== tache : !cle.endsWith(`:${compte}`)) continue;
+    cartesBascule.delete(cle);
+    cartesVues.delete(cle);
+    c.ctrl.abort();
+  }
+  if (tache) return;
+  for (const cle of [...cartesVues]) if (cle.endsWith(`:${compte}`)) cartesVues.delete(cle);
+  for (const d of etat.dossiers.values()) {
+    if (!d.x?.bascules?.[compte]) continue;
+    delete d.x.bascules[compte];
+    majDossier(d);
   }
 }
 
@@ -500,11 +770,21 @@ function lancer(t) {
     verrous.get(cle).add(t.id);
   }
   t.debut = t.debut || Date.now();
-  const reprise = t.x.reprise;
+  let reprise = t.x.reprise;
   t.x.reprise = null;
   if (reprise?.phase === 'verification') {
     verification(t, d);
     return;
+  }
+  // la tâche change de compte (compte retiré, bascule acceptée) : sa conversation ne la suit pas
+  const route = t.x.route;
+  const idRoute = route?.compte ? trouverCompte(route.compte)?.id || route.compte : null;
+  if (idRoute && t.x.compteSession && idRoute !== t.x.compteSession && (reprise?.resume || t.x.session)) {
+    message(d.id, 'systeme', tr('{ref} passe sur {compte} : nouvelle conversation (le contexte de la précédente est perdu).', { ref: t.ref, compte: nomCompte(route.compte) }), [t.etage]);
+    reprise = null; // mission reprise depuis le début, dans une conversation neuve
+    t.x.session = null;
+    t.x.compteSession = null;
+    t.x.agentDemande = '';
   }
   // Qui fait la tâche : un agent de la réserve réembauché (ou cloné), sinon une nouvelle recrue.
   let resumeAgent = null;
@@ -522,6 +802,9 @@ function lancer(t) {
       t.agent = recruter(t, d).id;
     }
   } else {
+    // l'agent suit sa tâche sur son nouveau compte, sans sa conversation
+    const ag = agentEquipe(t.agent);
+    if (ag && t.x.route?.compte && ag.compte !== t.x.route.compte) Object.assign(ag, { compte: t.x.route.compte, session: null });
     occuper(t.agent, t);
   }
   const amonts = t.inputsFrom.map((ref) => [ref, tacheRef(d, ref)]).filter(([, u]) => u?.x.sortie);
@@ -540,6 +823,15 @@ async function executerProduction(t, d, prompt, resume, { fork = false } = {}) {
   controleurs.set(t.id, ctrl);
   const canal = {};
   canaux.set(t.id, canal);
+  // compte IA et fournisseur qui exécutent la tâche (badge dans le site)
+  const idRoute = t.x.route?.compte || compteTache(d);
+  const compteExec = trouverCompte(idRoute);
+  t.compte = compteExec?.id || idRoute || null;
+  t.fournisseur = compteExec ? fournisseurDuCompte(compteExec) : null;
+  // pourquoi ce compte et ce modèle (fiche de la tâche) : seulement quand le routeur a changé quelque chose
+  const r0 = t.x.route;
+  if (r0?.justification || r0?.repli || r0?.bascule) t.routage = { justification: r0.justification || null, repli: !!r0.repli, bascule: r0.bascule || null };
+  else delete t.routage;
   let r;
   try {
     r = await moteur.produire(t, d, {
@@ -552,7 +844,8 @@ async function executerProduction(t, d, prompt, resume, { fork = false } = {}) {
       surInit: (init) => {
         if (t.x.gen !== gen) return;
         t.x.session = init.session_id || t.x.session;
-        changerEtatTache(t, t.etat === 'rework' ? 'rework' : 'running', { modeleReel: init.model || null, effortReel: t.effort, derniereActivite: Date.now() });
+        if (init.session_id) t.x.compteSession = t.compte;
+        changerEtatTache(t, t.etat === 'rework' ? 'rework' : 'running', { modeleReel: init.model || null, effortReel: t.x.route ? t.x.route.effort : t.effort, derniereActivite: Date.now() });
       },
       surOutil: (nom, cible) => {
         if (t.x.gen !== gen) return;
@@ -565,6 +858,16 @@ async function executerProduction(t, d, prompt, resume, { fork = false } = {}) {
         t.derniereActivite = Date.now();
         emettre('activite', { tache: t.id }, d.id);
       },
+      surCompaction: ({ declencheur, avant }) => {
+        if (t.x.gen !== gen) return;
+        t.x.compactions = (t.x.compactions || 0) + 1;
+        emettre('compaction', { tache: t.id, declencheur, avant }, d.id);
+        publierMesures(t);
+      },
+      surContexte: (n) => {
+        if (t.x.gen !== gen) return;
+        mesurerContexte(t, n);
+      },
     });
   } catch (e) {
     r = { echec: String(e?.message || e) };
@@ -572,7 +875,10 @@ async function executerProduction(t, d, prompt, resume, { fork = false } = {}) {
   controleurs.delete(t.id);
   canaux.delete(t.id);
   if (t.x.gen !== gen || TERMINAUX.has(t.etat)) return; // annulée ou arrêt d'urgence entre-temps
-  if (r.sessionId) t.x.session = r.sessionId;
+  if (r.sessionId) {
+    t.x.session = r.sessionId;
+    t.x.compteSession = r.compte || t.compte;
+  }
   if (r.contexte != null) t.x.contexte = r.contexte;
   if (r.echec) return gererEchec(t, d, r, t.etat === 'rework' ? 'rework' : 'production');
   t.x.sortie = r.sortie;
@@ -638,7 +944,7 @@ async function informer(d, t, texte) {
 async function verification(t, d) {
   // tâche planifiée avant que tu coupes la validation par toi : elle passe aussi à un vérificateur IA
   if (t.x.verification?.mode === 'user' && REGLAGES.validationUtilisateur !== true) {
-    t.x.verification = verificationEffective(t.x.verification);
+    t.x.verification = verificationUtilisateur(t.x.verification);
     t.verif = { mode: t.x.verification.mode, modele: t.x.verification.modele };
   }
   const v = t.x.verification;
@@ -659,14 +965,24 @@ async function verification(t, d) {
     notifier({ id: `V-${t.id}`, type: 'validation', titre: tr('{ref} attend ta validation', { ref: t.ref }), texte: t.titre, dossier: d.id, tache: t.id, etage: t.etage, actions: [{ id: 'pass', libelle: tr('Valider') }, { id: 'fail', libelle: tr('Refuser') }] });
     return;
   }
-  emettre('verification', { tache: t.id, phase: 'debut', verificateur: { modele: v.modele }, verdict: null }, d.id);
+  // B9 : contrôles déterministes de la fiche du projet, lancés par le serveur avant le vérificateur
+  const rv = routerVerif(t, d);
+  if (!rv) return;
+  const ctl = await controlesDeterministes(t, d);
+  if (ctl?.abandon) return;
+  if (ctl && !ctl.ok) return echecControles(t, d, ctl.echec);
+  emettre('verification', { tache: t.id, phase: 'debut', verificateur: { modele: rv.modele, compte: rv.compte }, verdict: null }, d.id);
   const gen = t.x.gen;
   const ctrl = new AbortController();
   controleurs.set(t.id, ctrl);
   let r;
   try {
+    // A3 : après un rework, on reprend la session du vérificateur si son cache est encore chaud (< 55 min)
+    // jamais la session d'un autre compte (vérificateur passé sur un autre compte entre-temps)
+    const reprise = !t.x.compteVerif || t.x.compteVerif === rv.compte ? repriseVerif(t.x) : null;
     r = await moteur.verifier(t, d, sortie, {
       abortController: ctrl,
+      resume: reprise,
       surActivite: () => {
         t.derniereActivite = Date.now();
         emettre('activite', { tache: t.id }, d.id);
@@ -678,11 +994,18 @@ async function verification(t, d) {
   controleurs.delete(t.id);
   if (t.x.gen !== gen || TERMINAUX.has(t.etat)) return;
   if (r.echec) return gererEchec(t, d, r, 'verification');
-  const verdict = r.verdict;
+  if (r.sessionId) {
+    t.x.verifSession = r.sessionId;
+    t.x.compteVerif = rv.compte;
+  }
+  t.x.verifFin = Date.now();
+  const verdict = verdictEffectif(r.verdict);
   t.x.dernierVerdict = verdict;
-  emettre('verification', { tache: t.id, phase: 'fin', verificateur: { modele: v.modele }, verdict: verdict.verdict }, d.id);
+  emettre('verification', { tache: t.id, phase: 'fin', verificateur: { modele: rv.modele, compte: rv.compte }, verdict: verdict.verdict }, d.id);
   if (verdict.verdict === 'pass') {
     if (await roundComplement(t, d)) return;
+    // remarques mineures d'un rework sans bloquant : notées dans le résultat (A9)
+    if (verdict.reworkSansBloquant) return terminer(t, 'done', { ...sortie, remarquesVerif: verdict.issues || [] });
     return terminer(t, 'done', sortie);
   }
   if (verdict.verdict === 'rework' && t.x.reworks < v.maxRework) return rework(t, d, verdict);
@@ -690,10 +1013,67 @@ async function verification(t, d) {
   reveilDG(d, `${t.ref} rejetée par le vérificateur (${verdict.verdict}) : ${verdict.issues.map((i) => `[${i.gravite}] ${i.detail}`).join(' ; ')}`);
 }
 
-async function rework(t, d, verdict) {
+async function rework(t, d, verdict, prompt = promptRework(verdict)) {
   t.x.reworks += 1;
+  if (pauseParCompte() && t.compte && pauseDe(t.compte)) {
+    // compte en pause entre-temps (D4) : la reprise attend qu'il reprenne
+    libererVerrou(t);
+    t.x.reprise = t.x.session ? { phase: 'rework', resume: t.x.session, prompt } : null;
+    changerEtatTache(t, 'queued', { motifFile: motifCompte(t.compte) });
+    setImmediate(tick);
+    return;
+  }
   changerEtatTache(t, 'rework');
-  await executerProduction(t, d, promptRework(verdict), t.x.session);
+  await executerProduction(t, d, prompt, t.x.session);
+}
+
+// B9 : d'autres tâches écrivent-elles encore dans le même projet ? Leur travail inachevé ferait échouer
+// une suite qui couvre tout le projet : on laisse alors le vérificateur seul juger.
+function autresEcrivent(t) {
+  return [...(verrous.get(cleProjet(t)) || [])]
+    .map((id) => etat.taches.get(id))
+    .some((u) => u && u.id !== t.id && ['briefing', 'running', 'permission', 'rework'].includes(u.etat));
+}
+
+// Lance les commandes de la fiche (jamais celles du plan ni d'un agent). null : rien à lancer.
+async function controlesDeterministes(t, d) {
+  t.x.controles = null;
+  const e = trouverEtage(t.etage);
+  const commandes = e?.projet ? verificationsEtage(e) : [];
+  if (!commandes.length || typeof moteur.controler !== 'function') return null;
+  if (autresEcrivent(t)) {
+    message(d.id, 'systeme', tr("{ref} : contrôles du projet sautés, d'autres agents y travaillent encore ; le vérificateur juge seul.", { ref: t.ref }), [t.etage]);
+    return null;
+  }
+  const gen = t.x.gen;
+  const ctrl = new AbortController();
+  controleurs.set(t.id, ctrl);
+  let r;
+  try {
+    r = await moteur.controler(t, d, commandes, { cwd: e.projet, signal: ctrl.signal });
+  } catch (err) {
+    r = { ok: false, resultats: [], echec: { commande: commandes[0], ok: false, code: null, duree: 0, sortie: String(err?.message || err) } };
+  }
+  controleurs.delete(t.id);
+  if (t.x.gen !== gen || TERMINAUX.has(t.etat)) return { abandon: true };
+  t.x.controles = { ok: r.ok, date: Date.now(), resultats: r.resultats.map(({ commande, code, duree, delaiDepasse }) => ({ commande, code, duree, delaiDepasse: !!delaiDepasse })) };
+  t.verif = { ...t.verif, controles: r.ok ? 'passes' : 'echec' };
+  majTache(t, t.etat);
+  if (r.ok) message(d.id, 'systeme', tr('{ref} : contrôles du projet passés ({n}/{n}), place au vérificateur.', { ref: t.ref, n: r.resultats.length }), [t.etage]);
+  return r;
+}
+
+// Un contrôle a échoué : correction directe avec sa sortie, sans session de vérification (un rework compté).
+function echecControles(t, d, echec) {
+  const v = t.x.verification;
+  const raison = raisonControle(echec, REGLAGES.langueInterface === 'en');
+  if (t.x.reworks < v.maxRework) {
+    message(d.id, 'systeme', tr('{ref} : le contrôle « {commande} » a échoué ({raison}) : correction, sans vérificateur.', { ref: t.ref, commande: echec.commande, raison }), [t.etage]);
+    return rework(t, d, null, promptReworkControles(echec));
+  }
+  terminer(t, 'failed', { ...t.x.sortie, status: 'failed', summary: tr('Contrôle du projet échoué : {commande} ({raison})', { commande: echec.commande, raison }) });
+  reveilDG(d, `${t.ref} : le contrôle déterministe de la fiche du projet « ${echec.commande} » échoue encore après corrections (${raisonControle(echec)}). Extrait :
+${(echec.sortie || '').slice(-1500)}`);
 }
 
 function finLimite(limite) {
@@ -704,24 +1084,57 @@ function finLimite(limite) {
 
 function gererEchec(t, d, r, phase) {
   libererVerrou(t);
-  if (ERREURS_FATALES.has(r.erreur)) {
-    const c = d.compte === 'claude2' ? 2 : 1;
-    pauseGlobale(tr('Compte {n} non connecté ou problème de facturation', { n: c }), null);
-    alerte('erreur', tr('Lance connexion-compte-{n}.bat puis clique sur Reprendre.', { n: c }), d.id);
+  if (r.plafondAtteint) {
+    // B6 : plafond de la tâche atteint — pas un échec technique ; le DG choisit la suite
+    const montant = typeof r.plafondAtteint === 'number' ? r.plafondAtteint.toFixed(2) : '?';
+    t.x.reprise = repriseDe(t, phase, r.echec);
+    if (r.sessionId) t.x.sessionPlafond = r.sessionId;
+    terminer(t, 'failed', { status: 'failed', summary: tr('Plafond atteint ({montant} $)', { montant }) });
+    reveilDG(d, `${t.ref} a atteint son plafond de coût (${montant} $). Trois choix : relancer en reprenant sa session avec un plafond plus haut (op relancer, consigne « plafond N $ »), accepter l'état actuel (op accepter), ou découper le reste en nouvelles tâches.`);
+    return;
+  }
+  // compte qui a échoué : celui de la session (vérificateur sur un autre compte, tâche routée), sinon la base
+  const idCompte = r.compte || (phase === 'verification' ? t.x.routeVerif?.compte : null) || t.compte || compteTache(d);
+  const parCompte = pauseParCompte();
+  if (r.erreur === 'authentication_failed' || r.erreur === 'billing_error') {
+    const nom = nomCompte(r.compte || compteTache(d));
+    if (parCompte) {
+      // D4 : seul ce compte s'arrête ; ses tâches attendent la reconnexion, les autres continuent
+      mettreCompteEnPause(idCompte, { type: 'connexion', raison: tr('{nom} non connecté ou problème de facturation', { nom }) });
+      alerte('erreur', tr('Reconnecte {nom} dans Réglages › Comptes IA.', { nom }), d.id);
+      t.x.reprise = repriseDe(t, phase, r.echec);
+      changerEtatTache(t, 'queued', { motifFile: motifCompte(idCompte) });
+      setImmediate(tick);
+      return;
+    }
+    pauseGlobale(tr('{nom} non connecté ou problème de facturation', { nom }), null);
+    alerte('erreur', tr('Reconnecte {nom} (Réglages › Comptes IA) puis clique sur Reprendre.', { nom }), d.id);
     t.x.reprise = repriseDe(t, phase, r.echec);
     changerEtatTache(t, 'queued', { motifFile: 'compte à vérifier' });
     return;
   }
-  if ((r.erreur === 'rate_limit' || r.limite) && estFable(t) && REGLAGES.gardeFable?.actif !== false) {
+  if (ERREURS_FATALES.has(r.erreur)) {
+    // profil refusé par le fournisseur, rôle non pris en charge, binaire absent : inutile de réessayer
+    terminer(t, 'failed', { status: 'failed', summary: tr('Impossible sur ce compte : {raison}', { raison: r.echec }) });
+    reveilDG(d, `${t.ref} ne peut pas tourner sur ${nomCompte(r.compte || compteTache(d))} : ${r.echec}`);
+    return;
+  }
+  if ((r.erreur === 'rate_limit' || r.limite) && estFable(t) && REGLAGES.gardeFable?.actif !== false && (!parCompte || surClaude(idCompte))) {
     // limite de Fable (sa fenêtre à lui) : on relit les limites ; si c'est bien Fable qui est épuisé, la
     // tâche repart sur Opus, dans sa propre conversation, sans mettre le QG en pause
-    lireLimites(d.compte).catch(() => null).finally(() => {
-      const q = quotaFable(d.compte);
+    const cl = parCompte ? idCompte : d.compte;
+    lireLimites(cl).catch(() => null).finally(() => {
+      const q = quotaFable(cl);
       if (q && q.reste <= 0) {
         basculerOpus(t, tr('Fable est épuisé pour cette semaine'));
         t.x.reprise = repriseDe(t, phase, "limite d'usage de Fable");
         changerEtatTache(t, 'ready', { motifFile: null });
         tick();
+      } else if (parCompte) {
+        mettreCompteEnPause(cl, { type: 'quota', jusqua: finLimite(r.limite), raison: tr("Limite d'usage atteinte") });
+        t.x.reprise = repriseDe(t, phase, "limite d'usage");
+        changerEtatTache(t, 'queued', { motifFile: motifCompte(cl) });
+        setImmediate(tick);
       } else {
         pauseGlobale(tr("Limite d'usage atteinte"), finLimite(r.limite), { limite: true, compte: d.compte });
         t.x.reprise = repriseDe(t, phase, "limite d'usage");
@@ -731,6 +1144,13 @@ function gererEchec(t, d, r, phase) {
     return;
   }
   if (r.erreur === 'rate_limit' || r.limite) {
+    if (parCompte) {
+      mettreCompteEnPause(idCompte, { type: 'quota', jusqua: finLimite(r.limite), raison: tr("Limite d'usage atteinte") });
+      t.x.reprise = repriseDe(t, phase, "limite d'usage");
+      changerEtatTache(t, 'queued', { motifFile: motifCompte(idCompte) });
+      setImmediate(tick);
+      return;
+    }
     pauseGlobale(tr("Limite d'usage atteinte"), finLimite(r.limite), { limite: true, compte: d.compte });
     t.x.reprise = repriseDe(t, phase, "limite d'usage");
     changerEtatTache(t, 'queued', { motifFile: "limite d'usage" });
@@ -785,6 +1205,7 @@ function terminer(t, etatFinal, sortie) {
   // En échec, il attend la décision du DG (qui peut le relancer) : on le libère après le plan_delta.
   if (t.agent && etatFinal !== 'failed') liberer(t.agent, { session: t.x.session, sortie: t.x.sortie, contexte: t.x.contexte ?? null, reussi: etatFinal === 'done' });
   if (!t.agent && t.prenom) libererPrenom(t.prenom); // jamais lancée : le prénom promis se libère
+  mesuresDeFin(t);
   changerEtatTache(t, etatFinal, { attend: [], motifFile: null });
   const d = etat.dossiers.get(t.dossier);
   setImmediate(() => {
@@ -798,6 +1219,7 @@ export function annulerTache(t, notifier = true) {
   t.x.gen += 1;
   controleurs.get(t.id)?.abort();
   refuserPour(new Set([t.id]));
+  fermerCartes(null, { tache: t.id });
   terminer(t, 'cancelled', { status: 'failed', summary: tr('Annulée.') });
   if (notifier) message(t.dossier, 'systeme', tr('{ref} annulée.', { ref: t.ref }), [t.etage]);
 }
@@ -850,6 +1272,8 @@ async function lancerReveil(d) {
   }
   const r = reveils.get(d.id);
   if (!r) return;
+  // compte du DG en pause (D4) : les événements attendent qu'il reprenne
+  if (attendreCompteDg(d, () => lancerReveil(d), `${d.id}:reveil`)) return;
   reveils.delete(d.id);
   dgOccupe.add(d.id);
   majDg({ etat: 'reflechit', dossier: d.id, etage: etageDg(d), action: 'delta' });
@@ -864,6 +1288,14 @@ async function lancerReveil(d) {
   dgOccupe.delete(d.id);
   majDg({ etat: 'libre', dossier: d.id, action: null });
   if (d.etat === 'annule') return;
+  if (res.echec && (res.erreur === 'rate_limit' || res.limite) && pauseParCompte()) {
+    // limite du compte du DG : les événements sont gardés et repartent quand le compte reprend
+    mettreCompteEnPause(compteDg(d), { type: 'quota', jusqua: finLimite(res.limite), raison: tr("Limite d'usage atteinte") });
+    const suite = reveils.get(d.id);
+    reveils.set(d.id, { evenements: [...r.evenements, ...(suite?.evenements || [])], minuterie: suite?.minuterie ?? null });
+    attendreCompteDg(d, () => lancerReveil(d), `${d.id}:reveil`);
+    return;
+  }
   if (res.echec) {
     message(d.id, 'systeme', tr("Le DG n'a pas pu décider ({raison}) : les tâches en échec restent en échec.", { raison: res.echec }));
   } else {
@@ -874,6 +1306,8 @@ async function lancerReveil(d) {
     // Échec que le DG n'a pas relancé : l'agent quitte son poste (réserve ou retraite).
     if (t.etat === 'failed' && t.agent && agentEquipe(t.agent)?.tache === t.id) liberer(t.agent, { session: t.x.session, contexte: t.x.contexte ?? null, reussi: false });
   }
+  // C1 : le DG a revu son plan après « Réduire » : nouvelle estimation, nouvelle demande si besoin
+  if (d.x.accordCout === 'reduire' && d.etat === 'en_cours') accorderCout(d).catch((e) => console.error('accord coût', e.message));
   tick();
   verifierFinDossier(d);
 }
@@ -909,9 +1343,18 @@ function appliquerDelta(d, delta) {
       changerEtatTache(t, 'done', { resultat: { status: 'done', summary: tr('{resume} (accepté par le DG)', { resume: t.resultat?.summary || '' }).trim() } });
     } else if (op.op === 'relancer' && TERMINAUX.has(t.etat)) {
       if (op.consigne?.trim()) t.x.consignes.push(op.consigne.trim());
-      if (op.modele) t.modele = op.modele;
+      if (op.modele) {
+        t.modele = sansPrefixe(op.modele);
+        if (prefixeModele(op.modele)) t.x.iaDemandee = prefixeModele(op.modele);
+      }
       if (op.effort) t.effort = op.effort;
-      Object.assign(t.x, { sortie: null, session: null, reprise: null, reworks: 0, relances: 0, enAttenteDg: false });
+      // plusieurs IA : un autre compte reprend la tâche (conversation neuve, voir ci-dessous)
+      if (op.compte) t.x.compteDemande = op.compte;
+      // B6 : « plafond N $ » après un dépassement → même session reprise, plafond relevé
+      const plafond = /plafond\s+(\d+(?:[.,]\d+)?)\s*\$/i.exec(op.consigne || '');
+      const reprise = plafond && t.x.sessionPlafond ? t.x.reprise : null;
+      if (plafond) t.x.plafondUsd = Number(plafond[1].replace(',', '.'));
+      Object.assign(t.x, { sortie: null, session: null, reprise, reworks: 0, relances: 0, enAttenteDg: false, sessionPlafond: null });
       t.x.gen += 1;
       t.tentative += 1;
       d.x.blocageSignale = false;
@@ -924,7 +1367,7 @@ function appliquerDelta(d, delta) {
     }
   }
   if (delta.nouvellesTaches?.length) {
-    const erreurs = validerTaches(delta.nouvellesTaches, tachesDe(d).map((t) => t.ref));
+    const erreurs = validerTaches(delta.nouvellesTaches, tachesDe(d).map((t) => t.ref), { profil: profilEffectif(d) });
     if (erreurs.length) message(d.id, 'systeme', tr('Nouvelles tâches du DG refusées : {erreurs}', { erreurs: erreurs.join(' ; ') }));
     else ajouterTaches(d, delta.nouvellesTaches);
   }
@@ -955,6 +1398,7 @@ async function verifierFinDossier(d) {
   }
   if (!taches.length || !taches.every((t) => TERMINAUX.has(t.etat) && !t.x.enAttenteDg)) return;
   if (dgOccupe.has(d.id) || reveils.has(d.id)) return;
+  if (attendreCompteDg(d, () => verifierFinDossier(d), `${d.id}:synthese`)) return;
   d.x.syntheseEnCours = true;
   dgOccupe.add(d.id);
   majDg({ etat: 'reflechit', dossier: d.id, etage: 'direction', action: 'synthese' });
@@ -966,12 +1410,201 @@ async function verifierFinDossier(d) {
   }
   dgOccupe.delete(d.id);
   majDg({ etat: 'libre', dossier: d.id, action: null });
+  if (res.echec && (res.erreur === 'rate_limit' || res.limite) && pauseParCompte() && d.etat === 'en_cours') {
+    // limite du compte du DG : la synthèse attend qu'il reprenne
+    mettreCompteEnPause(compteDg(d), { type: 'quota', jusqua: finLimite(res.limite), raison: tr("Limite d'usage atteinte") });
+    d.x.syntheseEnCours = false;
+    attendreCompteDg(d, () => verifierFinDossier(d), `${d.id}:synthese`);
+    return;
+  }
   d.synthese = res.sortie?.message || `${tr('Synthèse indisponible ({raison}).', { raison: res.echec })}\n${tableau(d)}`;
   message(d.id, 'dg', d.synthese, d.etages);
   const faites = taches.filter((t) => t.etat === 'done').length;
   d.etat = faites ? 'termine' : 'echec';
   notifier({ type: 'info', titre: tr(faites ? 'Dossier {id} terminé' : 'Dossier {id} en échec', { id: d.id }), texte: d.titre, dossier: d.id });
   majDossier(d);
+}
+
+// ---------------------------------------------------------------- lot C : estimation du plan, accord, mesures
+// Le calcul est dans estimation.js. Ici : où le résultat est rangé (tâches, dossier, conso.json) et la carte
+// « Lancer / Réduire / Annuler » quand le plan dépasse le seuil du profil (seuilAccordFenetre, en % de ce
+// qui reste de la fenêtre de 5 h du compte des agents). Sans estimation, sans % ou sans seuil (Max), rien
+// n'attend. « Réduire » renvoie au DG sans jamais baisser les modèles ni les efforts.
+const AGE_MAX_LIMITES_MS = 5 * 60 * 1000;
+// Compte des agents : celui que prennent la plupart des tâches du plan (route posée, sinon prévue par le
+// routeur) ; à égalité ou sans tâche, le compte de la demande. Plusieurs IA : ce n'est pas forcément Claude.
+const idCompteDe = (id) => trouverCompte(id)?.id || id || null;
+function compteAgents(d, routeDe = (t) => routePrevue(t, d)) {
+  const base = idCompteDe(compteTache(d));
+  const n = new Map([[base, 0]]);
+  for (const t of tachesDe(d)) {
+    if (t.etat === 'cancelled' || t.etat === 'skipped') continue;
+    const c = idCompteDe(routeDe(t).compte) || base;
+    n.set(c, (n.get(c) || 0) + 1);
+  }
+  return [...n].sort((a, b) => b[1] - a[1])[0][0];
+}
+const seuilAccord = (d) => {
+  const s = profilEffectif(d).seuilAccordFenetre;
+  return typeof s === 'number' && Number.isFinite(s) ? s : null;
+};
+// La démo (simulation) fournit ses propres limites et n'écrit rien dans conso.json (partagé avec le vrai QG).
+const simule = () => typeof moteur?.limites === 'function';
+const lectureLimites = (compte) => (simule() ? moteur.limites(compte) : limitesDe(compte)) || null;
+const lectureFraiche = (l) => simule() || Date.now() - Math.max(l?.maj || 0, l?.essai || 0) <= AGE_MAX_LIMITES_MS;
+const annoter = (...a) => {
+  if (!moteur?.simulation) annoterConso(...a);
+};
+
+/** Estime le plan (tâches non annulées) et range le résultat : t.x.estimation (B6), t.estimation, d.estimation. */
+function poserEstimation(d, limites) {
+  const taches = tachesDe(d).filter((t) => t.etat !== 'cancelled' && t.etat !== 'skipped');
+  const routes = new Map(taches.map((t) => [t.ref, routePrevue(t, d)]));
+  const routeDe = (t) => routes.get(t.ref) || routePrevue(t, d);
+  const compte = compteAgents(d, routeDe);
+  let est;
+  try {
+    est = estimerDossier(d, taches, { compte, routeDe, limites: limites !== undefined ? limites : lectureLimites(compte) });
+  } catch (e) {
+    console.error('estimation', d.id, e.message);
+    return null;
+  }
+  const pub = resumePublic(est);
+  for (const t of taches) {
+    // unité de la tâche : celle du compte qui la fera (une tâche Codex d'un plan Claude reste en jetons)
+    const a = est.autres?.[t.ref];
+    const u = a ? a.unite : est.unite;
+    const v = a ? a.valeur : est.parTache[t.ref];
+    t.x.estimation = v == null ? null : { [u]: v }; // plafondTache (B6) lit estimation.usd
+    t.estimation = v == null ? null : { unite: u, valeur: a ? pub.autres[t.ref].valeur : pub.parTache[t.ref] };
+  }
+  d.estimation = { ...pub, profil: profilEffectif(d).cout, seuil: seuilAccord(d) };
+  annoter('dossiers', d.id, {
+    profil: d.estimation.profil,
+    estimation: { unite: pub.unite, total: pub.total, taches: pub.taches, dg: pub.dg, pct: pub.pct, pctDuReste: pub.pctDuReste, fenetre: pub.fenetre, calibre: pub.calibre, le: pub.le },
+  });
+  return est;
+}
+
+/** Les nouvelles tâches doivent-elles attendre ton accord ? true : accorderCout() pose la question. */
+function preparerAccord(d, nouvelles, est) {
+  const retenir = () => {
+    for (const t of nouvelles) if (!TERMINAUX.has(t.etat)) t.x.accordCout = 'attente';
+  };
+  if (d.x.accordCout === 'attente' || d.x.accordCout === 'reduire') {
+    retenir(); // la demande en cours (ou le plan revu après « Réduire ») les couvre
+    return false;
+  }
+  if (d.x.accordCout) return false; // plan déjà accepté : les tâches ajoutées ensuite sont estimées sans nouvelle carte
+  const seuil = seuilAccord(d);
+  const l = lectureLimites(compteAgents(d));
+  if (seuil == null || !est?.estimable || !l || (lectureFraiche(l) && !(est.pctDuReste > seuil))) {
+    d.x.accordCout = 'ok';
+    return false;
+  }
+  // au-dessus du seuil, ou lecture trop ancienne pour trancher : accorderCout() relit puis décide
+  d.x.accordCout = 'attente';
+  retenir();
+  return true;
+}
+
+function libererAccord(d) {
+  d.x.accordCout = 'ok';
+  for (const t of tachesDe(d)) if (t.x.accordCout === 'attente') t.x.accordCout = 'ok';
+  majDossier(d);
+  tick();
+}
+
+// Message au DG (en français, comme ses autres réveils).
+const MESSAGE_REDUIRE = (pct, seuil) =>
+  `Ton plan est estimé à ${pct} % de la fenêtre restante ; l'utilisateur veut tenir sous ${seuil} %. Réduis le périmètre ou le nombre de tâches, sans baisser les modèles ni les efforts. Aucune tâche n'a démarré : retire celles qui peuvent attendre (op « retirer ») ou regroupe-les (nouvellesTaches) ; le QG réestime ensuite le plan.`;
+
+async function accorderCout(d, garde = null) {
+  if (garde) await garde; // la garde Fable peut passer des tâches sur Opus : on estime après elle
+  if (d.etat !== 'en_cours') return;
+  d.x.accordCout = 'attente';
+  for (const t of tachesDe(d)) if (!TERMINAUX.has(t.etat) && t.x.accordCout !== 'ok') t.x.accordCout = 'attente';
+  const compte = compteAgents(d);
+  let l = lectureLimites(compte);
+  if (l && !lectureFraiche(l)) {
+    // relecture seulement si une lecture existe déjà (le suivi des limites tourne pour ce compte)
+    await lireLimites(compte).catch(() => null);
+    l = limitesDe(compte) || l;
+  }
+  if (d.etat !== 'en_cours') return;
+  const est = poserEstimation(d, l);
+  majDossier(d);
+  const seuil = seuilAccord(d);
+  if (seuil == null || !est || est.pctDuReste == null || !(est.pctDuReste > seuil)) return libererAccord(d);
+  const porteur = tachesDe(d)
+    .sort((a, b) => numRef(a) - numRef(b))
+    .find((t) => ['planned', 'waiting', 'ready', 'queued'].includes(t.etat) && t.x.gardeFable !== 'attente');
+  if (!porteur) return libererAccord(d);
+  const part = est.pctDuReste === Infinity ? '100+' : String(Math.round(est.pctDuReste));
+  const choix = await demanderDecision(porteur, {
+    question: tr('Ce plan est estimé à {estimation}, soit {part} % de ce qui reste de ta fenêtre. Au-delà de {seuil} %, le profil {profil} demande ton accord. « Réduire » demande au DG un plan plus court, sans baisser les modèles ni les efforts.', {
+      estimation: texteEstimation(est),
+      part,
+      seuil,
+      profil: nomNiveau(profilEffectif(d).cout, REGLAGES.langueInterface === 'en' ? 'en' : 'fr'),
+    }),
+    options: [{ libelle: tr('Lancer') }, { libelle: tr('Réduire') }, { libelle: tr('Annuler') }],
+    brut: true,
+  });
+  if (d.etat !== 'en_cours') return;
+  if (choix === 'O1') return libererAccord(d);
+  if (choix === 'O3') return annulerDossier(d);
+  if (choix === 'O2') {
+    d.x.accordCout = 'reduire';
+    majDossier(d);
+    reveilDG(d, MESSAGE_REDUIRE(part, seuil), 0);
+    return;
+  }
+  // pas de choix (réponse en texte seul, tâche porteuse partie) : la question est reposée
+  if (tachesDe(d).some((t) => t.x.accordCout === 'attente' && !TERMINAUX.has(t.etat))) return accorderCout(d);
+  return libererAccord(d);
+}
+
+// Mesures d'une tâche pour sa fiche (contexte actuel, compactions, coût) : diffusées, pas journalisées.
+const ECART_MESURES_MS = 10000;
+function publierMesures(t) {
+  const c = donneesConso().taches?.[t.id];
+  t.mesures = {
+    contexte: t.x.contexteActuel ?? t.x.contexte ?? null,
+    contexteMax: t.x.contexteMax ?? null,
+    compactions: t.x.compactions || 0,
+    cout: c?.cout ? Math.round(c.cout * 100) / 100 : null,
+    jetons: c ? jetonsDe(c) : null,
+  };
+  t.x.mesuresLe = Date.now();
+  emettre('mesures', { tache: t.id, mesures: t.mesures });
+}
+
+function mesurerContexte(t, n) {
+  if (!(n > 0)) return;
+  t.x.contexteActuel = n;
+  t.x.contexteMax = Math.max(t.x.contexteMax || 0, n);
+  if (Date.now() - (t.x.mesuresLe || 0) >= ECART_MESURES_MS) publierMesures(t);
+}
+
+// C3 : fin de tâche -> conso.json (contexteMax, tours, compactions, part du cache) et compactions du dossier.
+function mesuresDeFin(t) {
+  const conso = donneesConso();
+  const c = conso.taches?.[t.id];
+  if (!c && !t.x.contexteMax && !t.x.compactions) return;
+  if (c) {
+    const lu = c.cacheLu || 0;
+    const base = lu + (c.cacheEcrit || 0) + (c.entree || 0);
+    annoter('taches', t.id, {
+      contexteMax: t.x.contexteMax ?? t.x.contexte ?? null,
+      tours: c.appels || 0,
+      compactions: t.x.compactions || 0,
+      cache: base > 0 ? Math.round((lu / base) * 1000) / 1000 : null,
+    });
+  }
+  publierMesures(t);
+  const d = etat.dossiers.get(t.dossier);
+  if (d && conso.dossiers?.[d.id]) annoter('dossiers', d.id, { compactions: tachesDe(d).reduce((s, x) => s + (x.x.compactions || 0), 0) });
 }
 
 // ---------------------------------------------------------------- reprise après redémarrage
@@ -987,6 +1620,12 @@ export function reprendreDossiers() {
     for (const t of taches) {
       if (!t.prenom && !TERMINAUX.has(t.etat)) t.prenom = (t.agent && agentEquipe(t.agent)?.prenom) || tirerPrenom();
     }
+    // La garde Fable (carte « Garder Fable / Passer sur Opus » et son délai) s'est perdue avec le redémarrage :
+    // sans ça, ses tâches resteraient « attente » pour toujours. On lève la marque et on refait la garde.
+    const enGarde = taches.filter((t) => t.x.gardeFable === 'attente');
+    for (const t of enGarde) t.x.gardeFable = null;
+    const aGarder = enGarde.filter((t) => !TERMINAUX.has(t.etat));
+    const garde = aGarder.length ? gardeFable(d, aGarder).catch((e) => console.error('garde Fable', e.message)) : null;
     if (d.etat === 'planification') {
       message(d.id, 'systeme', tr('Le serveur a redémarré pendant la planification : le DG reprend son plan.'));
       planifierDossier(d, {});
@@ -1002,6 +1641,8 @@ export function reprendreDossiers() {
     for (const t of taches) {
       if (t.etat === 'failed' && t.x.enAttenteDg) reveilDG(d, `${t.ref} a échoué juste avant le redémarrage : ${t.resultat?.summary || 'raison inconnue'}`, 0);
     }
+    // C1 : la carte « Lancer / Réduire / Annuler » s'est perdue avec le redémarrage : on la repose
+    if (d.etat === 'en_cours' && (['attente', 'reduire'].includes(d.x.accordCout) || taches.some((t) => t.x.accordCout === 'attente'))) accorderCout(d, garde).catch((e) => console.error('accord coût', e.message));
     majDossier(d);
   }
   tick();
@@ -1038,35 +1679,109 @@ function quandReprise(ms) {
 
 // Relances du DG en attente de la fin d'une limite d'usage (elles partent aussi quand la pause est levée).
 const relancesDg = new Set();
+const REPRISE_SANS_HEURE_MS = 15 * 60000; // limite sans heure de remise à zéro connue : nouvel essai après 15 min
+
+// Relance du DG après une limite : à la remise à zéro (pause globale) ou quand son compte reprend (D4).
+function relanceDg(d, compte, reessayer, jusqua, cle = null) {
+  if (cle && [...relancesDg].some((r) => r.cle === cle)) return;
+  let minuterie = null;
+  const relance = () => {
+    if (!relancesDg.delete(relance)) return;
+    clearTimeout(minuterie);
+    if (d.etat !== 'annule') reessayer();
+  };
+  Object.assign(relance, { compte, cle });
+  if (!compte) minuterie = setTimeout(relance, Math.max(0, (jusqua || 0) - Date.now()) + 30000);
+  relancesDg.add(relance);
+}
+
+// Le DG attend que son compte reprenne (jamais de bascule du DG : sa conversation vit sur ce compte).
+function attendreCompteDg(d, reessayer, cle) {
+  const id = compteDg(d);
+  if (!id || !pauseDe(id) || !pauseParCompte()) return false;
+  if (![...relancesDg].some((r) => r.cle === cle)) {
+    message(d.id, 'systeme', tr('Le DG attend : {motif}.', { motif: motifCompte(id) }));
+    relanceDg(d, id, reessayer, null, cle);
+  }
+  return true;
+}
+
+/** D4 : met un compte en pause (type 'quota' ou 'connexion') ; levée à la remise à zéro, au retour de marge, ou sur « Reprendre ». */
+function mettreCompteEnPause(id, { type, jusqua = null, raison = '' }) {
+  if (!id) return;
+  const nouveau = !pauseDe(id);
+  pauseCompte(id, { type, jusqua, raison });
+  clearTimeout(minuteriesComptes.get(id));
+  minuteriesComptes.delete(id);
+  const delai = jusqua ? Math.max(0, jusqua - Date.now()) + 30000 : type === 'quota' ? REPRISE_SANS_HEURE_MS : 0;
+  if (delai) {
+    const m = setTimeout(() => {
+      minuteriesComptes.delete(id);
+      leverPauseCompte(id);
+    }, delai);
+    m.unref?.();
+    minuteriesComptes.set(id, m);
+  }
+  if (nouveau) notifier({ type: 'info', titre: tr('{nom} en pause', { nom: nomCompte(id) }), texte: motifCompte(id) });
+}
+
+// Un compte reprend : le DG qui l'attendait repart ; ses tâches repartent au prochain passage.
+function compteRepris(id) {
+  fermerCartes(id);
+  clearTimeout(minuteriesComptes.get(id));
+  minuteriesComptes.delete(id);
+  for (const relance of [...relancesDg]) if (relance.compte === id) relance();
+}
+
+surPauses((pauses) => {
+  etat.ordonnanceur = { ...etat.ordonnanceur, pauses };
+  emettre('ordonnanceur', { ordonnanceur: etat.ordonnanceur });
+  const levees = [...pausesVues].filter((id) => !(id in pauses));
+  pausesVues = new Set(Object.keys(pauses));
+  // différé : une levée peut survenir pendant un passage de l'ordonnanceur (pauseDe)
+  if (levees.length)
+    setImmediate(() => {
+      for (const id of levees) compteRepris(id);
+      tick();
+    });
+});
+
+/** Reprend un seul compte (bouton « Reprendre » de sa pause). */
+export const reprendreCompte = (id) => leverPauseCompte(id);
 
 /** extra : { limite: true, compte } pour une pause due à une limite d'usage (levée dès que le compte a de la marge). */
 export function pauseGlobale(raison, jusqua, extra = {}) {
   if (raison !== tr("Arrêt d'urgence")) notifier({ type: 'info', titre: tr('QG en pause'), texte: jusqua ? tr('{raison} — reprise vers {heure}', { raison, heure: quandReprise(jusqua) }) : raison });
-  etat.ordonnanceur = { pause: { raison, jusqua, ...extra } };
+  etat.ordonnanceur = { ...etat.ordonnanceur, pause: { raison, jusqua, ...extra } };
   emettre('ordonnanceur', { ordonnanceur: etat.ordonnanceur });
   clearTimeout(minuteriePause);
-  if (jusqua) minuteriePause = setTimeout(() => reprendre(), Math.max(0, jusqua - Date.now()) + 30000);
+  if (jusqua) minuteriePause = setTimeout(() => reprendre({ comptes: false }), Math.max(0, jusqua - Date.now()) + 30000);
 }
 
-export function reprendre() {
+// « Reprendre » : lève aussi les pauses des comptes (comptes: false pour la seule pause globale).
+export function reprendre({ comptes = true } = {}) {
   clearTimeout(minuteriePause);
-  etat.ordonnanceur = { pause: null };
+  if (comptes) viderPauses();
+  etat.ordonnanceur = { ...etat.ordonnanceur, pause: null };
   emettre('ordonnanceur', { ordonnanceur: etat.ordonnanceur });
-  for (const relance of [...relancesDg]) relance();
+  for (const relance of [...relancesDg]) if (!relance.compte || !pauseDe(relance.compte)) relance();
   tick();
 }
 
 // Limites relues (conso.js) : si le compte qui a mis le QG en pause a de nouveau de la marge (forfait
 // changé, fenêtre remise à zéro plus tôt), on reprend sans attendre l'heure annoncée.
+// Même chose pour un compte en pause (D4).
 function limitesRelues(compteId, l) {
-  const p = etat.ordonnanceur.pause;
-  if (!p?.limite || (p.compte && p.compte !== compteId)) return;
   const fenetres = Object.values(l.fenetres || {}).filter((f) => f.utilisation != null);
-  if (!fenetres.length || fenetres.some((f) => f.utilisation >= 100)) return;
+  const marge = fenetres.length > 0 && !fenetres.some((f) => f.utilisation >= 100);
+  if (marge && pauseDe(compteId)?.type === 'quota') leverPauseCompte(compteId);
+  const p = etat.ordonnanceur.pause;
+  if (!p?.limite || (p.compte && p.compte !== compteId) || !marge) return;
   notifier({ type: 'info', titre: tr('QG relancé'), texte: tr('Le forfait a de nouveau de la marge : le travail reprend sans attendre.') });
-  reprendre();
+  reprendre({ comptes: false });
 }
 surLimitesLues(limitesRelues);
+demarrerCalibrage(); // C2 : chaque lecture des limites affine le rapport $ -> % de fenêtre du compte
 
 // Arrêt d'urgence : tout s'arrête ; les tâches en cours repartiront (reprise de session) sur « Reprendre ».
 export function urgence() {
@@ -1083,4 +1798,4 @@ export function urgence() {
   }
 }
 
-export const etatInterne = { verrous, dgOccupe, reveils };
+export const etatInterne = { verrous, dgOccupe, reveils, relancesDg, minuteriesComptes };

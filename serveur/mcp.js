@@ -8,7 +8,7 @@ import path from 'node:path';
 import { RACINE, etage as trouverEtage, etages } from './config.js';
 import { decouverteEnCache, prefixeOutils } from './decouverte.js';
 
-const FICHIER = path.join(RACINE, 'config', 'mcp.json');
+const FICHIER = process.env.QG_MCP_FICHIER || path.join(RACINE, 'config', 'mcp.json');
 export const MODES = ['off', 'demander', 'auto'];
 
 function lire() {
@@ -97,6 +97,20 @@ export function resumePourDg(compteId) {
  * - Des connecteurs activés : on charge la config normale du compte et on retire, par préfixe
  *   d'outils, chaque serveur non activé (connecteurs, MCP utilisateur, MCP du projet hors liste).
  */
+/**
+ * MCP d'une tâche pour un agent qui n'est pas Claude (Codex, ACP) : `demande.mcp`, forme .mcp.json. Seuls les MCP
+ * du projet réglés sur « auto » : ces agents ne lèvent pas la main à chaque appel (capacites.mcp.demandeParAppel
+ * faux), donc un MCP « demander » reste coupé ; les connecteurs d'un compte Claude ne les concernent pas.
+ * Lecture seule : aucun.
+ */
+export function mcpDemande(etageId, lectureSeule) {
+  if (lectureSeule) return {};
+  const cfg = lire();
+  const e = trouverEtage(etageId);
+  if (!e) return {};
+  return Object.fromEntries(Object.entries(serveursProjet(e)).filter(([nom]) => nom !== 'qg' && modeEtage(cfg, e, nom) === 'auto'));
+}
+
 export function optionsMcp(etageId, compteId, lectureSeule) {
   if (lectureSeule) return { mcpServers: {}, strictMcpConfig: true, interdits: [], autorises: [] };
   const cfg = lire();

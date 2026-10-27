@@ -4,8 +4,8 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { spawn } from 'node:child_process';
 import { RACINE, REGLAGES, utiliserImmeubleDemo } from './config.js';
+import * as plateforme from './plateforme.js';
 import { etat, abonner, instantane, chargerHistorique, appliquerEvenement, DOSSIERS_DIR, sauver, utiliserDossiers, emettre, modelesPublics, mcpPublic, alerte, comptesPublics, modificationsDe } from './bus.js';
 import { decouvrir, decouverteEnCache } from './decouverte.js';
 import { changerMode } from './mcp.js';
@@ -24,7 +24,11 @@ import { resoudre } from './permissions.js';
 import * as dg from './dg.js';
 import * as taches from './taches.js';
 import { creerSimulation } from './simulation.js';
+import { lancerControles } from './controles.js';
+import { NIVEAUX } from './travail.js';
 import { routesReglages, ajouterEtages } from './api-reglages.js';
+import { routeMcp, definirAdresseMcp } from './mcp-http.js';
+import { modeDemo, pausesComptes } from './routeur.js';
 import { routesNavigateur, etatApp, ouvrirApp } from './navigateur.js';
 import { majIconeRaccourci } from './raccourci.js';
 import { discuter, definirPersonnalite, oublier, bavarder, demarrerBavardages, utiliserDemo } from './personnages.js';
@@ -45,6 +49,7 @@ const option = (nom, defaut = null) => {
 };
 const DEMO = args.includes('--demo');
 const REPLAY = option('replay');
+modeDemo(DEMO || !!REPLAY); // la simulation n'a pas de comptes : tout reste sur le compte de la demande
 const VITESSE = Number(option('vitesse', 1)) || 1;
 // la démo prend le port suivant : elle tourne à côté du QG sans le déranger
 const PORT = Number(option('port', DEMO ? Number(REGLAGES.port) + 1 : REGLAGES.port));
@@ -82,8 +87,10 @@ if (!REPLAY && !DEMO) demarrerDetection();
 if (!REPLAY) demarrerBonheur({ demo: DEMO });
 const moteur = DEMO
   ? creerSimulation()
-  : { planifier: dg.planifier, reagir: dg.reagir, synthese: dg.synthese, produire: taches.produire, verifier: taches.verifier };
+  : { planifier: dg.planifier, reagir: dg.reagir, synthese: dg.synthese, produire: taches.produire, verifier: taches.verifier, controler: (t, d, commandes, ctx) => lancerControles(commandes, ctx) };
 const dernierId = REPLAY ? 0 : chargerHistorique();
+// pauses des comptes (D4) : en mémoire seulement ; celles rejouées depuis le journal ne valent plus
+if (etat.ordonnanceur?.pauses) etat.ordonnanceur = { ...etat.ordonnanceur, pauses: {} };
 // Consommation en temps réel : le site reçoit les compteurs à chaque appel au modèle (au plus 1 fois/s).
 surConso(() => emettre('conso', { conso: consoPublique() }));
 ordo.initialiser(moteur, dernierId);
@@ -248,12 +255,19 @@ async function api(req, res, chemin) {
     if (!texte) return json(res, 400, { erreur: tr('demande vide') });
     if (texte.length > 20000) return json(res, 400, { erreur: tr('demande trop longue') });
     const compte = trouverCompte(corps.compte);
+    if (!DEMO && !compte) return json(res, 409, { erreur: tr('Aucun compte IA : ajoute-en un dans Réglages › Comptes IA') });
     if (!DEMO && !compteConnecte(compte)) {
-      return json(res, 409, { erreur: tr("{compte} n'est pas connecté : connecte-le dans Réglages › Comptes", { compte: compte.nom }) });
+      return json(res, 409, { erreur: tr("{compte} n'est pas connecté : connecte-le dans Réglages › Comptes IA", { compte: compte.nom }) });
+    }
+    // compte qui exécute les tâches (Réglages › Comptes IA › Agents de la demande) : doit exister et être connecté
+    const agents = REGLAGES.compteAgents ? trouverCompte(REGLAGES.compteAgents) : null;
+    const compteAgents = agents && agents.id === REGLAGES.compteAgents && agents.id !== compte?.id && (DEMO || compteConnecte(agents)) ? agents.id : null;
+    if (REGLAGES.compteAgents && !compteAgents && agents && agents.id !== compte?.id && !DEMO) {
+      return json(res, 409, { erreur: tr("{compte} (compte des agents) n'est pas connecté : connecte-le ou change le réglage dans Réglages › Comptes IA", { compte: agents.nom }) });
     }
     let reglageDg = null;
     if (corps.dg?.modele || corps.dg?.effort) {
-      const modeles = modelesPublics()[compte.id] || [];
+      const modeles = modelesPublics()[compte?.id] || [];
       const m = modeles.find((x) => x.id === corps.dg.modele);
       if (corps.dg.modele && !m) return json(res, 400, { erreur: tr('modèle inconnu pour ce compte : {modele}', { modele: corps.dg.modele }) });
       if (corps.dg.effort && m && !m.efforts.includes(corps.dg.effort)) return json(res, 400, { erreur: tr('effort non supporté : {effort}', { effort: corps.dg.effort }) });
@@ -263,7 +277,10 @@ async function api(req, res, chemin) {
     const connus = new Set(idsSkills());
     const skills = (Array.isArray(corps.skills) ? corps.skills : []).filter((s) => s && connus.has(s.id) && ['dg', 'tous', 'demande'].includes(s.pour)).map((s) => ({ id: s.id, pour: s.pour }));
     const skillsExclus = (Array.isArray(corps.skillsExclus) ? corps.skillsExclus : []).filter((id) => connus.has(id));
-    const d = ordo.creerDossier({ texte, etageAffiche: String(corps.etageAffiche || 'hall'), compte: compte.id, dg: reglageDg, pieces: corps.pieces || [], skills, skillsExclus });
+    // niveau de coût choisi à l'envoi (pastille de la barre d'envoi) ; absent : celui des réglages
+    if (corps.travail != null && !NIVEAUX.includes(corps.travail?.cout)) return json(res, 400, { erreur: tr('niveau de coût inconnu : {cout}', { cout: String(corps.travail?.cout ?? corps.travail) }) });
+    const travail = corps.travail != null ? { cout: corps.travail.cout } : null;
+    const d = ordo.creerDossier({ texte, etageAffiche: String(corps.etageAffiche || 'hall'), compte: compte?.id || null, compteAgents, dg: reglageDg, pieces: corps.pieces || [], skills, skillsExclus, travail });
     return json(res, 200, { id: d.id });
   }
   if (chemin === '/api/bonheur/recolter') {
@@ -271,14 +288,16 @@ async function api(req, res, chemin) {
   }
   if (chemin === '/api/etages/ajouter-lot') return json(res, 200, ajouterEtages(corps.projets));
   if ((m = chemin.match(/^\/api\/etages\/(ajouter|ignorer)$/))) {
-    const dossier = String(corps.dossier || '');
+    // { dossier, nom } (un projet) ou { dossiers: [...], nom, type } (étage libre, le premier dossier est le principal)
+    const liste = m[1] === 'ajouter' && Array.isArray(corps.dossiers) ? corps.dossiers.map((d) => String(d || '').trim()).filter(Boolean) : null;
+    const dossier = liste ? liste[0] : String(corps.dossier || '');
     if (!dossier) return json(res, 400, { erreur: tr('dossier requis') });
     try {
       if (m[1] === 'ignorer') {
         ignorerProjet(dossier);
         return json(res, 200, { ok: true });
       }
-      return json(res, 200, ajouterEtage(dossier, { nom: corps.nom || null }));
+      return json(res, 200, ajouterEtage(liste || dossier, { nom: corps.nom || null, type: corps.type || null }));
     } catch (e) {
       return json(res, 409, { erreur: e.message });
     }
@@ -393,10 +412,11 @@ async function api(req, res, chemin) {
     const port = PORT + 1;
     const lienDemo = `http://${HOTE}:${port}/?jeton=${JETON}`;
     if (await portRepond(port)) {
-      if (!(REGLAGES.ouvrirEnApp !== false && ouvrirApp(lienDemo))) spawn('cmd.exe', ['/c', 'start', '', lienDemo], { detached: true, stdio: 'ignore' }).unref();
+      if (!(REGLAGES.ouvrirEnApp !== false && ouvrirApp(lienDemo))) plateforme.ouvrirUrl(lienDemo);
       return json(res, 200, { ok: true, deja: true });
     }
-    spawn('cmd.exe', ['/d', '/c', 'start', 'QG des agents - demo', path.join(RACINE, 'lancer-demo.bat'), '--port', String(port), '--neuve', '--spectacle'], { detached: true, stdio: 'ignore', cwd: RACINE }).unref();
+    // lancer-demo.bat (lancer-demo.command sur Mac) dans sa propre fenêtre de terminal
+    plateforme.ouvrirTerminal('QG des agents - demo', [path.join(RACINE, plateforme.script('lancer-demo')), '--port', String(port), '--neuve', '--spectacle'], { cwd: RACINE });
     return json(res, 200, { ok: true });
   }
   if (chemin === '/api/demo/quitter') {
@@ -410,7 +430,8 @@ async function api(req, res, chemin) {
     return json(res, 200, { ok: true });
   }
   if (chemin === '/api/reprendre') {
-    ordo.reprendre();
+    if (typeof corps.compte === 'string' && corps.compte) ordo.reprendreCompte(corps.compte);
+    else ordo.reprendre();
     return json(res, 200, { ok: true });
   }
   return json(res, 404, { erreur: tr('route inconnue') });
@@ -421,10 +442,12 @@ const serveur = http.createServer(async (req, res) => {
     if (!HOTES_OK.has(req.headers.host || '')) return json(res, 403, { erreur: tr('hôte refusé') });
     const url = new URL(req.url, `http://${req.headers.host}`);
     const chemin = url.pathname;
+    // outils du QG en MCP HTTP pour les agents Codex : jeton par session (pas le jeton du site)
+    if (chemin === '/mcp/agents') return await routeMcp(req, res, chemin, { lireCorps, json });
     if (chemin.startsWith('/api/')) {
       const origine = req.headers.origin;
       if (origine && !HOTES_OK.has(origine.replace(/^https?:\/\//, ''))) return json(res, 403, { erreur: tr('origine refusée') });
-      if (!autorise(req)) return json(res, 401, { erreur: tr('ouvre le QG avec lancer.bat (lien avec jeton)') });
+      if (!autorise(req)) return json(res, 401, { erreur: tr('ouvre le QG avec {script} (lien avec jeton)', { script: plateforme.script('lancer') }) });
       return await api(req, res, chemin);
     }
     if (chemin === '/' && url.searchParams.get('jeton')) {
@@ -443,12 +466,13 @@ const serveur = http.createServer(async (req, res) => {
 serveur.listen(PORT, HOTE, () => {
   const lien = `http://${HOTE}:${PORT}/?jeton=${JETON}`;
   definirLienSite(lien);
+  definirAdresseMcp(`http://${HOTE}:${PORT}/mcp/agents`);
   const { comptes } = chargerComptes();
   console.log(`QG des agents — ${DEMO ? 'MODE DÉMO (aucune session Claude)' : REPLAY ? `REPLAY ${REPLAY} ×${VITESSE}` : 'mode réel'}`);
   console.log(`Ouvre : ${lien}`);
-  for (const c of comptes) console.log(`  ${c.nom} : ${compteConnecte(c) ? 'connecté' : 'non connecté (Réglages › Comptes, ou ajouter-un-compte.bat)'}`);
+  for (const c of comptes) console.log(`  ${c.nom} : ${compteConnecte(c) ? 'connecté' : `non connecté (Réglages › Comptes, ou ${plateforme.script('ajouter-un-compte')})`}`);
   // fenêtre application du QG (navigateur complet) si elle est installée, sinon le navigateur habituel
-  if (OUVRIR && !(REGLAGES.ouvrirEnApp !== false && ouvrirApp(lien))) spawn('cmd.exe', ['/c', 'start', '', lien], { detached: true, stdio: 'ignore' }).unref();
+  if (OUVRIR && !(REGLAGES.ouvrirEnApp !== false && ouvrirApp(lien))) plateforme.ouvrirUrl(lien);
   if (REPLAY) lancerReplay();
   else ordo.reprendreDossiers(); // dossiers interrompus par un arrêt : ils repartent
   if (!REPLAY) prechargerDictee();
@@ -459,7 +483,7 @@ serveur.listen(PORT, HOTE, () => {
   if (!DEMO && !REPLAY) majIconeRaccourci();
   if (!DEMO && !REPLAY) {
     // En pause sur une limite d'usage : relecture toutes les 5 min, pour reprendre dès qu'il y a de la marge.
-    demarrerSuiviLimites({ urgent: () => !!etat.ordonnanceur?.pause?.limite });
+    demarrerSuiviLimites({ urgent: () => !!etat.ordonnanceur?.pause?.limite || Object.values(pausesComptes()).some((p) => p.type === 'quota') });
     // Forfait changé (Pro → Max…) : la découverte en cache garde l'ancien forfait et ses modèles, on la refait.
     // (la découverte dit « Claude Max », la lecture des limites « max » : on compare le mot du forfait)
     const forfait = (s) => String(s || '').toLowerCase().replace(/^claude\s+/, '').split(/\s+/)[0];
@@ -547,4 +571,4 @@ function arreter(code) {
 }
 process.on('SIGINT', arreter); // Ctrl+C dans la fenêtre
 process.on('SIGTERM', arreter);
-process.on('SIGHUP', arreter); // fenêtre de lancer.bat fermée (Windows)
+process.on('SIGHUP', arreter); // fenêtre de lancer.bat (Windows) ou du Terminal de lancer.command (Mac) fermée

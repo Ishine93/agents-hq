@@ -6,8 +6,10 @@ import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
 import { RACINE, REGLAGES, etages } from './config.js';
+import * as plateforme from './plateforme.js';
 
-const PYTHON = path.join(RACINE, 'runtime', 'dictee', 'venv', 'Scripts', 'python.exe');
+// venv\Scripts\python.exe sur Windows, venv/bin/python ailleurs (l'installation Mac n'existe pas encore)
+const PYTHON = plateforme.pythonVenv(path.join(RACINE, 'runtime', 'dictee', 'venv'));
 const WORKER = path.join(RACINE, 'serveur', 'dictee_worker.py');
 let processus = null;
 let pret = null;

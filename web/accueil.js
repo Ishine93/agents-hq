@@ -1,10 +1,11 @@
-// Configuration guidée du premier lancement : langues, comptes Claude, dossiers racines et étages,
+// Configuration guidée du premier lancement : langues, comptes IA, dossiers racines et étages,
 // mode de travail, connecteurs et dictée. Tout reste modifiable ensuite dans Réglages.
 import { h, ouvrirModale, api } from './modale.js';
 import { t, LANGUES_INTERFACE, LANGUES_IA } from './i18n.js';
 import { TYPES_PROJET } from './parametres.js';
+import { infos as infosPlateforme, dicteeSysteme } from './plateforme.js';
 
-const ETAPES = ['Bienvenue', 'Comptes Claude', 'Tes projets', 'Mode de travail', 'Connecteurs et dictée', 'C’est prêt'];
+const ETAPES = ['Bienvenue', 'Comptes IA', 'Tes projets', 'Mode de travail', 'Connecteurs et dictée', 'C’est prêt'];
 
 export class Accueil {
   constructor(store, ui) {
@@ -73,10 +74,10 @@ export class Accueil {
     return {
       contenu: [
         h('div', { class: 'accueil-intro' },
-          h('p', { class: 'gros' }, t('Un immeuble d’agents Claude qui travaillent pour toi.')),
+          h('p', { class: 'gros' }, t('Un immeuble d’agents IA qui travaillent pour toi.')),
           h('ul', {},
             h('li', {}, t('Tu écris une demande au DG (directeur) en bas de l’écran.')),
-            h('li', {}, t('Il la découpe en tâches et choisit pour chacune le bon modèle (Opus, Sonnet, Haiku, Fable) et le bon niveau de réflexion.')),
+            h('li', {}, t('Il la découpe en tâches et choisit pour chacune le bon modèle de ton compte et le bon niveau de réflexion.')),
             h('li', {}, t('Les agents travaillent en parallèle, un étage par projet. Tu les regardes réfléchir, tu réponds à leurs questions, tu valides ce qui doit l’être.')))),
         h('div', { class: 'param-ligne' }, h('label', { class: 'param-lib' }, t('Langue de l’interface')), h('div', { class: 'param-val' }, selLangue)),
         h('div', { class: 'param-ligne' }, h('label', { class: 'param-lib' }, t('Langue des IA')), h('div', { class: 'param-val' }, selIA, h('small', { class: 'meta' }, t('Le DG et les agents travaillent et te répondent dans cette langue.')))),
@@ -89,33 +90,13 @@ export class Accueil {
     };
   }
 
-  // 2. Comptes Claude
+  // 2. Comptes IA : le formulaire de Réglages › Comptes IA (Claude, ChatGPT · Codex, agents ACP)
   comptes() {
-    const S = this.store;
-    const R = S.reglages;
-    const connectes = S.comptes.filter((c) => c.connecte);
-    const lignes = S.comptes.map((c) => {
-      const nom = h('input', { class: 'champ', value: c.nom, maxlength: '40', 'aria-label': t('Nom du compte') });
-      nom.addEventListener('change', () => this.poster('/api/comptes/' + c.id + '/modifier', { nom: nom.value }));
-      return h('div', { class: 'param-compte' + (c.connecte ? ' connecte' : '') },
-        h('div', { class: 'param-compte-tete' },
-          nom,
-          h('span', { class: 'badge ' + (c.connecte ? 'st-ok' : 'st-ko') }, c.connecte ? '✓ ' + t('connecté') : t('non connecté')),
-          c.abonnement ? h('span', { class: 'meta' }, c.abonnement) : null,
-          c.connecte ? null : h('button', { class: 'petit ok', type: 'button', on: { click: () => this.poster('/api/comptes/' + c.id + '/connecter', {}, t('Une fenêtre s’est ouverte : connecte-toi dans ton navigateur, puis reviens ici.')) } }, t('Se connecter'))));
-    });
-    const nouveau = h('input', { class: 'champ', placeholder: t('Nom d’un autre compte (ex. Claude pro)'), maxlength: '40' });
-    const partage = R.claudeCodeLocal && !S.comptes.some((c) => c.partage);
+    const connectes = this.store.comptes.filter((c) => c.connecte);
     return {
       contenu: [
-        h('p', {}, t('Le QG utilise ton abonnement Claude (Pro, Max, Team ou Enterprise), sans clé API ni facturation au token. Connecte au moins un compte ; tu peux en ajouter autant que tu veux (perso, pro…) et choisir lequel travaille pour chaque demande.')),
-        h('p', { class: 'meta' }, t('La connexion s’ouvre dans une petite fenêtre puis dans ton navigateur. Le QG ne voit jamais ton mot de passe ni ton jeton.')),
-        ...lignes,
-        partage ? h('div', { class: 'param-ajout' }, h('button', { class: 'petit ok', type: 'button', on: { click: () => this.poster('/api/comptes/ajouter', { nom: t('Claude Code'), partage: true }, t('Compte ajouté.')) } }, t('Utiliser mon compte Claude Code déjà connecté sur ce PC'))) : null,
-        h('div', { class: 'param-ajout' }, nouveau, h('button', { class: 'petit', type: 'button', on: { click: async () => { if (await this.poster('/api/comptes/ajouter', { nom: nouveau.value }, t('Compte ajouté : une fenêtre de connexion s’est ouverte.'))) nouveau.value = ''; } } }, t('Ajouter un compte'))),
-        h('details', { class: 'accueil-api' },
-          h('summary', {}, t('J’ai plutôt une clé API Anthropic')),
-          this.ui.parametres.ajoutCleApi()),
+        h('p', {}, t('Connecte au moins un compte d’IA : un seul suffit, quel que soit le fournisseur. Tu pourras en ajouter d’autres quand tu veux et choisir lequel travaille pour chaque demande.')),
+        ...this.ui.parametres.comptes({ accueil: true, apres: () => this.rendre() }),
         connectes.length ? h('p', { class: 'ok-texte' }, '✓ ' + t('{n} compte(s) connecté(s).', { n: connectes.length })) : h('p', { class: 'meta' }, t('En attente de connexion… cette page se met à jour toute seule.')),
       ],
       libelleSuivant: connectes.length ? t('Continuer') + ' →' : t('Plus tard') + ' →',
@@ -129,7 +110,7 @@ export class Accueil {
     if (!this.projets) {
       api('/api/projets').then((r) => {
         this.projets = r.projets;
-        for (const p of r.projets) if (!this.choix.has(p.dossier)) this.choix.set(p.dossier, { coche: !p.ignore, nom: p.nom });
+        for (const p of r.projets) if (!this.choix.has(p.dossier)) this.choix.set(p.dossier, { coche: !p.ignore && !p.racine, nom: p.nom });
         if (this.etape === 2) this.rendre();
       }).catch(() => null);
     }
@@ -138,7 +119,7 @@ export class Accueil {
       if (!r) return;
       this.store.reglages = { ...this.store.reglages, racines: r.racines, racinesValides: r.racines };
       this.projets = r.projets;
-      for (const p of r.projets) if (!this.choix.has(p.dossier)) this.choix.set(p.dossier, { coche: !p.ignore, nom: p.nom });
+      for (const p of r.projets) if (!this.choix.has(p.dossier)) this.choix.set(p.dossier, { coche: !p.ignore && !p.racine, nom: p.nom });
       this.rendre();
     };
     const manuel = h('input', { class: 'champ', placeholder: t('ou colle un chemin, ex. D:\\Projets') });
@@ -150,19 +131,20 @@ export class Accueil {
         h('p', { class: 'meta' }, t('Les agents écriront librement dans ces dossiers. Partout ailleurs, ils te demanderont la permission.')),
         racines.length ? h('ul', { class: 'param-liste' }, racines.map((r) => h('li', {}, h('code', {}, r), h('button', { class: 'petit danger', type: 'button', on: { click: () => majRacines(racines.filter((x) => x !== r)) } }, t('Retirer'))))) : null,
         h('div', { class: 'param-ajout' },
-          h('button', { class: 'petit ok', type: 'button', on: { click: async () => { const r = await this.poster('/api/choisir-dossier', { titre: t('Choisis un dossier qui contient tes projets') }); if (r && r.chemin) majRacines([...racines, r.chemin]); } } }, t('Choisir un dossier…')),
+          h('button', { class: 'petit ok', type: 'button', on: { click: async (ev) => { const b = ev.currentTarget; if (b.disabled) return; const txt = b.textContent; b.disabled = true; b.textContent = t('Fenêtre ouverte…'); let r = null; try { r = await this.poster('/api/choisir-dossier', { titre: t('Choisis un dossier qui contient tes projets') }); } finally { b.disabled = false; b.textContent = txt; } if (r && r.chemin) majRacines([...racines, r.chemin]); } } }, t('Choisir un dossier…')),
           manuel,
           h('button', { class: 'petit', type: 'button', on: { click: () => manuel.value.trim() && majRacines([...racines, manuel.value.trim()]) } }, t('Ajouter'))),
         racines.length && this.projets ? h('h4', {}, t('Projets trouvés')) : null,
-        racines.length && this.projets && !nouveaux.length && !deja.length ? h('div', { class: 'vide' }, t('Aucun projet reconnu dans ces dossiers (un projet = un dossier avec .git, package.json, un projet Roblox, Unreal, Unity, Godot, Python…). Tu pourras ajouter des étages à la main dans Réglages.')) : null,
+        racines.length && this.projets && !nouveaux.some((p) => !p.racine) && !deja.length ? h('div', { class: 'vide' }, t('Aucun projet reconnu dans ces dossiers (un projet = un dossier avec .git, package.json, un projet Roblox, Unreal, Unity, Godot, Python…). Tu pourras ajouter des étages à la main dans Réglages.')) : null,
         ...nouveaux.map((p) => {
           const c = this.choix.get(p.dossier) || { coche: true, nom: p.nom };
           const nom = h('input', { class: 'champ', value: c.nom, maxlength: '40', on: { input: (e) => this.choix.set(p.dossier, { ...c, nom: e.target.value }) } });
           return h('label', { class: 'accueil-projet' },
             h('input', { type: 'checkbox', checked: c.coche, on: { change: (e) => this.choix.set(p.dossier, { ...c, coche: e.target.checked, nom: nom.value }) } }),
             nom,
-            h('span', { class: 'badge' }, t(TYPES_PROJET[p.type] || p.type)),
-            h('code', { class: 'meta' }, p.dossier));
+            h('span', { class: 'badge' }, p.racine ? t('Dossier entier') : t(TYPES_PROJET[p.type] || p.type)),
+            h('code', { class: 'meta' }, p.dossier),
+            p.racine ? h('small', { class: 'meta' }, t('Utiliser ce dossier entier comme étage')) : null);
         }),
         deja.length ? h('p', { class: 'meta' }, t('Déjà dans l’immeuble : {liste}', { liste: deja.map((p) => p.nom).join(', ') })) : null,
         h('p', { class: 'meta' }, t('Un bac à sable (petit projet de test sans risque) est déjà là pour essayer.')),
@@ -212,10 +194,12 @@ export class Accueil {
         h('p', { class: 'meta' }, t('Les connecteurs de ton compte claude.ai (Notion, Drive, Gmail…) ne sont jamais donnés aux agents par défaut. Tu pourras les activer un par un dans Réglages › Connecteurs MCP. Les serveurs MCP déclarés par un projet (.mcp.json) demandent ton accord à chaque appel.')),
         h('h4', {}, t('Dictée')),
         dic.disponible
-          ? h('p', {}, '✓ ' + t('Dictée locale prête : bouton 🎤 ou Alt+M.'))
-          : h('div', {},
-            h('p', { class: 'meta' }, t('Tu dictes souvent ? La dictée locale (Whisper, gratuite, sur ton PC) s’installe en un clic : environ 4 Go avec une carte NVIDIA, 1,5 Go sans. Sinon, Win+H (dictée de Windows) marche partout.')),
-            h('button', { class: 'petit', type: 'button', on: { click: () => this.poster('/api/dictee/installer', {}, t('L’installation s’ouvre dans une fenêtre à part.')) } }, t('Installer la dictée locale'))),
+          ? h('p', {}, '✓ ' + t('Dictée locale prête : bouton 🎤 ou {raccourci}.', { raccourci: infosPlateforme(this.store).raccourciDictee }))
+          : !infosPlateforme(this.store).dicteeLocale
+            ? h('p', { class: 'meta' }, t('La dictée locale (Whisper) n’est pas encore disponible sur Mac. Utilise {systeme} dans la zone de saisie : ça marche partout.', { systeme: dicteeSysteme() }))
+            : h('div', {},
+              h('p', { class: 'meta' }, t('Tu dictes souvent ? La dictée locale (Whisper, gratuite, sur ton PC) s’installe en un clic : environ 4 Go avec une carte NVIDIA, 1,5 Go sans. Sinon, Win+H (dictée de Windows) marche partout.')),
+              h('button', { class: 'petit', type: 'button', on: { click: () => this.poster('/api/dictee/installer', {}, t('L’installation s’ouvre dans une fenêtre à part.')) } }, t('Installer la dictée locale'))),
         h('h4', {}, t('Notifications')),
         perm === 'granted' ? h('p', {}, '✓ ' + t('Notifications activées.'))
           : perm === 'default' ? h('div', {}, h('p', { class: 'meta' }, t('Pour être prévenu quand un agent lève la main ou pose une question, même si le QG est en arrière-plan.')), h('button', { class: 'petit', type: 'button', on: { click: async () => { await this.ui.notifs.activer(); this.rendre(); } } }, t('Activer les notifications')))

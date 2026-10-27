@@ -2,8 +2,9 @@
 // Le texte reçu s'ajoute à la saisie pour relecture : rien n'est envoyé tout seul.
 import { envoyerBinaire, MAQUETTE } from './flux.js';
 import { t } from './i18n.js';
+import { RACCOURCI_DICTEE, dicteeSysteme } from './plateforme.js';
 
-export const RACCOURCI = 'Alt+M';
+export const RACCOURCI = RACCOURCI_DICTEE; // Alt+M, ou ⌥M sur Mac
 
 export class Dictee {
   constructor(store, { bouton, saisie, surTexte, surErreur }) {
@@ -21,7 +22,8 @@ export class Dictee {
     this.faux = false;
     bouton.addEventListener('click', () => this.basculer());
     window.addEventListener('keydown', (e) => {
-      if (e.altKey && !e.ctrlKey && !e.metaKey && (e.key === 'm' || e.key === 'M')) {
+      // (sur Mac, ⌥M produit e.key = 'µ' : on regarde aussi la touche physique)
+      if (e.altKey && !e.ctrlKey && !e.metaKey && (e.key === 'm' || e.key === 'M' || e.code === 'KeyM')) {
         e.preventDefault();
         this.basculer();
       }
@@ -53,13 +55,13 @@ export class Dictee {
       etiquette.textContent = '';
       b.title = dispo
         ? t('Dicter ({raccourci}) : clic pour démarrer, clic pour arrêter. Le texte s’ajoute à la saisie pour relecture.', { raccourci: RACCOURCI })
-        : t('Dictée locale indisponible sur ce poste : utilise la dictée de Windows (Win+H) dans la zone de saisie.');
+        : t('Dictée locale indisponible sur ce poste : utilise {systeme} dans la zone de saisie.', { systeme: dicteeSysteme() });
     }
   }
 
   basculer() {
     if (!this.disponible()) {
-      this.surErreur(t('Dictée locale indisponible : utilise Win+H (dictée de Windows) dans la zone de saisie.'));
+      this.surErreur(t('Dictée locale indisponible : utilise {systeme} dans la zone de saisie.', { systeme: dicteeSysteme() }));
       return;
     }
     if (this.etat === 'enregistre') this.arreter();
@@ -89,7 +91,7 @@ export class Dictee {
         this.liberer();
         this.etat = 'libre';
         this.maj();
-        this.surErreur(t('Micro indisponible : {erreur}. Tu peux utiliser Win+H.', { erreur: e.message || e.name }));
+        this.surErreur(t('Micro indisponible : {erreur}. Tu peux utiliser {systeme}.', { erreur: e.message || e.name, systeme: dicteeSysteme() }));
         return;
       }
     }

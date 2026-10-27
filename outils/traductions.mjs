@@ -67,9 +67,14 @@ for (const s of sourcesHtml(path.join(QG, 'web', 'index.html'))) if (!(s in dico
 const dicoServeurF = path.join(QG, 'serveur', 'i18n', 'en.json');
 const dicoServeur = fs.existsSync(dicoServeurF) ? lireJson(dicoServeurF) : {};
 const manquantsServeur = new Set();
-for (const f of fs.readdirSync(path.join(QG, 'serveur')).filter((x) => x.endsWith('.js'))) {
+// serveur/*.js et serveur/ia/*.js (adaptateurs de fournisseurs)
+const fichiersServeur = [
+  ...fs.readdirSync(path.join(QG, 'serveur')).filter((x) => x.endsWith('.js')),
+  ...(fs.existsSync(path.join(QG, 'serveur', 'ia')) ? fs.readdirSync(path.join(QG, 'serveur', 'ia')).filter((x) => x.endsWith('.js')).map((x) => `ia/${x}`) : []),
+];
+for (const f of fichiersServeur) {
   const code = fs.readFileSync(path.join(QG, 'serveur', f), 'utf8');
-  if (!/from '\.\/i18n\.js'/.test(code)) continue;
+  if (!/from '\.\.?\/i18n\.js'/.test(code)) continue;
   for (const s of sources(path.join(QG, 'serveur', f))) if (!(s in dicoServeur)) manquantsServeur.add(`${f} : ${s}`);
 }
 

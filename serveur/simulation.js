@@ -1,9 +1,11 @@
 // Moteur simulé (mode --demo) : même interface que le vrai moteur, sans aucune session Claude.
 // Sert à tester l'ordonnanceur, les permissions et le site sans consommer de quota.
-import { etagesActifs } from './config.js';
+import { etagesActifs, REGLAGES } from './config.js';
 import { t as tr } from './i18n.js';
 import { modification } from './bus.js';
 import { modificationDe } from './session.js';
+import { suiviPensees } from './pensees.js';
+import { profilEffectif, nomNiveau } from './travail.js';
 import { scenario as scenarioParCle, scenarioDe, CODES_DEMO } from './scenarios-demo.js';
 
 // Code « écrit » par les agents simulés : de vrais diffs (lignes + et −) pour l'onglet Code et le vieil écran.
@@ -39,6 +41,12 @@ function ecrireSimule(t, d, nom, chemin) {
     : { filePath: chemin, originalFile: null, structuredPatch: [], type: 'create', content: c.apres.join('\n') + '\n' };
   modification(t, d.id, modificationDe(r, nom, null));
 }
+
+// Deuxième réflexion, entre deux outils : le fil de la fiche montre plusieurs blocs et les actions intercalées.
+const PENSEES_MILIEU = () => [
+  tr('Les premiers résultats sont là. Avant d’aller plus loin, je vérifie qu’ils tiennent la route.'),
+  tr('Si un point coince, je préfère le corriger maintenant plutôt qu’à la fin.'),
+];
 
 const attendre = (ms, signal) =>
   new Promise((resolve, reject) => {
@@ -81,9 +89,36 @@ function tache(ref, titre, etage, nature, modele, effort, deps, inputsFrom, prof
   };
 }
 
+// Le DG simulé suit le plafond de tâches du niveau de coût du dossier (choisi avec la pastille, aussi en démo) :
+// il garde les premières tâches et oublie les dépendances vers celles qu'il retire.
+function bornerAuProfil(sortie, d) {
+  const profil = profilEffectif(d);
+  if (!profil.maxTaches || sortie.taches.length <= profil.maxTaches) return sortie;
+  const taches = sortie.taches.slice(0, profil.maxTaches);
+  const refs = new Set(taches.map((t) => t.ref));
+  for (const t of taches) {
+    t.deps = t.deps.filter((x) => refs.has(x.ref));
+    t.inputsFrom = t.inputsFrom.filter((r) => refs.has(r));
+  }
+  const niveau = nomNiveau(profil.cout, REGLAGES.langueInterface === 'en' ? 'en' : 'fr');
+  return { ...sortie, taches, message: `${sortie.message} ${tr('Niveau de coût {niveau} : {n} tâches au plus, je garde les premières.', { niveau, n: profil.maxTaches })}` };
+}
+
+// Lot C : limites simulées du compte (la démo ne lit pas les vraies) : 30 % de la fenêtre de 5 h déjà pris.
+const DEBUT_SIMULATION = Date.now();
+const limitesSimulees = () => ({ maj: Date.now(), essai: Date.now(), disponible: true, abonnement: 'max', fenetres: { five_hour: { utilisation: 30, reinit: DEBUT_SIMULATION + 3 * 3600000 } } });
+
 export function creerSimulation() {
   return {
-    async planifier(d, { reponse = null } = {}) {
+    simulation: true, // l'ordonnanceur n'écrit rien dans conso.json pour la démo
+    limites: limitesSimulees,
+    async planifier(d, options) {
+      const r = await this.planSimule(d, options);
+      if (r.sortie?.taches?.length) r.sortie = bornerAuProfil(r.sortie, d);
+      return r;
+    },
+
+    async planSimule(d, { reponse = null } = {}) {
       const sc = scenarioDu(d);
       if (sc) {
         d.x.scenario = sc.cle;
@@ -128,17 +163,34 @@ export function creerSimulation() {
       };
     },
 
-    // Pensées simulées (réflexion, rédaction, rapport) pour voir les bulles de réflexion en démo.
-    async penserSimule(cible, dossierId, signal, idees) {
+    // Pensées simulées : un bloc de réflexion (une idée par paragraphe) écrit mot à mot, puis la rédaction.
+    // Le flux passe par le vrai suivi des pensées (serveur/pensees.js) : même format qu'une vraie session.
+    async penserSimule(cible, dossierId, signal, idees, { redaction = true, verificateur = false } = {}) {
       const { pensee } = await import('./bus.js');
-      let texte = '';
-      for (const idee of idees) {
-        texte += (texte ? ' ' : '') + idee;
-        pensee(cible, dossierId, { phase: 'reflexion', outil: null, extrait: texte.slice(-280), taille: texte.length });
-        await attendre(1300, signal);
+      const suivre = suiviPensees((p) => pensee(cible, dossierId, verificateur ? { ...p, verificateur: true } : p));
+      try {
+        suivre({ type: 'content_block_start', content_block: { type: 'thinking', thinking: '' } });
+        for (const [i, idee] of idees.entries()) {
+          const mots = (i ? '\n\n' : '') + idee;
+          const morceaux = mots.match(/\S+\s*|\s+/g) || [];
+          for (const m of morceaux) {
+            suivre({ type: 'content_block_delta', delta: { type: 'thinking_delta', thinking: m } });
+            await attendre(Math.max(40, Math.round(1300 / morceaux.length)), signal);
+          }
+        }
+        suivre({ type: 'content_block_stop' });
+      } finally {
+        suivre.terminer();
       }
+      if (!redaction) return;
       pensee(cible, dossierId, { phase: 'redaction', outil: null, extrait: '', taille: 1800 });
       await attendre(900, signal);
+    },
+
+    // B9 : la démo ne lance aucune commande ; les contrôles de la fiche passent toujours.
+    async controler(t, d, commandes) {
+      await attendre(600);
+      return { ok: true, resultats: commandes.map((commande) => ({ commande, ok: true, code: 0, duree: 600 })), echec: null };
     },
 
     async produire(t, d, ctx) {
@@ -162,7 +214,9 @@ export function creerSimulation() {
           await attendre(2200 + ((i * 937) % 1800), signal);
           const [nom, cible] = OUTILS[(i + t.ref.charCodeAt(1)) % OUTILS.length];
           ctx.surOutil(nom, tr(cible));
+          ctx.surContexte?.(24000 + i * 9000 + (t.ref.charCodeAt(1) % 5) * 3000);
           if (nom === 'Edit' || nom === 'Write') ecrireSimule(t, d, nom, cible);
+          if (i === 1) await this.penserSimule(t.id, d.id, signal, PENSEES_MILIEU(), { redaction: false });
           if (i === 1 && t.ref === 'T3' && t.etat !== 'rework') {
             const res = await ctx.canUseTool('Bash', { command: 'npm install --save-dev luau-test-kit' }, { signal });
             ctx.surOutil('Bash', res.behavior === 'allow' ? tr('npm install (autorisé)') : tr('autre approche'));
@@ -211,7 +265,9 @@ export function creerSimulation() {
         if (i === 1 && etape.service && !rework) await this.allumerServeur(t, d, ctx, etape.service);
         const [nom, cible] = pas[i];
         ctx.surOutil(nom, cible);
+        ctx.surContexte?.(30000 + i * 11000);
         if (nom === 'Edit' || nom === 'Write') ecrireSimule(t, d, nom, cible);
+        if (i === 1 && !rework) await this.penserSimule(t.id, d.id, signal, PENSEES_MILIEU(), { redaction: false });
       }
       for (let i = 0; i < complements() * 2; i++) {
         await attendre(1500, signal);
@@ -249,6 +305,10 @@ export function creerSimulation() {
 
     async verifier(t, d, sortie, ctx) {
       try {
+        await this.penserSimule(t.id, d.id, ctx.abortController.signal, [
+          tr('Je relis la mission et les critères « terminé quand », un par un.'),
+          tr('Ensuite je compare avec ce que l’agent dit avoir fait, puis je regarde le diff pour vérifier par moi-même.'),
+        ], { redaction: false, verificateur: true });
         for (let i = 0; i < 3; i++) {
           await attendre(2000, ctx.abortController.signal);
           ctx.surActivite();
@@ -274,6 +334,16 @@ export function creerSimulation() {
       // Complément de l'utilisateur : on le transmet à toutes les tâches pas encore finies ;
       // si tout est fini, on ajoute une tâche confiée à un agent de la réserve.
       const nouvellesTaches = [];
+      // « Réduire » sur la carte d'accord du coût : le DG simulé retire sa dernière tâche pas encore lancée.
+      let retiree = null;
+      if (evenements.some((e) => e.startsWith('Ton plan est estimé'))) {
+        const { etat } = await import('./bus.js');
+        const restantes = [...etat.taches.values()].filter((t) => t.dossier === d.id && ['planned', 'waiting', 'ready', 'queued'].includes(t.etat)).sort((a, b) => Number(a.ref.slice(1)) - Number(b.ref.slice(1)));
+        if (restantes.length > 1) {
+          retiree = restantes.at(-1).ref;
+          ops.push({ op: 'retirer', ref: retiree, consigne: '', modele: '', effort: '', raison: tr('plan réduit pour tenir sous ton seuil') });
+        }
+      }
       if (complements.length) {
         const { etat } = await import('./bus.js');
         const { disponiblesPour } = await import('./equipe.js');
@@ -298,9 +368,11 @@ export function creerSimulation() {
                 ? tr("Tout était fini : j'ajoute {ref} pour ce complément, confiée à {agent} qui connaît déjà ce code.", { ref: nouvellesTaches[0].ref, agent: nouvellesTaches[0].agent })
                 : tr("Tout était fini : j'ajoute {ref} pour ce complément.", { ref: nouvellesTaches[0].ref }))
               : tr('Complément reçu : je le transmets aux tâches en cours ({refs}).', { refs: ops.filter((o) => o.op === 'informer').map((o) => o.ref).join(', ') }))
-            : relance
-              ? tr('T4 manquait de contexte : je la relance en opus/xhigh avec la consigne de garder l’ancien format.')
-              : tr('Bien reçu, on continue.'),
+            : retiree
+              ? tr('Je réduis le plan : je retire {ref}, sans toucher aux modèles ni aux efforts.', { ref: retiree })
+              : relance
+                ? tr('T4 manquait de contexte : je la relance en opus/xhigh avec la consigne de garder l’ancien format.')
+                : tr('Bien reçu, on continue.'),
           question: '',
           ops,
           nouvellesTaches,
