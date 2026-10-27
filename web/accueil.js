@@ -4,6 +4,7 @@ import { h, ouvrirModale, api } from './modale.js';
 import { t, LANGUES_INTERFACE, LANGUES_IA } from './i18n.js';
 import { TYPES_PROJET } from './parametres.js';
 import { infos as infosPlateforme, dicteeSysteme } from './plateforme.js';
+import { ligneI, exempleAide } from './aide.js';
 
 const ETAPES = ['Bienvenue', 'Comptes IA', 'Tes projets', 'Mode de travail', 'Connecteurs et dictée', 'C’est prêt'];
 
@@ -32,7 +33,7 @@ export class Accueil {
   maj() {
     if (!this.m) return;
     const actif = document.activeElement;
-    if (actif && this.m.boite.contains(actif) && /^(INPUT|TEXTAREA)$/.test(actif.tagName)) return;
+    if (actif && this.m.boite.contains(actif) && /^(INPUT|TEXTAREA|SELECT)$/.test(actif.tagName)) return;
     if ([1, 4].includes(this.etape)) this.rendre(); // comptes connectés, dictée : mise à jour en direct
   }
 
@@ -79,9 +80,15 @@ export class Accueil {
             h('li', {}, t('Tu écris une demande au DG (directeur) en bas de l’écran.')),
             h('li', {}, t('Il la découpe en tâches et choisit pour chacune le bon modèle de ton compte et le bon niveau de réflexion.')),
             h('li', {}, t('Les agents travaillent en parallèle, un étage par projet. Tu les regardes réfléchir, tu réponds à leurs questions, tu valides ce qui doit l’être.')))),
-        h('div', { class: 'param-ligne' }, h('label', { class: 'param-lib' }, t('Langue de l’interface')), h('div', { class: 'param-val' }, selLangue)),
-        h('div', { class: 'param-ligne' }, h('label', { class: 'param-lib' }, t('Langue des IA')), h('div', { class: 'param-val' }, selIA, h('small', { class: 'meta' }, t('Le DG et les agents travaillent et te répondent dans cette langue.')))),
-        h('div', { class: 'param-ligne' }, h('label', { class: 'param-lib' }, t('Ton prénom (facultatif)')), h('div', { class: 'param-val' }, prenom)),
+        ligneI('accueil-langue', t('Langue de l’interface'), [
+          t('La langue des menus, des boutons et des messages du QG.'),
+          exempleAide(t('tu choisis English : tout l’écran passe en anglais ; les agents, eux, écrivent dans la langue des IA, réglée juste en dessous.')),
+        ], selLangue),
+        ligneI('accueil-langue-ia', t('Langue des IA'), [
+          t('Le DG et les agents réfléchissent, écrivent et te répondent dans cette langue.'),
+          exempleAide(t('écran en français et IA en anglais : les menus restent en français, mais les réponses, les rapports et les commentaires du code arrivent en anglais.')),
+        ], selIA),
+        ligneI('accueil-prenom', t('Ton prénom (facultatif)'), [t('Facultatif : le DG s’adresse à toi par ton prénom.')], prenom),
       ],
       suivant: async () => {
         if ((prenom.value || '') !== (R.utilisateur || '')) await this.poster('/api/reglages', { utilisateur: prenom.value });
@@ -171,14 +178,14 @@ export class Accueil {
     return {
       contenu: [
         h('p', {}, t('Comment les agents travaillent-ils ?')),
-        choix('auto', t('Autonome (recommandé)'), t('Comme une conversation Claude Code en mode auto : les agents lisent partout, écrivent librement dans tes dossiers, installent leurs dépendances. Le mode auto de Claude Code bloque ce qui est risqué.')),
-        choix('prudent', t('Prudent'), t('Chaque commande ou écriture hors de tes dossiers lève la main et attend ton accord. Plus sûr, mais tu seras souvent sollicité.')),
+        choix('auto', t('Autonome (recommandé)'), t('Les agents lisent partout, écrivent librement dans tes dossiers et avancent sans te demander à chaque geste. Ce qui est risqué reste bloqué : par le mode auto de Claude Code pour Claude, par le bac à sable pour Codex, par le QG pour les autres agents.')),
+        choix('prudent', t('Prudent'), t('Chaque commande ou écriture hors de tes dossiers lève la main et attend ton accord. Plus sûr, mais tu seras souvent sollicité. Seul Claude sait travailler ainsi : en Prudent, Codex et les autres agents ne prennent pas les tâches qui écrivent.')),
         h('div', { class: 'accueil-garde' },
           h('b', {}, t('Dans tous les cas :')),
           h('ul', {},
             h('li', {}, t('écrire hors de tes dossiers racines demande ton accord ;')),
             h('li', {}, t('jamais de git push, de publication ni d’envoi sans ton accord ;')),
-            h('li', {}, t('les agents ne peuvent ni modifier le QG, ni lire tes identifiants Claude ;')),
+            h('li', {}, t('les agents ne peuvent ni modifier le QG, ni lire les identifiants de tes comptes IA ;')),
             h('li', {}, t('un bouton « Arrêt d’urgence » coupe tout instantanément.')))),
       ],
     };

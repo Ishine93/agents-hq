@@ -4,12 +4,12 @@
 // modifierait pendant qu'il travaille). Repli : une courte session à part, sur le même compte, répond d'après
 // l'activité visible de l'agent (dernières pensées, outils, terminal, mission), avec la mention
 // « réponse d'après son activité visible ».
-import { REGLAGES, RACINE, langueIA, racines, etage as trouverEtage } from './config.js';
+import { RACINE, langueIA, racines, etage as trouverEtage } from './config.js';
 import { etat, message } from './bus.js';
 import { executerSession, raisonEchec } from './session.js';
 import { trouverCompte } from './comptes.js';
 import { adaptateurDe } from './ia/fournisseurs.js';
-import { modelePour } from './routeur.js';
+import { modelePour, reglageDg } from './routeur.js';
 import { t as tr } from './i18n.js';
 
 const nomTache = (t) => t.prenom || t.ref;
@@ -161,7 +161,7 @@ export async function questionDg(d, texte) {
   message(d.id, 'toi', tr('Au DG : {texte}', { texte }), ['direction'], [], { question: true, cible: 'dg' });
   // la conversation du DG vit sur le compte qui l'a commencée (compte du DG, sinon celui de la demande)
   const compte = d.x.dgCompte || d.dg?.compte || d.compte;
-  const modele = d.dg?.modele || REGLAGES.dg.modele;
+  const modele = d.dg?.modele || reglageDg().modele;
   const cwd = racines()[0] || RACINE;
   const conso = { role: 'question', dossier: d.id, etage: 'direction' };
   let rep;

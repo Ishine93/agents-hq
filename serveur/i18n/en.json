@@ -24,7 +24,7 @@
   "{ref} a généré une image ({compte}) : {description}": "{ref} generated an image ({compte}): {description}",
   "l'abonnement ChatGPT ne sait pas imposer la taille, la qualité, la transparence ni des références": "the ChatGPT subscription cannot set the size, quality, transparency or references",
   "aucun compte ChatGPT · Codex avec clé API pour l'API Images": "no ChatGPT · Codex account with an API key for the Images API",
-  "API Images désactivée (Réglages › Priorités › Délégation)": "Images API turned off (Settings › Priorities › Delegation)",
+  "API Images désactivée (Réglages › Priorités › Images)": "Images API turned off (Settings › Priorities › Images)",
   "aucun compte ChatGPT · Codex": "no ChatGPT · Codex account",
   "{motif}. Les tâches de ce dossier prévues sur {nom} attendent. Tu peux attendre ou les passer sur {autre}.": "{motif}. This case's tasks planned on {nom} are waiting. You can wait or move them to {autre}.",
   "Attention : changer de compte pour contourner une limite peut être contraire aux conditions d'utilisation du fournisseur (OpenAI le déconseille).": "Warning: switching accounts to get around a limit may go against the provider's terms of use (OpenAI advises against it).",
@@ -58,8 +58,6 @@
   "aucun compte {ia} connecté": "no {ia} account signed in",
   "Tout sur le compte de la demande": "Everything on the request's account",
   "Autres agents": "Other agents",
-  "Tout sur {ia}": "Everything on {ia}",
-  "Claude pour le code, Codex pour la rédaction et les images": "Claude for code, Codex for writing and images",
   "Claude Code introuvable : relance {script}": "Claude Code not found: run {script} again",
   "Claude Code est introuvable dans node_modules : lance d'abord {script}.": "Claude Code is missing from node_modules: run {script} first.",
   "ouvre le QG avec {script} (lien avec jeton)": "open the HQ with {script} (link with token)",
@@ -636,5 +634,13 @@
   "Réduire": "Reduce",
   "Annuler": "Cancel",
   "plan réduit pour tenir sous ton seuil": "plan reduced to stay under your threshold",
-  "Je réduis le plan : je retire {ref}, sans toucher aux modèles ni aux efforts.": "I'm reducing the plan: I'm removing {ref}, without touching models or effort."
+  "Je réduis le plan : je retire {ref}, sans toucher aux modèles ni aux efforts.": "I'm reducing the plan: I'm removing {ref}, without touching models or effort.",
+  "Le port {port} est déjà pris, sans doute par un autre QG ouvert. Ferme-le, ou lance celui-ci sur un autre port : {script} --port {autre} (ou change « port » dans config/reglages.json).": "Port {port} is already taken, probably by another HQ that is open. Close it, or start this one on another port: {script} --port {autre} (or change \"port\" in config/reglages.json).",
+  "{motif}. Les tâches de ce dossier prévues sur {nom} passent toutes seules sur {autre} jusqu’à sa reprise (Réglages › Priorités › Autre compte libre).": "{motif}. This case's tasks planned on {nom} move to {autre} automatically until it resumes (Settings › Priorities › Another free account).",
+  "Tout sur {compte}": "Everything on {compte}",
+  "{code} pour le code, {redaction} pour la rédaction et les images": "{code} for code, {redaction} for writing and images",
+  "Seul un dossier terminé, annulé ou en échec peut être archivé.": "Only a finished, cancelled or failed case can be archived.",
+  "Ce dossier n’est pas archivé.": "This case is not archived.",
+  "{ref} : {n} compactions de contexte dans la même tâche, le garde-fou l’arrête. Le DG va la redécouper.": "{ref}: {n} context compactions in the same task, the guard stops it. The CEO will split it again.",
+  "Arrêtée par le garde-fou après {n} compactions de contexte": "Stopped by the guard after {n} context compactions"
 }

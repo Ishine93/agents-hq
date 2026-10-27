@@ -5,6 +5,7 @@
 // Tout texte venant du serveur passe par textContent (via h).
 import { h, api } from './modale.js';
 import { t } from './i18n.js';
+import { titreI, exempleAide } from './aide.js';
 
 const POUR = [['dg', 'Pour le DG'], ['tous', 'DG + agents'], ['demande', 'Sur demande']];
 const MODES = [['off', 'Off (seulement si choisi pour un dossier)'], ['dispo', 'Disponible (chargé si besoin)'], ['toujours', 'Toujours appliqué']];
@@ -204,7 +205,11 @@ export function sectionSkills(param) {
   const liste = S.skills || [];
   // (append écrirait « null » pour un bloc absent : on le retire)
   box.append(...[
-    h('p', { class: 'meta' }, t('Un skill est une consigne réutilisable (fichier SKILL.md, le format de Claude Code). « Toujours appliqué » : donné d’office (une règle de comportement). « Disponible » : seuls son nom et sa description sont donnés, l’IA le charge si elle en a besoin (presque gratuit). « Off » : rangé ici, à choisir pour un dossier avec 🧩. Le DG donne aussi à chaque agent les skills utiles à sa tâche.')),
+    ...titreI('skills-biblio', t('Ta bibliothèque'), [
+      t('Un skill est une consigne réutilisable (fichier SKILL.md, le format de Claude Code). « Toujours appliqué » : donné d’office (une règle de comportement). « Disponible » : seuls son nom et sa description sont donnés, l’IA le charge si elle en a besoin (presque gratuit). « Off » : rangé ici, à choisir pour un dossier avec 🧩. Le DG donne aussi à chaque agent les skills utiles à sa tâche.'),
+      t('Sur chaque skill : le mode, puis « DG » et « agents » pour dire qui le reçoit ; les étages cochés le réservent aux agents de ces projets.'),
+      exempleAide(t('un skill « réponses courtes » en « Toujours appliqué », coché pour les agents : chaque agent te répond en quelques phrases au lieu d’un long rapport.')),
+    ]),
     h('div', { class: 'boutons' },
       h('button', { class: 'petit', type: 'button', on: { click: () => { formulaire.hidden = !formulaire.hidden; } } }, '＋ ' + t('Créer un skill')),
       h('button', { class: 'petit', type: 'button', on: { click: () => fichier.click() } }, '⤓ ' + t('Importer un fichier (SKILL.md, .skill, .zip)')),

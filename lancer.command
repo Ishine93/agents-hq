@@ -16,8 +16,9 @@ echo "Le QG s'ouvre dans ton navigateur. Laisse cette fenetre ouverte : la ferme
 # (chemin absolu : mettre-a-jour.sh reconnait ainsi un QG en marche)
 "$QG/runtime/node/bin/node" "$QG/serveur/index.js" "$@"
 code=$?
-# Code 42 : une mise a jour a ete lancee, elle relance le QG dans une autre fenetre.
-if [ "$code" = "42" ]; then exit 0; fi
+# Code 41 : bouton Fermer du QG. Code 42 : une mise a jour a ete lancee, elle relance le QG dans une autre fenetre.
+# Dans les deux cas, pas d'attente d'une touche.
+if [ "$code" = "41" ] || [ "$code" = "42" ]; then exit 0; fi
 echo
 echo "Le QG est arrete. Tu peux fermer cette fenetre."
 read -r _

@@ -128,7 +128,7 @@ button:focus-visible, textarea:focus-visible { outline: 2px solid var(--jaune); 
   display: flex;
   flex-direction: column;
   gap: 6px;
-  z-index: 40;
+  z-index: 200; /* devant les fenêtres (Réglages : z-index 110) : une erreur se voit toujours */
   pointer-events: none;
 }
 .alerte {
@@ -733,7 +733,7 @@ body.complement #saisie { border-color: #9b6dff; box-shadow: 0 0 0 2px rgba(155,
 }
 .jointe .retirer:hover { background: var(--rouge); }
 
-/* ---------- outils de saisie : 📎, 🎤, réglage du DG ---------- */
+/* ---------- outils de saisie : 📎, 🎤, 🧩, ⚙, coût de la demande ---------- */
 .outil-saisie {
   flex: none;
   height: 38px;
@@ -768,7 +768,9 @@ body.complement #saisie { border-color: #9b6dff; box-shadow: 0 0 0 2px rgba(155,
 @keyframes pulse-rouge { 50% { opacity: 0.2; transform: scale(0.7); } }
 .dictee.transcription .micro { font-size: 0; }
 .dictee.transcription .micro::before { content: '⏳'; font-size: 16px; display: inline-block; animation: tourne 1.6s linear infinite; }
-.reglage-dg {
+.reglages-envoi { font-size: 17px; color: var(--dim); }
+.reglages-envoi:hover { color: var(--texte); }
+.pastille-envoi {
   flex: none;
   display: inline-flex;
   align-items: center;
@@ -780,10 +782,10 @@ body.complement #saisie { border-color: #9b6dff; box-shadow: 0 0 0 2px rgba(155,
   background: #0f1322;
   font-size: 12.5px;
 }
-.reglage-dg.modifie { border-color: #9b6dff; }
-.reglage-dg .lib { color: var(--dim); font-weight: 700; }
-.reglage-dg .sep { color: var(--dim); }
-.reglage-dg select {
+.pastille-envoi.modifie { border-color: #9b6dff; }
+.pastille-envoi .lib { color: var(--dim); font-weight: 700; }
+.pastille-envoi .sep { color: var(--dim); }
+.pastille-envoi select {
   background: transparent;
   color: var(--texte);
   border: 0;
@@ -793,7 +795,7 @@ body.complement #saisie { border-color: #9b6dff; box-shadow: 0 0 0 2px rgba(155,
   max-width: 108px;
   cursor: pointer;
 }
-.reglage-dg select option { background: #1b2033; }
+.pastille-envoi select option { background: #1b2033; }
 
 /* ---------- vignettes (fil, cartes) ---------- */
 .vignettes { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }

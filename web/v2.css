@@ -21,6 +21,7 @@ body.redimensionne, body.redimensionne * { cursor: inherit !important; user-sele
 .choix-compte option, .choix-langue option, select.champ option { background: #1b2033; color: var(--texte); font-weight: 400; }
 #comptes { border: 0; overflow: visible; }
 .champ:focus-visible { outline: 2px solid var(--jaune); outline-offset: 1px; }
+.param-avert { flex-basis: 100%; margin: 4px 0 0; padding: 6px 10px; border-left: 3px solid var(--orange); border-radius: 0 6px 6px 0; background: rgba(255, 159, 67, 0.1); font-size: 12px; color: var(--texte); }
 .champ.zone { width: 100%; resize: vertical; font-family: inherit; line-height: 1.45; }
 
 /* compteur de consommation */
@@ -70,14 +71,33 @@ body.redimensionne, body.redimensionne * { cursor: inherit !important; user-sele
 .param-choix.choisi { border-color: var(--accent); background: rgba(58, 134, 255, 0.1); }
 .param-choix small { color: var(--dim); line-height: 1.4; }
 .param-case { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; }
-.param-niveaux { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 6px 0; }
+.param-niveaux { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 6px 0; }
 .param-niveau { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; padding: 9px 12px; border: 2px solid #2c3454; border-radius: 8px; background: transparent; color: var(--texte); cursor: pointer; }
 .param-niveau small { color: var(--dim); line-height: 1.35; }
 .param-niveau.choisi { border-color: var(--accent); background: rgba(58, 134, 255, 0.1); }
 .param-cout-perso { margin: 8px 0; border: 1px solid var(--bord-clair); border-radius: 8px; padding: 6px 10px; }
 .param-cout-perso summary { cursor: pointer; font-weight: 600; font-size: 13px; }
 .param-cout-perso .param-ligne { margin: 6px 0; }
+.param-cout-perso button.petit.choisi { border-color: var(--accent); background: rgba(58, 134, 255, 0.18); }
+@media (max-width: 1000px) { .param-niveaux { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 700px) { .param-niveaux { grid-template-columns: 1fr; } }
+/* bulles « i » (web/aide.js) : bouton rond après le libellé, explication sous toute la ligne */
+.param-lib { display: flex; align-items: flex-start; gap: 6px; }
+.bouton-i { flex: none; width: 18px; height: 18px; margin-top: -1px; padding: 0; border-radius: 50%; border: 1px solid #4a5684; background: rgba(58, 134, 255, 0.12); color: #9cc2ff; font: italic 700 11px/16px Georgia, "Times New Roman", serif; text-align: center; }
+.bouton-i:hover, .bouton-i.ouvert { background: var(--accent); border-color: var(--accent); color: #fff; }
+.titre-i { display: flex; align-items: center; gap: 8px; }
+.titre-i .bouton-i { text-transform: none; letter-spacing: 0; }
+.aide-i { margin: 2px 0 6px; padding: 9px 12px; border-left: 3px solid var(--accent); border-radius: 0 8px 8px 0; background: rgba(58, 134, 255, 0.08); font-size: 13px; line-height: 1.5; color: var(--texte); }
+.param-ligne > .aide-i { grid-column: 1 / -1; }
+.aide-i p { margin: 0 0 6px; }
+.aide-i p:last-child, .aide-i > div:last-child { margin-bottom: 0; }
+.aide-choix { margin: 0 0 8px; }
+.aide-plus { color: #8fe3a8; margin-left: 12px; }
+.aide-moins { color: #ffb38a; margin-left: 12px; }
+.aide-valeur { margin: 0 0 4px; }
+.aide-valeur code { display: inline-block; min-width: 34px; padding: 0 5px; border-radius: 4px; background: rgba(255, 255, 255, 0.08); text-align: center; font-weight: 700; }
+.aide-exemple { margin: 6px 0 0; font-style: italic; color: var(--dim); }
+.aide-exemple span { font-style: normal; font-weight: 600; }
 .param-compte, .param-etage { border: 1px solid var(--bord-clair); border-radius: 8px; padding: 8px 10px; margin: 8px 0; background: rgba(255, 255, 255, 0.025); }
 .param-compte.connecte { border-left: 4px solid var(--vert); }
 .param-etage.inactif { opacity: 0.6; }
@@ -85,9 +105,18 @@ body.redimensionne, body.redimensionne * { cursor: inherit !important; user-sele
 .param-compte-tete .champ, .param-etage-tete .champ { font-weight: 700; min-width: 180px; }
 .param-ajout { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 8px 0; }
 .param-ajout .champ { flex: 1; min-width: 180px; }
+.param-archives .dossier { margin: 8px 0; }
+.param-archives .taches { display: flex; flex-direction: column; gap: 4px; margin: 6px 0; }
+.fiche-archivee .modale-corps dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; }
+.param-ajout-aide { display: flex; flex-direction: column; gap: 4px; margin: 4px 0 8px; }
+button.occupe:disabled { cursor: progress; }
+.nouvel-etage .param-val > .champ { width: min(100%, 340px); } /* nom et type libre : le texte d’aide reste lisible */
 .param-liste { list-style: none; margin: 6px 0; padding: 0; }
 .param-liste li { display: flex; gap: 8px; align-items: center; padding: 5px 0; border-bottom: 1px dashed rgba(255, 255, 255, 0.07); flex-wrap: wrap; }
 .param-liste li code { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+/* listes dans l’ordre de préférence : numérotées */
+ol.param-liste { counter-reset: rang; }
+ol.param-liste li::before { counter-increment: rang; content: counter(rang) "."; min-width: 18px; color: var(--dim); font-variant-numeric: tabular-nums; }
 .param-skins { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; }
 .param-skin { border: 1px solid var(--bord-clair); border-radius: 8px; background: rgba(255, 255, 255, 0.03); }
 .param-skin.perso { border-color: var(--jaune); }
@@ -551,3 +580,16 @@ body:has(#panneau.replie) #demandes-boite:not(.placee) { right: 26px; }
 .badge-demo { background: #e8a33a; color: #1b1205; font-weight: 800; font-size: 11px; letter-spacing: 1px; padding: 2px 8px; border-radius: 10px; }
 .badge-demo[hidden] { display: none; }
 .demo-fin { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: #0b0e1c; color: #c9cff0; font-size: 16px; }
+
+/* Notes de version (1.0.7) : numéro de version à côté du nom, fenêtre à deux colonnes */
+.version-bouton { background: none; border: 1px solid transparent; border-radius: 6px; padding: 1px 6px; font-size: 12px; color: var(--texte); opacity: 0.7; cursor: pointer; }
+.version-bouton:hover, .version-bouton:focus-visible { opacity: 1; border-color: currentColor; }
+.notes-version.modale-boite { width: min(960px, 94vw); }
+.notes-colonnes { display: grid; grid-template-columns: 170px 1fr; gap: 14px; min-height: 0; }
+.notes-liste { display: flex; flex-direction: column; gap: 4px; max-height: 65vh; overflow-y: auto; }
+.notes-version-bouton { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; text-align: left; padding: 7px 10px; border: 0; border-radius: 6px; background: transparent; color: var(--dim); box-shadow: none; }
+.notes-version-bouton:hover { background: rgba(255, 255, 255, 0.06); color: var(--texte); }
+.notes-version-bouton.choisi { background: var(--accent); color: #fff; }
+.notes-version-bouton.choisi .meta { color: rgba(255, 255, 255, 0.85); }
+.notes-texte { max-height: 65vh; overflow-y: auto; padding-right: 6px; }
+@media (max-width: 640px) { .notes-colonnes { grid-template-columns: 1fr; } .notes-liste { flex-direction: row; flex-wrap: wrap; max-height: none; } }

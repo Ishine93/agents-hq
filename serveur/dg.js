@@ -1,14 +1,15 @@
 // Le DG : une session par dossier (reprise à chaque réveil), en lecture seule, sur le compte IA du DG
 // (dossier.dg.compte, sinon le compte de la demande). Il rend un plan, des plan_delta et la synthèse, toujours
 // en sortie JSON imposée. Avec plusieurs IA connectées (lot 2 multi-IA), son schéma et sa directive listent les
-// comptes et les modèles que l'on a vraiment ; avec Claude seul, ils restent ceux de la 1.0.5.
+// comptes et les modèles que l'on a vraiment ; avec Claude seul, ils ne parlent que de Claude. Les consignes de
+// l'utilisateur (Réglages › Priorités › Consignes au DG) lui sont données avec une IA comme avec plusieurs.
 import { REGLAGES, RACINE, directive, etagesActifs, etage as trouverEtage, fiche, racines } from './config.js';
 import { optionsProfil } from './permissions.js';
 import { executerSession, raisonEchec } from './session.js';
 import { decouverteEnCache } from './decouverte.js';
 import { trouverCompte } from './comptes.js';
 import { adaptateurDe, fournisseurDe, convertirModele, chargerEquivalences } from './ia/fournisseurs.js';
-import { comptesDisponibles, multiIa, profilsPossibles, profilOk, resumePriorites, chargerPriorites, appartient, niveauModele, sansPrefixe, qualifie, enDemo } from './routeur.js';
+import { comptesDisponibles, multiIa, profilsPossibles, profilOk, resumePriorites, chargerPriorites, niveauModele, sansPrefixe, qualifie, enDemo, reglageDg, consignesDossier, TYPES } from './routeur.js';
 import { skillsDemande } from './taches.js';
 import { resumePourDg } from './mcp.js';
 import { blocsImages } from './pieces.js';
@@ -101,14 +102,11 @@ export function modelesPour(compteId) {
 const NIVEAUX = () => chargerEquivalences().niveaux || ['eco', 'standard', 'fort', 'max'];
 const rangModele = (m) => NIVEAUX().indexOf(niveauModele(m));
 
-// Modèle du DG : celui demandé s'il existe pour son compte, sinon le plus capable disponible. Les priorités
-// (dg.modele) ne peuvent que le relever, jamais le baisser.
+// Modèle du DG : celui du dossier (Réglages › Priorités › DG, figé à l'envoi) s'il existe pour son compte, sinon
+// le plus proche sans descendre de niveau (en dernier recours, le plus capable disponible).
 export function modeleDg(dossier) {
   const compte = compteDg(dossier);
-  let voulu = dossier.dg?.modele || REGLAGES.dg.modele;
-  const prio = chargerPriorites().dg || {};
-  const c = trouverCompte(compte);
-  if (prio.modele && (!prio.compte || prio.compte === c?.id) && c && appartient(c, prio.modele) && rangModele(prio.modele) >= rangModele(voulu)) voulu = sansPrefixe(prio.modele);
+  const voulu = sansPrefixe(dossier.dg?.modele || reglageDg().modele);
   const liste = modelesPour(compte);
   if (liste.includes(voulu)) return voulu;
   // autre IA : le modèle du même niveau chez ce fournisseur (jamais un niveau plus bas)
@@ -121,15 +119,15 @@ export function modeleDg(dossier) {
     const tries = [...liste].sort((a, b) => rangModele(a) - rangModele(b));
     return tries.find((m) => rangModele(m) >= r) || tries[tries.length - 1];
   }
-  return ['opus', 'fable', 'sonnet', 'haiku'].find((m) => liste.includes(m)) || voulu;
+  // Claude : l'alias du même niveau ou du niveau au-dessus, sinon le plus capable disponible
+  const rang = rangModele(voulu);
+  return MODELES.find((m) => liste.includes(m) && rangModele(m) >= rang) || ['opus', 'fable', 'sonnet', 'haiku'].find((m) => liste.includes(m)) || voulu;
 }
 
-// Effort du DG : celui de la demande ou des réglages ; les priorités (dg.effort) ne peuvent que le relever.
+// Effort du DG : celui du dossier (Réglages › Priorités › DG, figé à l'envoi). L'adaptateur d'une autre IA le
+// ramène au plus proche que son modèle sait faire.
 export function effortDg(dossier) {
-  const base = dossier.dg?.effort || REGLAGES.dg.effort;
-  const prio = chargerPriorites().dg || {};
-  const ordre = ['low', 'medium', 'high', 'xhigh', 'max'];
-  return prio.effort && ordre.indexOf(prio.effort) > ordre.indexOf(base) && (!prio.compte || prio.compte === compteDg(dossier)) ? prio.effort : base;
+  return dossier.dg?.effort || reglageDg().effort;
 }
 
 function schemaAvecModeles(schema, modeles) {
@@ -275,7 +273,7 @@ export function catalogueIa(comptes = comptesDisponibles()) {
 }
 
 /**
- * Schéma du DG. Claude seul : celui de la 1.0.5 (modèles du compte du DG). Plusieurs IA : modèles de tous les
+ * Schéma du DG. Claude seul : les modèles du compte du DG, sans champ `ia` ni `compte`. Plusieurs IA : modèles de tous les
  * comptes connectés, plus les champs `ia` (auto ou un fournisseur présent) et `compte` (vide ou un compte
  * connecté) sur chaque tâche, et `compte` sur les opérations du plan_delta.
  */
@@ -301,8 +299,8 @@ export function schemaDg(schema, dossier, comptes = comptesDisponibles()) {
   return copie;
 }
 
-// Directive du DG : les marqueurs {COMPTES_IA}, {PRIORITES} et {CONSIGNE_IA} ne servent qu'avec plusieurs IA ;
-// avec Claude seul, leurs lignes disparaissent (directive de la 1.0.5).
+// Directive du DG : les marqueurs {COMPTES_IA} et {PRIORITES} ne servent qu'avec plusieurs IA (avec Claude seul,
+// leurs lignes disparaissent) ; {CONSIGNES} reçoit les consignes de l'utilisateur, avec une IA ou plusieurs.
 const REGLES_IA = [
   '',
   '## Plusieurs IA',
@@ -313,14 +311,36 @@ const REGLES_IA = [
   "`modele` est un modèle de la liste de ces comptes, jamais un autre. La grille ci-dessus est écrite avec les alias Claude : pour une autre IA, prends le modèle du même niveau (eco, standard, fort, max). Si le compte retenu n'a pas ce modèle, le serveur prend celui du même niveau chez lui (jamais plus bas). Pour le vérificateur, un modèle d'une autre IA que le producteur donne une relecture croisée. Un compte « pas encore qualifié » marche, mais n'a pas encore été essayé en vrai par le QG.",
 ].join('\n');
 
-export function directiveDg(comptes = comptesDisponibles()) {
+// Consignes de l'utilisateur (figées dans le dossier à l'envoi) : la générale guide le DG lui-même ; celle d'un
+// type de tâche est recopiée par le serveur dans la mission de chaque tâche de ce type et montrée à son
+// vérificateur (taches.js : promptProduction, promptVerif).
+const NOMS_TYPES = { code: 'code', recherche: 'recherche', redaction: 'rédaction', image: 'images', defaut: "par défaut (tâches dont le type n'a pas de consigne à lui)" };
+const citer = (texte, retrait = '') => texte.split('\n').map((l) => `${retrait}> ${l}`).join('\n');
+function blocConsignes(consignes, prio) {
+  const generale = consignes?.generale || '';
+  const parType = TYPES.filter((ty) => consignes?.types?.[ty]);
+  if (!generale && !parType.length) return '';
+  const lignes = ['', "## Consignes de l'utilisateur", "L'utilisateur les a écrites pour toutes ses demandes : applique-les. Si sa demande dit autre chose, la demande prime."];
+  if (generale) lignes.push('', 'Consigne générale (ta méthode, ton style, ton choix des IA, des modèles et des efforts) :', citer(generale));
+  if (parType.length) {
+    lignes.push('', "Consignes par type de tâche. Le serveur recopie chacune mot pour mot dans la mission des tâches de ce type et la montre à leur vérificateur : ne la réécris pas dans `prompt`, et ne donne pas de mission qui la contredit, sauf si la demande l'exige (dis-le alors dans la mission).");
+    for (const ty of parType) {
+      const natures = ty === 'defaut' ? [] : prio.types[ty]?.natures || [];
+      lignes.push(`- ${NOMS_TYPES[ty]}${natures.length ? ` (natures ${natures.join(', ')})` : ''} :`, citer(consignes.types[ty], '  '));
+    }
+  }
+  return lignes.join('\n');
+}
+
+// dossier : ses consignes figées (sans dossier : celles des réglages, pour les tests et l'aperçu)
+export function directiveDg(comptes = comptesDisponibles(), dossier = null) {
   const multi = multiIa(comptes);
   const prio = chargerPriorites();
   const resume = multi ? resumePriorites(prio) : '';
   const blocs = {
     '{COMPTES_IA}': multi ? REGLES_IA : '',
     '{PRIORITES}': resume ? `Priorités réglées par l'utilisateur (appliquées par le serveur quand ia = "auto" et compte vide) :\n${resume}` : '',
-    '{CONSIGNE_IA}': multi && prio.consigneDg ? `Consigne de l'utilisateur sur le choix des IA : ${prio.consigneDg}` : '',
+    '{CONSIGNES}': blocConsignes(consignesDossier(dossier), prio),
   };
   let texte = directive('dg');
   for (const [m, v] of Object.entries(blocs)) texte = texte.replace(new RegExp(m.replace(/[{}]/g, '\\$&') + '\\r?\\n?', 'g'), v ? v + '\n' : '');
@@ -354,7 +374,7 @@ function demandeDg(dossier, schema, comptes) {
     profil: 'lecture',
     cwd: racines()[0] || RACINE,
     dossiersSup: racines().slice(1),
-    consignes: directiveDg(comptes) + optionsSkills(sk).append,
+    consignes: directiveDg(comptes, dossier) + optionsSkills(sk).append,
     schema,
     outilsQg: { definitions: [definitionCreerSkill(dossier)] },
     skills: { toujours: sk.toujours, dispo: skillsDemande(sk.dispo) },
@@ -367,7 +387,7 @@ function registre() {
     .map((e) => {
       const dossiers = (e.dossiers || [e.projet]).join(' + ');
       const f = fiche(e);
-      return `- id \`${e.id}\` — ${e.nom} (${e.type}) — ${dossiers}${e.note ? `\n  Note : ${e.note}` : ''}${f ? `\n  Fiche : ${f.replace(/\n/g, '\n  ')}` : ''}`;
+      return `- id \`${e.id}\` — ${e.nom} (${e.libelleType ? `${e.libelleType}, ${e.type}` : e.type}) — ${dossiers}${e.note ? `\n  Note : ${e.note}` : ''}${f ? `\n  Fiche : ${f.replace(/\n/g, '\n  ')}` : ''}`;
     })
     .join('\n');
 }
@@ -389,7 +409,7 @@ function optionsDg(dossier, outputFormat, comptes = comptesDisponibles()) {
     // outil du DG : créer un skill dans la bibliothèque (quand l'utilisateur le demande)
     mcpServers: { qg: serveurSkillsDg(dossier) },
     strictMcpConfig: true,
-    systemPrompt: { type: 'preset', preset: 'claude_code', append: directiveDg(comptes) + sk.append },
+    systemPrompt: { type: 'preset', preset: 'claude_code', append: directiveDg(comptes, dossier) + sk.append },
     outputFormat: { type: 'json_schema', schema: outputFormat },
     maxTurns: REGLAGES.dg.maxTurns,
     resume: repriseDg(dossier) || undefined,

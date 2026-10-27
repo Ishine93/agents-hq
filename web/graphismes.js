@@ -3,6 +3,7 @@
 // Le moteur lui demande à chaque rafraîchissement l'intervalle voulu et lui rend compte de chaque image.
 import { t } from './i18n.js';
 import { h } from './modale.js';
+import { ligneI, exempleAide } from './aide.js';
 import {
   NIVEAUX, PROFILS, choisirAuto, lireBatterie, enVeille, intervalleVoulu, Evaluateur, niveauEnDessous, plusLeger, niveauValide, classerGpu,
 } from './cadence.js';
@@ -64,7 +65,7 @@ const phraseNiveau = (n) => ({
   leger: t('15 images/s, résolution réduite, animations calmes. Pour les petites machines.'),
   equilibre: t('30 images/s, résolution plafonnée, animations allégées.'),
   haute: t('60 images/s, pleine résolution.'),
-  maximum: t('Rythme de l’écran, toujours dessiné (comme avant la 1.0.6).'),
+  maximum: t('Rythme de l’écran, toujours dessiné, même quand l’onglet est caché.'),
 })[n] || '';
 
 const texteRaison = (r) => ({
@@ -245,7 +246,7 @@ class Graphismes {
     return intervalleVoulu(p, veille);
   }
 
-  // Dessiner quand l'onglet est masqué ? (Maximum seulement, comme avant)
+  // Dessiner quand l'onglet est masqué ? (Maximum seulement)
   dessinerMasque() {
     return this.profil.masque;
   }
@@ -313,13 +314,14 @@ export function blocGraphismes() {
   };
   g.ecouteurs.add(maj);
   maj();
+  const ligne = ligneI('gfx-graphismes', t('Graphismes'), [
+    t('La finesse de l’immeuble à l’écran : nombre d’images par seconde, résolution, animations. Plus c’est léger, plus l’ordinateur reste calme et frais.'),
+    t('Propre à cet appareil (rien n’est envoyé au serveur). Sauf en Maximum : rien n’est dessiné quand l’onglet est caché, et 5 images/s quand la fenêtre n’est pas au premier plan ou que personne ne s’en sert ; la cadence remonte dès que la souris bouge ou que quelque chose bouge dans la scène.'),
+    exempleAide(t('un petit portable qui chauffe ou fait du bruit : Léger. Un PC de jeu branché sur secteur : Haute.')),
+  ], groupe, etat);
+  ligne.classList.add('gfx-ligne');
   return [
     h('h4', {}, t('Affichage')),
-    h('div', { class: 'param-ligne gfx-ligne' },
-      h('label', { class: 'param-lib' }, t('Graphismes')),
-      h('div', { class: 'param-val' },
-        groupe,
-        etat,
-        h('small', { class: 'meta gfx-etat' }, t('Propre à cet appareil (rien n’est envoyé au serveur). Sauf en Maximum : rien n’est dessiné quand l’onglet est caché, et 5 images/s quand la fenêtre n’est pas au premier plan ou que personne ne s’en sert ; la cadence remonte dès que la souris bouge ou que quelque chose bouge dans la scène.')))),
+    ligne,
   ];
 }

@@ -10,7 +10,8 @@ if [ ! -x "runtime/node/bin/node" ]; then
 fi
 "$(pwd)/runtime/node/bin/node" "$(pwd)/serveur/index.js" --demo "$@"
 code=$?
-if [ "$code" != "0" ]; then
+# Code 41 : bouton Fermer de la demo, pas d'attente d'une touche.
+if [ "$code" != "0" ] && [ "$code" != "41" ]; then
   printf '\nAppuie sur Entree pour fermer cette fenetre.'
   read -r _
 fi

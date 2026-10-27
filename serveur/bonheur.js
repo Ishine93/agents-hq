@@ -225,7 +225,7 @@ const THEMES = [
 const LANGUES_JOKEAPI = ['cs', 'de', 'en', 'es', 'fr', 'pt'];
 const LANGUES_FAITS = ['en', 'de'];
 
-// amb : compte et modèle de l'ambiance (routeur.choisirAmbiance) ; sur Claude, Haiku comme en 1.0.5.
+// amb : compte et modèle de l'ambiance (routeur.choisirAmbiance) ; sur Claude, Haiku (le modèle le moins cher).
 async function appelHaiku(amb, prompt, schema) {
   const cwd = path.join(RACINE, 'runtime');
   const s = await executerSession({

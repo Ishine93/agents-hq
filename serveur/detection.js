@@ -135,10 +135,13 @@ export function demarrerDetection() {
   setInterval(scanner, 60000).unref();
 }
 
-function ficheAuto(type, dir, port, autres = []) {
+function ficheAuto(type, dir, port, autres = [], libelle = null) {
   const claude = fs.existsSync(path.join(dir, 'CLAUDE.md')) ? '\nLire d\'abord : `CLAUDE.md` du projet (chargé automatiquement).' : fs.existsSync(path.join(dir, 'README.md')) ? '\nLire d\'abord : `README.md`.' : '';
   const aussi = autres.length ? `\nAutres dossiers de l'étage : ${autres.map((d) => `\`${d}\``).join(', ')}.` : '';
   const fin = `${aussi}\nFiche créée automatiquement : complète-la dans Réglages › Étages.\n`;
+  if (libelle && !['roblox', 'unreal', 'unity', 'comfyui'].includes(type)) return `${libelle} (\`${dir}\`).${claude}${fin}`;
+  // un type à toi sur un projet reconnu : il précède la fiche du type détecté
+  if (libelle) return `${libelle}.\n${ficheAuto(type, dir, port, autres)}`;
   if (type === 'roblox') {
     return `Jeu Roblox (Rojo). Code Luau dans \`src/\`, projet \`default.project.json\`${port ? `, port Rojo ${port}` : ''}.${claude}\nVérifications : \`rojo build -o build/verif.rbxl\`, \`selene src\`, \`stylua --check src\`.${fin}`;
   }
@@ -173,11 +176,13 @@ function validerDossiers(liste, sauf = null) {
 
 // Ajoute un étage (sur ton accord). Il se place juste sous la Direction.
 // `dir` : un dossier, ou une liste de dossiers (le premier est le principal). `type` : une clé de TYPES,
-// sinon le type détecté du dossier principal, sinon 'projet'.
-export function ajouterEtage(dir, { nom = null, type: typeVoulu = null } = {}) {
+// sinon le type détecté du dossier principal, sinon 'projet'. `libelleType` : un type écrit à la main
+// (« Mod Minecraft »), montré à la place du type et donné au DG ; le décor et les services suivent `type`.
+export function ajouterEtage(dir, { nom = null, type: typeVoulu = null, libelleType = null } = {}) {
   const dossiers = validerDossiers(Array.isArray(dir) ? dir : [dir]);
   dir = dossiers[0];
   const type = TYPES[typeVoulu] ? typeVoulu : typeDe(dir) || 'projet';
+  const libre = String(libelleType || '').replace(/\s+/g, ' ').trim().slice(0, 40) || null;
   const brut = lireEtages();
   const nomEtage = String(nom || path.basename(dir)).trim().slice(0, 40) || path.basename(dir);
   const base = slug(nomEtage);
@@ -200,9 +205,9 @@ export function ajouterEtage(dir, { nom = null, type: typeVoulu = null } = {}) {
       port = portEnregistre(dir);
     }
   }
-  fs.writeFileSync(path.join(RACINE, 'config', 'fiches', `${id}.md`), ficheAuto(type, dir, port, dossiers.slice(1)));
+  fs.writeFileSync(path.join(RACINE, 'config', 'fiches', `${id}.md`), ficheAuto(type, dir, port, dossiers.slice(1), libre));
   // même forme que les étages écrits à la main : `dossiers` seulement s'il y en a plusieurs
-  const e = { id, nom: nomEtage, type, ordre, projet: dir, ...(dossiers.length > 1 ? { dossiers } : {}), actif: true, fiche: `${id}.md`, mcp };
+  const e = { id, nom: nomEtage, type, ...(libre ? { libelleType: libre } : {}), ordre, projet: dir, ...(dossiers.length > 1 ? { dossiers } : {}), actif: true, fiche: `${id}.md`, mcp };
   brut.etages.splice(direction ? brut.etages.indexOf(direction) + 1 : 0, 0, e);
   ecrireJson(FICHIER_ETAGES, brut);
   ajouterServicesEtage(e);

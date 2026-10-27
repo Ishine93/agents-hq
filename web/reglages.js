@@ -1,5 +1,6 @@
 // Connecteurs MCP par compte et MCP des projets par étage (section « Connecteurs » des Réglages).
 import { t, locale } from './i18n.js';
+import { titreI, choixAide, exempleAide } from './aide.js';
 
 const MODES = [
   { id: 'off', libelle: 'Coupé', titre: 'Jamais proposé aux agents' },
@@ -37,8 +38,12 @@ export function rendreMcp(box, ui) {
   const sections = [];
   const mcp = S.mcp || { comptes: {}, etages: {} };
   const comptes = S.comptes.length ? S.comptes : Object.keys(mcp.comptes || {}).map((id) => ({ id, nom: id, connecte: true }));
-  sections.push(h('p', { class: 'meta' }, t('Les connecteurs de ton compte claude.ai (Notion, Drive, Gmail…) et les serveurs MCP de tes projets. Par défaut, un connecteur n’est jamais donné aux agents : choisis « Sur demande » (chaque appel lève la main) ou « Auto ».')));
-  const blocComptes = h('section', { class: 'reglage' }, h('h4', {}, t('Connecteurs MCP par compte')));
+  const modes = MODES.map((m) => choixAide(t(m.libelle), t(m.titre)));
+  const blocComptes = h('section', { class: 'reglage' }, ...titreI('mcp-comptes', t('Connecteurs MCP par compte'), [
+    t('Les connecteurs de ton compte claude.ai (Notion, Drive, Gmail…) et les serveurs MCP de tes projets. Par défaut, un connecteur n’est jamais donné aux agents : choisis « Sur demande » (chaque appel lève la main) ou « Auto ».'),
+    ...modes,
+    exempleAide(t('tu veux qu’un agent lise une page Notion : mets Notion sur « Sur demande » ; à chaque lecture, il lève la main et tu réponds oui ou non.')),
+  ]));
   for (const c of comptes) {
     const info = (mcp.comptes || {})[c.id] || { serveurs: [], decouverte: null };
     const enCours = ui.decouvertes.has(c.id);
@@ -64,7 +69,10 @@ export function rendreMcp(box, ui) {
   sections.push(blocComptes);
 
   const parEtage = Object.entries(mcp.etages || {});
-  const blocEtages = h('section', { class: 'reglage' }, h('h4', {}, t('MCP des projets (par étage)')));
+  const blocEtages = h('section', { class: 'reglage' }, ...titreI('mcp-etages', t('MCP des projets (par étage)'), [
+    t('Les serveurs MCP qu’un projet déclare dans son fichier .mcp.json, avec les mêmes trois choix que les connecteurs des comptes.'),
+    ...modes,
+  ]));
   if (!parEtage.length) blocEtages.append(h('div', { class: 'vide' }, t('Aucun projet ne déclare de serveur MCP (fichier .mcp.json).')));
   for (const [id, liste] of parEtage.sort((a, b) => ((S.etage(b[0]) || {}).ordre || 0) - ((S.etage(a[0]) || {}).ordre || 0))) {
     const e = S.etage(id);

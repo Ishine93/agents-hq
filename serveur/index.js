@@ -6,7 +6,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { RACINE, REGLAGES, utiliserImmeubleDemo } from './config.js';
 import * as plateforme from './plateforme.js';
-import { etat, abonner, instantane, chargerHistorique, appliquerEvenement, DOSSIERS_DIR, sauver, utiliserDossiers, emettre, modelesPublics, mcpPublic, alerte, comptesPublics, modificationsDe } from './bus.js';
+import { etat, abonner, instantane, chargerHistorique, appliquerEvenement, DOSSIERS_DIR, sauver, utiliserDossiers, emettre, modelesPublics, mcpPublic, alerte, comptesPublics, modificationsDe, archiverDossier, ressortirDossier, dossiersArchives } from './bus.js';
 import { decouvrir, decouverteEnCache } from './decouverte.js';
 import { changerMode } from './mcp.js';
 import { resoudreDecision } from './decisions.js';
@@ -25,10 +25,10 @@ import * as dg from './dg.js';
 import * as taches from './taches.js';
 import { creerSimulation } from './simulation.js';
 import { lancerControles } from './controles.js';
-import { NIVEAUX } from './travail.js';
+import { COUTS } from './travail.js';
 import { routesReglages, ajouterEtages } from './api-reglages.js';
 import { routeMcp, definirAdresseMcp } from './mcp-http.js';
-import { modeDemo, pausesComptes } from './routeur.js';
+import { modeDemo, pausesComptes, choisirDg } from './routeur.js';
 import { routesNavigateur, etatApp, ouvrirApp } from './navigateur.js';
 import { majIconeRaccourci } from './raccourci.js';
 import { discuter, definirPersonnalite, oublier, bavarder, demarrerBavardages, utiliserDemo } from './personnages.js';
@@ -36,7 +36,8 @@ import { listeSkills, skillsClaudeCode, lireSkill, existe as existeSkill, idsSki
 import { surChangement as surConso, consoPublique, demarrerSuiviLimites, surLimitesLues } from './conso.js';
 import { t as tr } from './i18n.js';
 import { questionTache, questionDg } from './questions.js';
-import { verifierMaj, lancerMaj, majAuLancement, CODE_MISE_A_JOUR } from './maj.js';
+import { verifierMaj, lancerMaj, majAuLancement, CODE_MISE_A_JOUR, installationDev } from './maj.js';
+import { preparerNotes, notesPubliques, marquerVues } from './notes.js';
 
 const decouverteEnCours = new Set();
 const alerteQuestion = (dossierId, e) => alerte('erreur', tr('Question sans réponse : {raison}', { raison: e.message }), dossierId);
@@ -49,6 +50,8 @@ const option = (nom, defaut = null) => {
 };
 const DEMO = args.includes('--demo');
 const REPLAY = option('replay');
+// notes de version à montrer une fois (après une mise à jour), avant que le QG n'écrive quoi que ce soit
+preparerNotes({ silencieux: DEMO || !!REPLAY || installationDev() });
 modeDemo(DEMO || !!REPLAY); // la simulation n'a pas de comptes : tout reste sur le compte de la demande
 const VITESSE = Number(option('vitesse', 1)) || 1;
 // la démo prend le port suivant : elle tourne à côté du QG sans le déranger
@@ -108,7 +111,13 @@ const HOTES_OK = new Set([`127.0.0.1:${PORT}`, `localhost:${PORT}`]);
 function cookies(req) {
   return Object.fromEntries((req.headers.cookie || '').split(';').map((c) => c.trim().split('=')).filter((p) => p.length === 2));
 }
-const autorise = (req) => cookies(req).qg_jeton === JETON || req.headers['x-qg-jeton'] === JETON;
+// Un cookie par port : les cookies ne séparent pas les ports, et deux QG ouverts dans le même navigateur
+// (ton QG et une copie de dev) s'écraseraient leur jeton. L'ancien nom reste accepté.
+const COOKIE = `qg_jeton_${PORT}`;
+const autorise = (req) => {
+  const c = cookies(req);
+  return c[COOKIE] === JETON || c.qg_jeton === JETON || req.headers['x-qg-jeton'] === JETON;
+};
 
 function json(res, statut, corps) {
   res.writeHead(statut, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
@@ -177,6 +186,8 @@ function flux(req, res) {
 async function api(req, res, chemin) {
   if (req.method === 'GET' && chemin === '/api/flux') return flux(req, res);
   if (req.method === 'GET' && chemin === '/api/etat') return json(res, 200, instantane());
+  if (req.method === 'GET' && chemin === '/api/dossiers/archives') return json(res, 200, { dossiers: dossiersArchives() });
+  if (req.method === 'GET' && chemin === '/api/notes') return json(res, 200, notesPubliques());
   if (req.method === 'GET' && chemin === '/api/mcp') return json(res, 200, mcpPublic());
   if (req.method === 'GET' && chemin === '/api/dictee') return json(res, 200, etatDictee);
   if (req.method === 'GET' && chemin === '/api/services') return json(res, 200, servicesPublics());
@@ -220,6 +231,18 @@ async function api(req, res, chemin) {
     if (!audio.length) return json(res, 400, { erreur: tr('audio vide') });
     const r = await transcrire(audio, AUDIO[type] || '.webm');
     return json(res, 200, r);
+  }
+  // Bouton « Fermer » (1.0.7) : le même arrêt propre que la fermeture de la fenêtre noire (état enregistré,
+  // dossiers en cours repris au prochain lancement), avec le code 41 : la fenêtre de lancement se ferme aussi.
+  // Avant la garde du replay : un replay se ferme aussi.
+  if (chemin === '/api/quitter') {
+    setTimeout(() => arreter(CODE_FERMER), 100); // la réponse part d'abord
+    return json(res, 200, { ok: true });
+  }
+  // notes de version montrées après une mise à jour : vues, elles ne s'ouvrent plus toutes seules
+  if (chemin === '/api/notes/vu') {
+    marquerVues();
+    return json(res, 200, { ok: true });
   }
   if (REPLAY) return json(res, 403, { erreur: tr('mode replay : lecture seule') });
 
@@ -265,22 +288,17 @@ async function api(req, res, chemin) {
     if (REGLAGES.compteAgents && !compteAgents && agents && agents.id !== compte?.id && !DEMO) {
       return json(res, 409, { erreur: tr("{compte} (compte des agents) n'est pas connecté : connecte-le ou change le réglage dans Réglages › Comptes IA", { compte: agents.nom }) });
     }
-    let reglageDg = null;
-    if (corps.dg?.modele || corps.dg?.effort) {
-      const modeles = modelesPublics()[compte?.id] || [];
-      const m = modeles.find((x) => x.id === corps.dg.modele);
-      if (corps.dg.modele && !m) return json(res, 400, { erreur: tr('modèle inconnu pour ce compte : {modele}', { modele: corps.dg.modele }) });
-      if (corps.dg.effort && m && !m.efforts.includes(corps.dg.effort)) return json(res, 400, { erreur: tr('effort non supporté : {effort}', { effort: corps.dg.effort }) });
-      reglageDg = { modele: corps.dg.modele || null, effort: corps.dg.effort || null };
-    }
+    // compte du DG : celui de Réglages › Priorités › DG s'il est connecté, sinon celui de la demande (son modèle et
+    // son effort viennent du même réglage : ordonnanceur.creerDossier)
+    const cDg = DEMO ? null : choisirDg(compte?.id);
     // skills choisis à l'envoi (🧩) : seulement des skills de la bibliothèque
     const connus = new Set(idsSkills());
     const skills = (Array.isArray(corps.skills) ? corps.skills : []).filter((s) => s && connus.has(s.id) && ['dg', 'tous', 'demande'].includes(s.pour)).map((s) => ({ id: s.id, pour: s.pour }));
     const skillsExclus = (Array.isArray(corps.skillsExclus) ? corps.skillsExclus : []).filter((id) => connus.has(id));
     // niveau de coût choisi à l'envoi (pastille de la barre d'envoi) ; absent : celui des réglages
-    if (corps.travail != null && !NIVEAUX.includes(corps.travail?.cout)) return json(res, 400, { erreur: tr('niveau de coût inconnu : {cout}', { cout: String(corps.travail?.cout ?? corps.travail) }) });
+    if (corps.travail != null && !COUTS.includes(corps.travail?.cout)) return json(res, 400, { erreur: tr('niveau de coût inconnu : {cout}', { cout: String(corps.travail?.cout ?? corps.travail) }) });
     const travail = corps.travail != null ? { cout: corps.travail.cout } : null;
-    const d = ordo.creerDossier({ texte, etageAffiche: String(corps.etageAffiche || 'hall'), compte: compte?.id || null, compteAgents, dg: reglageDg, pieces: corps.pieces || [], skills, skillsExclus, travail });
+    const d = ordo.creerDossier({ texte, etageAffiche: String(corps.etageAffiche || 'hall'), compte: compte?.id || null, compteAgents, dg: cDg && cDg.id !== compte?.id ? { compte: cDg.id } : null, pieces: corps.pieces || [], skills, skillsExclus, travail });
     return json(res, 200, { id: d.id });
   }
   if (chemin === '/api/bonheur/recolter') {
@@ -288,7 +306,7 @@ async function api(req, res, chemin) {
   }
   if (chemin === '/api/etages/ajouter-lot') return json(res, 200, ajouterEtages(corps.projets));
   if ((m = chemin.match(/^\/api\/etages\/(ajouter|ignorer)$/))) {
-    // { dossier, nom } (un projet) ou { dossiers: [...], nom, type } (étage libre, le premier dossier est le principal)
+    // { dossier, nom } (un projet) ou { dossiers: [...], nom, type, libelleType } (étage libre, le premier dossier est le principal)
     const liste = m[1] === 'ajouter' && Array.isArray(corps.dossiers) ? corps.dossiers.map((d) => String(d || '').trim()).filter(Boolean) : null;
     const dossier = liste ? liste[0] : String(corps.dossier || '');
     if (!dossier) return json(res, 400, { erreur: tr('dossier requis') });
@@ -297,7 +315,7 @@ async function api(req, res, chemin) {
         ignorerProjet(dossier);
         return json(res, 200, { ok: true });
       }
-      return json(res, 200, ajouterEtage(liste || dossier, { nom: corps.nom || null, type: corps.type || null }));
+      return json(res, 200, ajouterEtage(liste || dossier, { nom: corps.nom || null, type: corps.type || null, libelleType: corps.libelleType || null }));
     } catch (e) {
       return json(res, 409, { erreur: e.message });
     }
@@ -350,14 +368,19 @@ async function api(req, res, chemin) {
     const r = await bavarder({ force: true });
     return r ? json(res, 200, r) : json(res, 409, { erreur: tr('Personne à faire bavarder : il faut au moins deux collègues au même étage.') });
   }
-  if ((m = chemin.match(/^\/api\/dossiers\/(D\d+)\/(repondre|completer|annuler|supprimer)$/))) {
+  if ((m = chemin.match(/^\/api\/dossiers\/(D\d+)\/(repondre|completer|annuler|supprimer|archiver|ressortir)$/))) {
     const d = etat.dossiers.get(m[1]);
     if (!d) return json(res, 404, { erreur: tr('dossier inconnu') });
     if (m[2] === 'annuler') ordo.annulerDossier(d);
     else if (m[2] === 'supprimer') ordo.supprimerDossier(d);
-    else {
+    else if (m[2] === 'archiver') {
+      if (!archiverDossier(d)) return json(res, 409, { erreur: tr('Seul un dossier terminé, annulé ou en échec peut être archivé.') });
+    } else if (m[2] === 'ressortir') {
+      if (!ressortirDossier(d)) return json(res, 409, { erreur: tr('Ce dossier n’est pas archivé.') });
+    } else {
       const texte = String(corps.texte || '').trim();
       if (!texte) return json(res, 400, { erreur: tr('message vide') });
+      if (d.archive) ressortirDossier(d); // compléter ou répondre à un dossier archivé le remet dans la liste
       if (m[2] === 'repondre') ordo.repondre(d, texte, corps.pieces || []);
       else ordo.completer(d, texte, corps.pieces || []);
     }
@@ -452,7 +475,7 @@ const serveur = http.createServer(async (req, res) => {
     }
     if (chemin === '/' && url.searchParams.get('jeton')) {
       if (url.searchParams.get('jeton') !== JETON) return json(res, 401, { erreur: tr('jeton invalide') });
-      res.writeHead(302, { 'Set-Cookie': `qg_jeton=${JETON}; HttpOnly; SameSite=Strict; Path=/`, Location: '/' });
+      res.writeHead(302, { 'Set-Cookie': `${COOKIE}=${JETON}; HttpOnly; SameSite=Strict; Path=/`, Location: '/' });
       return res.end();
     }
     if (req.method !== 'GET') return json(res, 405, { erreur: tr('méthode non permise') });
@@ -461,6 +484,13 @@ const serveur = http.createServer(async (req, res) => {
     console.error(e);
     if (!res.headersSent) json(res, 500, { erreur: String(e?.message || e) });
   }
+});
+
+// Port déjà pris, le plus souvent par un autre QG ouvert : un message clair au lieu d'une pile d'erreur.
+serveur.on('error', (e) => {
+  if (e.code !== 'EADDRINUSE') throw e;
+  console.error(tr('Le port {port} est déjà pris, sans doute par un autre QG ouvert. Ferme-le, ou lance celui-ci sur un autre port : {script} --port {autre} (ou change « port » dans config/reglages.json).', { port: PORT, script: plateforme.script('lancer'), autre: PORT + 10 }));
+  process.exit(1);
 });
 
 serveur.listen(PORT, HOTE, () => {
@@ -551,6 +581,7 @@ function portRepond(port) {
 }
 
 let arretEnCours = false;
+const CODE_FERMER = 41; // bouton « Fermer » : lancer.bat, lancer.command et les lanceurs de la démo se ferment sans attendre
 // (en gestionnaire de signal, le premier argument est le nom du signal : on quitte alors avec 0)
 function arreter(code) {
   if (arretEnCours) return;

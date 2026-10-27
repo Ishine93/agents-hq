@@ -185,7 +185,7 @@ export function presents() {
 
 // ---------------------------------------------------------------- appel au modèle (sans outils, sans connecteurs)
 // Compte du mini-jeu : priorités « ambiance », sinon le compte par défaut s'il est connecté, sinon le premier
-// compte connecté (n'importe quelle IA). Sur Claude, le modèle des réglages du mini-jeu, comme en 1.0.5.
+// compte connecté (n'importe quelle IA). Sur Claude, le modèle choisi dans les réglages du mini-jeu.
 async function appeler(prompt, schema, modele, role) {
   const amb = choisirAmbiance({ modeleClaude: modele, defautDabord: true });
   if (!amb) throw new Error(t('aucun compte IA connecté'));

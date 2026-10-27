@@ -1,16 +1,17 @@
 // Fenêtre « Réglages » : tout se règle ici, sans toucher aux fichiers.
-// Général (langues, prénom, mode de travail, DG), comptes Claude, dossiers et étages, connecteurs MCP,
+// Général (langues, prénom, mode de travail, coût, parallélisme), comptes IA, priorités (DG, consignes, comptes par tâche), dossiers et étages, connecteurs MCP,
 // équipe (prénoms, skins), happiness manager (édition, import, export), dictée et notifications.
 import { h, ouvrirModale, api } from './modale.js';
 import { t, LANGUES_INTERFACE, LANGUES_IA, locale } from './i18n.js';
 import { rendreMcp } from './reglages.js';
-import { apparence, spriteAvatar, PALETTE_PEAUX, PALETTE_CHEVEUX, PALETTE_PANTALONS } from './sprites.js';
-import { TERMINAUX } from './etat.js';
+import { apparence, spriteAvatar, modele, PALETTE_PEAUX, PALETTE_CHEVEUX, PALETTE_PANTALONS } from './sprites.js';
+import { TERMINAUX, libelleEtat, libelleDossier } from './etat.js';
 import { md } from './markdown.js';
 import { sectionSkills } from './skills.js';
 import { sectionPriorites, badgeQualification } from './priorites.js';
 import { script as scriptPlateforme, infos as infosPlateforme, dicteeSysteme } from './plateforme.js';
-import { NIVEAUX, NIVEAU_DEFAUT, nomNiveau, phraseNiveau, travailDe, sansCapacite, CAPACITES_COUT, boutonsCout, texteValeur } from './cout.js';
+import { NIVEAUX, COUTS, PERSONNALISE, NIVEAU_DEFAUT, nomNiveau, nomTravail, phraseNiveau, travailDe, sansCapacite, CAPACITES_COUT, boutonsCout, texteValeur } from './cout.js';
+import { bulle, ligneI, titreI, choixAide, valeurAide, exempleAide } from './aide.js';
 import { blocGraphismes } from './graphismes.js';
 
 const SECTIONS = [
@@ -18,6 +19,7 @@ const SECTIONS = [
   ['comptes', 'Comptes IA'],
   ['priorites', 'Priorités'],
   ['dossiers', 'Dossiers et étages'],
+  ['archives', 'Dossiers archivés'],
   ['mcp', 'Connecteurs MCP'],
   ['equipe', 'Équipe et skins'],
   ['skills', 'Skills'],
@@ -53,6 +55,7 @@ export class Parametres {
     this.modifsBonheur = false;
     this.skinOuvert = null;
     this.enregistrerSkins = null;
+    this.listeArchives = null; // Réglages › Dossiers archivés : lue à chaque visite de la section
   }
 
   get ouvert() {
@@ -62,6 +65,7 @@ export class Parametres {
   // focus : personnage à ouvrir dans la section Équipe ('@dg', '@joy' ou un prénom).
   ouvrir(section = null, focus = null) {
     if (section) this.section = section;
+    if (this.section === 'archives') this.listeArchives = null;
     if (focus) {
       this.skinOuvert = focus;
       this.defiler = true;
@@ -86,6 +90,7 @@ export class Parametres {
     if (this.section === 'bonheur' && this.modifsBonheur && !window.confirm(t('Des modifications des blagues ne sont pas enregistrées. Les abandonner ?'))) return;
     this.modifsBonheur = false;
     this.section = section;
+    if (section === 'archives') this.listeArchives = null;
     this.rendre();
   }
 
@@ -107,7 +112,7 @@ export class Parametres {
     this.m.titre(t('Réglages'));
     this.nav.replaceChildren(...SECTIONS.map(([id, lib]) => h('button', { type: 'button', class: id === this.section ? 'actif' : '', on: { click: () => this.aller(id) } }, t(lib))));
     const haut = this.contenu.scrollTop;
-    const fn = { general: this.general, comptes: this.comptes, priorites: this.priorites, dossiers: this.dossiers, mcp: this.mcp, equipe: this.equipe, skills: this.skills, bonheur: this.bonheur, dictee: this.dictee, apropos: this.apropos }[this.section];
+    const fn = { general: this.general, comptes: this.comptes, priorites: this.priorites, dossiers: this.dossiers, archives: this.dossiersArchives, mcp: this.mcp, equipe: this.equipe, skills: this.skills, bonheur: this.bonheur, dictee: this.dictee, apropos: this.apropos }[this.section];
     this.contenu.replaceChildren(h('h3', {}, t(SECTIONS.find((s) => s[0] === this.section)[1])), ...[].concat(fn.call(this)).filter(Boolean));
     this.contenu.scrollTop = haut;
     if (this.defiler) {
@@ -146,11 +151,6 @@ export class Parametres {
     const mode = (id, titre, texte) => h('label', { class: 'param-choix' + (R.modeTravail === id ? ' choisi' : '') },
       h('input', { type: 'radio', name: 'mode-travail', value: id, checked: R.modeTravail === id, on: { change: () => this.reglage({ modeTravail: id }).then(() => this.rendre()) } }),
       h('span', {}, h('b', {}, titre), h('br'), h('small', {}, texte)));
-    const modeles = S.modeles[S.compteDefaut] || Object.values(S.modeles)[0] || [];
-    const dg = R.dg || {};
-    const mod = modeles.find((x) => x.id === dg.modele) || modeles[0];
-    const selMod = h('select', { class: 'champ', on: { change: () => this.reglage({ dg: { modele: selMod.value } }).then(() => this.rendre()) } }, modeles.map((x) => h('option', { value: x.id, selected: x.id === (mod && mod.id) ? true : null }, x.nom || x.id)));
-    const selEff = h('select', { class: 'champ', on: { change: () => this.reglage({ dg: { effort: selEff.value } }) } }, ((mod && mod.efforts) || []).map((x) => h('option', { value: x, selected: x === dg.effort ? true : null }, x)));
     const plafond = (cle) => {
       const c = champ({ type: 'number', min: '0', max: '64', value: String(R[cle] ?? 0), style: { width: '80px' } });
       c.addEventListener('change', () => this.reglage({ [cle]: Math.max(0, Math.min(64, parseInt(c.value, 10) || 0)) }, t('Enregistré.')));
@@ -158,47 +158,68 @@ export class Parametres {
     };
     const rojo = h('input', { type: 'checkbox', checked: !!R.rojoPortsAuto, on: { change: (e) => this.reglage({ rojoPortsAuto: e.target.checked }) } });
     return [
-      ligne(t('Langue de l’interface'), selLangue),
-      ligne(t('Langue des IA'), selIA, h('small', { class: 'meta' }, t('Le DG et les agents réfléchissent, écrivent et te répondent dans cette langue.'))),
-      ligne(t('Traduire les réflexions'),
+      ligneI('gen-langue', t('Langue de l’interface'), [
+        t('La langue des menus, des boutons et des messages du QG.'),
+        exempleAide(t('tu choisis English : tout l’écran passe en anglais ; les agents, eux, écrivent dans la langue des IA, réglée juste en dessous.')),
+      ], selLangue),
+      ligneI('gen-langue-ia', t('Langue des IA'), [
+        t('Le DG et les agents réfléchissent, écrivent et te répondent dans cette langue.'),
+        exempleAide(t('écran en français et IA en anglais : les menus restent en français, mais les réponses, les rapports et les commentaires du code arrivent en anglais.')),
+      ], selIA),
+      ligneI('gen-traduire', t('Traduire les réflexions'), [
+        t('Chaque bloc terminé est traduit par le compte de la demande, avec un modèle économique (Haiku sur Claude) ; le texte d’origine reste visible d’un clic. Coût estimé : 1 000 à 3 000 tokens par bloc, pris sur ce compte.'),
+        exempleAide(t('tes IA parlent français et un agent réfléchit en anglais : une fois son bloc de réflexion terminé, il s’affiche en français.')),
+      ],
         h('label', { class: 'param-case' },
           h('input', { type: 'checkbox', checked: !!R.traduireReflexion, on: { change: (e) => {
             this.reglage({ traduireReflexion: e.target.checked }, e.target.checked ? t('Les réflexions terminées seront traduites dans la langue des IA.') : t('Les réflexions restent dans leur langue d’origine.'));
           } } }),
-          ' ', t('Traduire dans la langue des IA les blocs de réflexion écrits dans une autre langue (souvent l’anglais).')),
-        h('small', { class: 'meta' }, t('Chaque bloc terminé est traduit par Haiku ; le texte d’origine reste visible d’un clic. Coût estimé : 1 000 à 3 000 tokens Haiku par bloc, pris sur ton forfait.'))),
-      ligne(t('Ton prénom'), prenom, h('small', { class: 'meta' }, t('Facultatif : le DG s’adresse à toi par ton prénom.'))),
-      h('h4', {}, t('Mode de travail des agents')),
-      mode('auto', t('Autonome (recommandé)'), t('Les agents lisent partout et écrivent librement dans tes dossiers racines. Écrire ailleurs, publier ou envoyer quelque chose demande ton accord. Les commandes sont jugées par le mode auto de Claude Code.')),
-      mode('prudent', t('Prudent'), t('Toute action qui n’est pas une simple lecture ou une écriture dans tes dossiers lève la main : tu valides chaque commande. Plus sûr, plus lent.')),
-      h('h4', {}, t('DG par défaut')),
-      modeles.length ? ligne(t('Modèle et effort'), selMod, selEff, h('small', { class: 'meta' }, t('Modifiable aussi demande par demande, en bas de l’écran.'))) : h('div', { class: 'vide' }, t('Connecte un compte pour choisir le modèle du DG.')),
-      h('h4', {}, t('Coût')),
+          ' ', t('Traduire dans la langue des IA les blocs de réflexion écrits dans une autre langue (souvent l’anglais).'))),
+      ligneI('gen-prenom', t('Ton prénom'), [t('Facultatif : le DG s’adresse à toi par ton prénom.')], prenom),
+      ...titreI('gen-mode', t('Mode de travail des agents'), [
+        t('Ce que les agents ont le droit de faire seuls, sans te demander.'),
+        exempleAide(t('un projet précieux, ou tu découvres le QG : Prudent, tu vois chaque commande avant qu’elle parte. Tu veux que ça avance pendant que tu fais autre chose : Autonome.')),
+      ]),
+      mode('auto', t('Autonome (recommandé)'), t('Les agents lisent partout et écrivent librement dans tes dossiers racines. Écrire ailleurs, publier ou envoyer quelque chose demande ton accord. Les commandes sont jugées par le mode auto de Claude Code pour Claude, par le bac à sable pour Codex, par le QG pour les autres agents.')),
+      mode('prudent', t('Prudent'), t('Toute action qui n’est pas une simple lecture ou une écriture dans tes dossiers lève la main : tu valides chaque commande. Plus sûr, plus lent. Seul Claude sait travailler ainsi : Codex et les autres agents ne prennent pas les tâches qui écrivent.')),
       ...this.blocCout(),
-      h('h4', {}, t('Parallélisme')),
-      ligne(t('Tâches en même temps (total)'), plafond('plafondGlobal'), h('small', { class: 'meta' }, t('0 = sans limite : seules les dépendances entre tâches comptent.'))),
-      ligne(t('Tâches en même temps (par étage)'), plafond('plafondEtage')),
+      ...titreI('gen-parallele', t('Parallélisme'), [
+        t('Combien de tâches avancent en même temps. Plus il y en a, plus ça va vite, mais l’usage de tes comptes monte plus vite aussi.'),
+      ]),
+      ligneI('gen-plafond-global', t('Tâches en même temps (total)'), [
+        t('Le nombre maximum de tâches qui tournent en même temps, tous étages réunis.'),
+        valeurAide('0', t('sans limite : seules les dépendances entre tâches comptent.')),
+        valeurAide('3', t('jamais plus de 3 tâches à la fois.')),
+      ], plafond('plafondGlobal')),
+      ligneI('gen-plafond-etage', t('Tâches en même temps (par étage)'), [
+        t('Le même maximum, mais pour chaque étage (chaque projet) séparément.'),
+        valeurAide('0', t('sans limite : seules les dépendances entre tâches comptent.')),
+        exempleAide(t('total 4 et par étage 2 : deux projets avancent chacun avec deux tâches à la fois.')),
+      ], plafond('plafondEtage')),
       h('h4', {}, t('Divers')),
-      ligne(t('Ports Rojo automatiques'), h('label', { class: 'param-case' }, rojo, ' ', t('Donner un port Rojo unique à chaque nouveau jeu Roblox détecté (écrit dans son default.project.json).'))),
+      ligneI('gen-rojo', t('Ports Rojo automatiques'), [
+        t('Pour les jeux Roblox seulement. Rojo relie les fichiers d’un jeu à Roblox Studio par un numéro de port ; deux jeux ouverts sur le même port se mélangent.'),
+        exempleAide(t('deux jeux Roblox ouverts en même temps : chacun a son port, et chaque Roblox Studio reçoit le bon jeu.')),
+      ], h('label', { class: 'param-case' }, rojo, ' ', t('Donner un port Rojo unique à chaque nouveau jeu Roblox détecté (écrit dans son default.project.json).'))),
       h('h4', {}, t('Saisie')),
-      ligne(t('Entrée pour envoyer'),
+      ligneI('gen-entree', t('Entrée pour envoyer'), [t('Décoché : Ctrl+Entrée envoie, Entrée va à la ligne. Le message principal au DG part toujours avec Entrée.')],
         h('label', { class: 'param-case' },
           h('input', { type: 'checkbox', checked: !!R.entreeEnvoie, on: { change: (e) => this.reglage({ entreeEnvoie: e.target.checked }, e.target.checked ? t('Entrée envoie (Maj+Entrée : retour à la ligne).') : t('Ctrl+Entrée envoie.')) } }),
-          ' ', t('Envoyer avec Entrée dans les précisions, réponses, questions, consignes et discussions (Maj+Entrée pour aller à la ligne).')),
-        h('small', { class: 'meta' }, t('Décoché : Ctrl+Entrée envoie, Entrée va à la ligne. Le message principal au DG part toujours avec Entrée.'))),
+          ' ', t('Envoyer avec Entrée dans les précisions, réponses, questions, consignes et discussions (Maj+Entrée pour aller à la ligne).'))),
       ...blocGraphismes(),
       h('h4', {}, t('Navigateur')),
       R.navigateurApp
-        ? ligne(t('Fenêtre application'),
+        ? ligneI('gen-fenetre-app', t('Fenêtre application'), [t('Décoché : le QG s’ouvre dans ton navigateur (Chrome, Edge, Firefox…) ; les vidéos et directs se jouent dans le QG, les autres sites s’ouvrent à côté, dans ce navigateur, où tu es déjà connecté.')],
           h('label', { class: 'param-case' },
-            h('input', { type: 'checkbox', checked: R.ouvrirEnApp !== false, on: { change: (e) => this.reglage({ ouvrirEnApp: e.target.checked }, e.target.checked ? t('Le QG s’ouvrira dans sa fenêtre application.') : t('Le QG s’ouvrira dans ton navigateur habituel.')) } }),
-            ' ', t('Ouvrir le QG dans sa propre fenêtre, avec le navigateur complet (tous les sites dedans ; tu t’y connectes une fois, tes connexions sont gardées)')),
-          h('small', { class: 'meta' }, t('Décoché : le QG s’ouvre dans ton navigateur habituel ; les vidéos et directs se jouent dans le QG, les autres sites s’ouvrent à côté avec tes connexions habituelles.')))
-        : ligne(t('Navigateur complet'),
-          h('button', { class: 'petit', type: 'button', on: { click: () => this.poster('/api/navigateur/app/installer', {}, t('Installation lancée (≈ 100 Mo).')) } }, t('Installer le navigateur complet')),
-          h('small', { class: 'meta' }, t('Pour afficher TOUS les sites dans le navigateur du QG (Google, Reddit, X…) : le QG s’ouvre alors dans sa propre fenêtre. ≈ 100 Mo, une fois.'))),
+            h('input', { type: 'checkbox', checked: R.ouvrirEnApp !== false, on: { change: (e) => this.reglage({ ouvrirEnApp: e.target.checked }, e.target.checked ? t('Le QG s’ouvrira dans sa fenêtre application.') : t('Le QG s’ouvrira dans ton navigateur.')) } }),
+            ' ', t('Ouvrir le QG dans sa propre fenêtre, avec le navigateur complet (tous les sites dedans ; tu t’y connectes une fois, tes connexions sont gardées)')))
+        : ligneI('gen-navigateur', t('Navigateur complet'), [t('Pour afficher TOUS les sites dans le navigateur du QG (Google, Reddit, X…) : le QG s’ouvre alors dans sa propre fenêtre. ≈ 100 Mo, une fois.')],
+          h('button', { class: 'petit', type: 'button', on: { click: () => this.poster('/api/navigateur/app/installer', {}, t('Installation lancée (≈ 100 Mo).')) } }, t('Installer le navigateur complet'))),
       h('h4', {}, t('Autorisations')),
-      ligne(t('Hors des projets'),
+      ligneI('gen-hors-projet', t('Hors des projets'), [
+        t('Décoché (conseillé) : chaque écriture hors projet te demande ton accord, avec « Toujours pour cet agent » pour ne plus être dérangé jusqu’à la fin de sa tâche. Le dossier temporaire de Windows est toujours libre (brouillons des agents).'),
+        exempleAide(t('un agent veut ranger un fichier dans tes Documents, hors du dossier du projet : coché, il le fait ; décoché, il te demande d’abord.')),
+      ],
         h('label', { class: 'param-case' },
           h('input', { type: 'checkbox', checked: !!R.ecritureHorsProjet, on: { change: (e) => {
             if (e.target.checked && !window.confirm(t('Les agents pourront créer et modifier des fichiers en dehors des dossiers de tes projets sans te demander. Activer ?'))) {
@@ -207,26 +228,26 @@ export class Parametres {
             }
             this.reglage({ ecritureHorsProjet: e.target.checked }, e.target.checked ? t('Écriture hors des projets autorisée.') : t('L’écriture hors des projets redemande ton accord.'));
           } } }),
-          ' ', t('Toujours autoriser la création et la modification de fichiers en dehors des dossiers des projets')),
-        h('small', { class: 'meta' }, t('Décoché (conseillé) : chaque écriture hors projet te demande ton accord, avec « Toujours pour cet agent » pour ne plus être dérangé jusqu’à la fin de sa tâche. Le dossier temporaire de Windows est toujours libre (brouillons des agents).'))),
+          ' ', t('Toujours autoriser la création et la modification de fichiers en dehors des dossiers des projets'))),
       h('h4', {}, t('Garde-fou Fable')),
-      ligne(t('Quota Fable'),
+      ligneI('gen-fable', t('Quota Fable'), [t('Fable a sa propre limite de la semaine. En dessous du seuil, le QG te demande (une fois par plan) s’il faut garder Fable ou passer sur Opus ; sans réponse en 10 min, Opus. Fable épuisé : Opus directement. Le reste du dossier continue pendant ce temps.')],
         h('label', { class: 'param-case' },
           h('input', { type: 'checkbox', checked: !(R.gardeFable && R.gardeFable.actif === false), on: { change: (e) => this.reglage({ gardeFable: { actif: e.target.checked } }, e.target.checked ? t('Garde-fou Fable activé.') : t('Garde-fou Fable coupé.')) } }),
           ' ', t('Avant de lancer des tâches sur Fable, vérifier ce qu’il reste de sa semaine'),
           ' ', h('select', { class: 'champ', on: { change: (e) => this.reglage({ gardeFable: { resteMin: Number(e.target.value) } }, t('Seuil enregistré.')) } },
-            [10, 20, 30, 50, 75].map((n) => h('option', { value: String(n), selected: ((R.gardeFable && R.gardeFable.resteMin) ?? 30) === n ? true : null }, t('demander sous {n} % restants', { n }))))),
-        h('small', { class: 'meta' }, t('Fable a sa propre limite de la semaine. En dessous du seuil, le QG te demande (une fois par plan) s’il faut garder Fable ou passer sur Opus ; sans réponse en 10 min, Opus. Fable épuisé : Opus directement. Le reste du dossier continue pendant ce temps.'))),
+            [10, 20, 30, 50, 75].map((n) => h('option', { value: String(n), selected: ((R.gardeFable && R.gardeFable.resteMin) ?? 30) === n ? true : null }, t('demander sous {n} % restants', { n })))))),
       h('h4', {}, t('Vérification')),
-      ligne(t('Validation par toi'),
+      ligneI('gen-validation', t('Validation par toi'), [
+        t('Décoché : un vérificateur IA relit ces tâches à ta place et le dossier continue sans t’attendre (y compris les tâches qui attendaient déjà ta validation). Le QG te demande toujours ton accord avant de publier, d’envoyer, de supprimer ou d’acheter.'),
+        exempleAide(t('une tâche « couleurs du menu » : coché, elle attend que tu regardes le résultat ; décoché, une IA la relit et le dossier continue.')),
+      ],
         h('label', { class: 'param-case' },
           h('input', { type: 'checkbox', checked: !!R.validationUtilisateur, on: { change: (e) => {
             this.reglage({ validationUtilisateur: e.target.checked }, e.target.checked ? t('Le DG pourra te demander de valider certaines tâches.') : t('Une IA vérifie tout : tes dossiers vont de A à Z sans t’attendre.'));
           } } }),
-          ' ', t('Me demander de valider moi-même certaines tâches (goût, visuel, gameplay).')),
-        h('small', { class: 'meta' }, t('Décoché : un vérificateur IA relit ces tâches à ta place et le dossier continue sans t’attendre (y compris les tâches qui attendaient déjà ta validation). Le QG te demande toujours ton accord avant de publier, d’envoyer, de supprimer ou d’acheter.'))),
+          ' ', t('Me demander de valider moi-même certaines tâches (goût, visuel, gameplay).'))),
       h('h4', {}, t('Git')),
-      ligne(t('Git sans demander'),
+      ligneI('gen-git', t('Git sans demander'), [t('Pratique si tu travailles avec Git et que tu relis l’historique ; sinon, laisse décoché : un git push te sera toujours demandé. S’applique aux prochaines tâches.')],
         h('label', { class: 'param-case' },
           h('input', { type: 'checkbox', checked: !!R.gitAuto, on: { change: (e) => {
             if (e.target.checked && !window.confirm(t('Les agents pourront faire pull, commit, branche, merge et push sans te demander, quand leur mission le demande. Activer ?'))) {
@@ -235,57 +256,104 @@ export class Parametres {
             }
             this.reglage({ gitAuto: e.target.checked }, e.target.checked ? t('Git autorisé sans demande.') : t('Git push redemande ton accord.'));
           } } }),
-          ' ', t('Autoriser les agents à faire toutes les opérations git (pull, commit, branche, merge, push) sans te demander.')),
-        h('small', { class: 'meta' }, t('Pratique si tu travailles avec Git et que tu relis l’historique ; sinon, laisse décoché : un git push te sera toujours demandé. S’applique aux prochaines tâches.'))),
+          ' ', t('Autoriser les agents à faire toutes les opérations git (pull, commit, branche, merge, push) sans te demander.'))),
       h('div', { class: 'boutons' }, h('button', { class: 'petit', type: 'button', on: { click: () => { this.m.fermer(); this.ui.accueil.ouvrir(true); } } }, t('Relancer la configuration guidée'))),
     ];
   }
 
-  // ---------------------------------------------------------------- coût (1.0.6, B2)
-  // Niveau des nouvelles demandes (aussi réglable demande par demande, en bas de l'écran) et personnalisation
-  // bouton par bouton. POST /api/reglages, champ travail : la personnalisation envoyée remplace l'ancienne.
+  // ---------------------------------------------------------------- coût (1.0.6, B2 ; Personnalisé en 1.0.7)
+  // Choix des nouvelles demandes (aussi réglable demande par demande, en bas de l'écran) : un des trois niveaux,
+  // ou Personnalisé, tes valeurs à partir d'un niveau (base). Choisir un niveau garde les valeurs de Personnalisé.
+  // POST /api/reglages, champ travail : ce qui manque garde sa valeur côté serveur.
   blocCout() {
     const S = this.store;
     const R = S.reglages;
-    const { cout, personnalise } = travailDe(R);
-    const base = (R.niveauxTravail && R.niveauxTravail[cout]) || null;
+    const { cout, base, personnalise } = travailDe(R);
+    const niveaux = R.niveauxTravail || null;
+    const valeursBase = (niveaux && niveaux[base]) || null;
     const enregistrer = (travail, ok) => this.reglage({ travail }, ok).then(() => this.rendre());
-    const niveaux = h('div', { class: 'param-niveaux', role: 'radiogroup', 'aria-label': t('Coût') }, NIVEAUX.map((n) =>
+    const nb = Object.keys(personnalise).length;
+    const aPartir = t('à partir de {niveau}', { niveau: nomNiveau(base) }) + (nb ? ' · ' + t('{n} valeur(s) changée(s)', { n: nb }) : '');
+    const cartes = h('div', { class: 'param-niveaux', role: 'radiogroup', 'aria-label': t('Coût') }, COUTS.map((n) =>
       h('button', {
         type: 'button', role: 'radio', class: 'param-niveau' + (n === cout ? ' choisi' : ''), 'aria-checked': n === cout ? 'true' : 'false',
-        on: { click: () => { if (n !== cout) enregistrer({ cout: n, personnalise }, t('Coût des nouvelles demandes : {niveau}.', { niveau: nomNiveau(n) })); } },
-      }, h('b', {}, nomNiveau(n)), n === NIVEAU_DEFAUT ? h('span', { class: 'meta' }, ' ' + t('(défaut)')) : null, h('small', {}, phraseNiveau(n)))));
+        on: { click: () => { if (n !== cout) enregistrer({ cout: n }, t('Coût des nouvelles demandes : {niveau}.', { niveau: nomTravail({ cout: n, base }) })); } },
+      }, h('b', {}, nomNiveau(n)), n === NIVEAU_DEFAUT ? h('span', { class: 'meta' }, ' ' + t('(défaut)')) : null,
+      h('small', {}, n === PERSONNALISE ? aPartir : phraseNiveau(n)))));
     // fournisseurs sans compaction, plafond par tâche ni sous-agent (Codex) : ces boutons sont sans effet pour eux
     const sans = [...new Set(CAPACITES_COUT.flatMap((c) => sansCapacite(S, c)))];
-    const nb = Object.keys(personnalise).length;
-    const perso = h('details', { class: 'param-cout-perso', open: this.persoCoutOuvert ? true : null, on: { toggle: (e) => { this.persoCoutOuvert = e.target.open; } } },
-      h('summary', {}, t('Personnaliser') + (nb ? ' — ' + t('{n} valeur(s) changée(s)', { n: nb }) : '')),
-      h('small', { class: 'meta' }, t('Valeurs du niveau {niveau}. Une valeur changée ici vaut pour les demandes envoyées à ce niveau ; une demande envoyée à un autre niveau prend les valeurs de cet autre niveau.', { niveau: nomNiveau(cout) })),
-      ...(base ? boutonsCout().map((b) => this.ligneCout(b, base[b.cle], personnalise, cout, enregistrer)) : [h('div', { class: 'vide' }, t('Valeurs des niveaux indisponibles.'))]));
+    const repartir = ligneI('cout-repartir', t('Repartir de'), [
+      t('Remplace toutes les valeurs de Personnalisé par celles d’un niveau, puis change ce que tu veux à partir de là.'),
+      t('Tes valeurs changées sont alors effacées ; le QG te demande d’abord confirmation.'),
+      t('Si un autre niveau est choisi plus haut, les nouvelles demandes passent alors en Personnalisé.'),
+      exempleAide(t('tu veux « Max, mais sans vérificateur pour les petites tâches » : clique sur Max ici, puis règle « Vérification par défaut ».')),
+    ], ...NIVEAUX.map((n) => h('button', {
+      type: 'button', class: 'petit' + (n === base ? ' choisi' : ''), 'aria-pressed': n === base ? 'true' : 'false',
+      on: { click: () => {
+        if (nb && !window.confirm(t('Remplacer tes {n} valeur(s) changée(s) par les valeurs de {niveau} ?', { n: nb, niveau: nomNiveau(n) }))) return;
+        enregistrer({ cout: PERSONNALISE, base: n, personnalise: {} }, cout === PERSONNALISE
+          ? t('Personnalisé repart de {niveau}.', { niveau: nomNiveau(n) })
+          : t('Personnalisé repart de {niveau} : les nouvelles demandes passent en Personnalisé.', { niveau: nomNiveau(n) }));
+      } },
+    }, nomNiveau(n))));
+    const ouvert = this.persoCoutOuvert ?? cout === PERSONNALISE;
+    const perso = h('details', { class: 'param-cout-perso', open: ouvert ? true : null, on: { toggle: (e) => { this.persoCoutOuvert = e.target.open; } } },
+      h('summary', {}, t('Valeurs de Personnalisé') + ' — ' + aPartir),
+      h('small', { class: 'meta' }, cout === PERSONNALISE
+        ? t('Les nouvelles demandes partent avec ces valeurs. Une valeur changée est enregistrée tout de suite.')
+        : t('Tu es sur {niveau} : ces valeurs restent gardées pour plus tard. Changer une valeur ici passe les nouvelles demandes en Personnalisé.', { niveau: nomNiveau(cout) })),
+      repartir,
+      ...(valeursBase ? boutonsCout().map((b) => this.ligneCout(b, valeursBase[b.cle], personnalise, cout, base, niveaux, enregistrer)) : [h('div', { class: 'vide' }, t('Valeurs des niveaux indisponibles.'))]));
     return [
-      niveaux,
+      ...titreI('cout', t('Coût'), [
+        t('Règle combien de travail le QG met dans une demande : nombre de tâches, relectures par un autre agent, mémoire des agents, à-côtés. Le modèle et l’effort que le DG choisit pour chaque tâche ne changent jamais, ni ceux du DG. Seule exception : le vérificateur (l’agent qui relit une tâche) peut passer au niveau standard et à un effort plus bas, en Économe ou selon tes valeurs de Personnalisé.'),
+        choixAide(nomNiveau('econome'), t('Le minimum qui donne un bon résultat.'),
+          t('Le moins de tokens : ta fenêtre de 5 h dure plus longtemps.'),
+          t('Moins de tâches en même temps, moins de relectures par un autre agent, et l’ambiance du mini-jeu coupée.')),
+        choixAide(nomNiveau('equilibre'), t('Le juste coût : ce qui est utile, sans plus. C’est le choix par défaut.'),
+          t('Un bon résultat pour une dépense raisonnable.'),
+          t('Sur une demande très délicate, Max relit davantage.')),
+        choixAide(nomNiveau('max'), t('La qualité d’abord : plus de tâches, un vérificateur pour tout code modifié, une grande mémoire.'),
+          t('Le plus soigné et le plus sûr.'),
+          t('Le plus cher : une grosse demande peut prendre une bonne part de ta fenêtre.')),
+        choixAide(nomNiveau(PERSONNALISE), t('Tes propres valeurs, réglées une par une à partir d’un des trois niveaux.'),
+          t('Exactement le réglage que tu veux.'),
+          t('À toi de juger l’effet de chaque valeur : chacune a son « i ».')),
+        t('Ce choix vaut pour les nouvelles demandes. Tu peux aussi le changer demande par demande, dans la barre en bas de l’écran, à côté d’Envoyer. Une demande envoyée garde ses valeurs jusqu’au bout, même si tu changes ce réglage ensuite.'),
+        t('Choisir un niveau n’efface pas tes valeurs de Personnalisé : tu les retrouves en revenant sur Personnalisé.'),
+        exempleAide(t('tu es en Équilibré et tu prépares une grosse refonte délicate : choisis Max en bas de l’écran pour cette seule demande ; les suivantes repartent en Équilibré.')),
+      ]),
+      cartes,
       h('small', { class: 'meta' }, t('Pour les nouvelles demandes ; modifiable aussi demande par demande, en bas de l’écran. Le modèle et l’effort des agents et du DG ne changent jamais.')),
       sans.length ? h('div', { class: 'meta' }, t('Avec {fournisseurs}, la compaction, le plafond par tâche et le sous-agent d’exploration sont sans effet ; le reste s’applique.', { fournisseurs: sans.join(', ') })) : null,
       perso,
-      ligne(t('Sorties de tests'),
-        h('label', { class: 'param-case' },
-          h('input', { type: 'checkbox', checked: R.filtreTests !== false, on: { change: (e) => {
-            this.reglage({ filtreTests: e.target.checked }, e.target.checked ? t('Les sorties de tests des agents seront raccourcies.') : t('Les agents liront les sorties de tests en entier.'));
-          } } }),
-          ' ', t('Raccourcir les sorties des commandes de test des agents (node --test, npm test, vitest…)')),
-        h('small', { class: 'meta' }, t('Garde le début, chaque échec en entier et le résumé ; le code de sortie ne change pas. Moins de texte lu, donc moins de tokens. Agents Claude seulement ; vaut pour les prochaines tâches.'))),
+      ligneI('cout-filtre-tests', t('Sorties de tests'), [
+        t('Quand un agent lance les tests d’un projet (node --test, npm test, vitest…), la sortie peut faire des milliers de lignes. L’agent lit tout, et chaque ligne lue coûte des tokens.'),
+        t('Coché, le QG ne lui montre que les 20 premières lignes, chaque test en échec en entier et les 15 dernières lignes (le résumé). Une sortie de moins de 60 lignes reste entière. Le code de sortie ne change pas : un test qui échoue reste un échec.'),
+        choixAide(t('Coché (conseillé)'), t('sorties raccourcies.'), t('Beaucoup moins de tokens sur les gros projets.'), t('Les lignes des tests réussis ne sont pas lues.')),
+        choixAide(t('Décoché'), t('l’agent lit la sortie complète.'), t('Rien n’est caché.'), t('Une longue sortie de tests peut coûter cher.')),
+        t('Vaut pour les prochaines tâches, avec Claude et les agents comme Gemini ou Cursor. Codex lance ses commandes lui-même : ses sorties restent entières.'),
+        exempleAide(t('un projet de 900 tests dont 2 échouent : l’agent lit une cinquantaine de lignes au lieu de plus de 900.')),
+      ],
+      h('label', { class: 'param-case' },
+        h('input', { type: 'checkbox', checked: R.filtreTests !== false, on: { change: (e) => {
+          this.reglage({ filtreTests: e.target.checked }, e.target.checked ? t('Les sorties de tests des agents seront raccourcies.') : t('Les agents liront les sorties de tests en entier.'));
+        } } }),
+        ' ', t('Raccourcir les sorties des commandes de test des agents (node --test, npm test, vitest…)'))),
     ];
   }
 
-  // Une ligne de « Personnaliser » : valeur actuelle (celle du niveau, ou la tienne), « revenir au niveau ».
-  ligneCout(b, valeurNiveau, perso, cout, enregistrer) {
+  // Une ligne de Personnalisé : contrôle, badge et « Revenir à {base} », « sans effet pour », bulle « i »
+  // (à quoi sert la valeur, ce que fait chaque choix, valeurs des trois niveaux, exemple).
+  ligneCout(b, valeurBase, perso, cout, base, niveaux, enregistrer) {
     const change = Object.prototype.hasOwnProperty.call(perso, b.cle);
-    const v = change ? perso[b.cle] : valeurNiveau;
+    const v = change ? perso[b.cle] : valeurBase;
     const poser = (nv) => {
       const p = { ...perso };
-      if (nv === valeurNiveau) delete p[b.cle];
+      if (nv === valeurBase) delete p[b.cle];
       else p[b.cle] = nv;
-      return enregistrer({ cout, personnalise: p }, t('Enregistré.'));
+      return enregistrer({ cout: PERSONNALISE, base, personnalise: p },
+        cout === PERSONNALISE ? t('Enregistré.') : t('Enregistré : les nouvelles demandes passent en Personnalisé.'));
     };
     let ctl;
     let unite = null;
@@ -303,7 +371,7 @@ export class Parametres {
         if (!brut && b.nul) return poser(null);
         const n = Number(brut);
         if (!brut || !Number.isFinite(n) || n < min || (max != null && n > max)) {
-          this.ui.toast('warn', t('Valeur invalide.'));
+          this.ui.toast('warn', max != null ? t('Valeur invalide : entre {min} et {max}.', { min, max }) : t('Valeur invalide : {min} au moins.', { min }));
           ctl.value = afficher(v);
           return;
         }
@@ -312,12 +380,21 @@ export class Parametres {
       unite = { k: t('k tokens'), pourcent: t('% de ta fenêtre de 5 h'), facteur: t('× l’estimation de la tâche') }[b.type] || null;
     }
     const sans = b.capacite ? sansCapacite(this.store, b.capacite) : [];
-    const note = [change ? t('Niveau {niveau} : {valeur}.', { niveau: nomNiveau(cout), valeur: texteValeur(b, valeurNiveau) }) : null, b.aide || null].filter(Boolean).join(' ');
-    return ligne(b.lib, ctl, unite ? h('span', { class: 'meta' }, unite) : null,
+    const desNiveaux = niveaux ? NIVEAUX.filter((n) => niveaux[n]).map((n) => nomNiveau(n) + ' : ' + texteValeur(b, niveaux[n][b.cle])).join(' · ') : '';
+    const aide = [
+      b.quoi,
+      ...(b.choix || []).map(([, lib, quoi, plus, moins]) => choixAide(lib, quoi, plus, moins)),
+      ...(b.valeurs || []).map(([x, effet]) => valeurAide(x, effet)),
+      b.note || null,
+      desNiveaux ? [t('Valeurs des niveaux :'), desNiveaux + '.'] : null,
+      sans.length ? t('Sans effet avec {fournisseurs} : cette IA ne sait pas le faire.', { fournisseurs: sans.join(', ') }) : null,
+      b.exemple ? exempleAide(b.exemple) : null,
+    ];
+    return ligneI('cout-' + b.cle, b.lib, aide, ctl, unite ? h('span', { class: 'meta' }, unite) : null,
       change ? h('span', { class: 'badge perso' }, t('personnalisé')) : null,
-      change ? h('button', { class: 'petit', type: 'button', on: { click: () => poser(valeurNiveau) } }, t('Revenir au niveau')) : null,
+      change ? h('button', { class: 'petit', type: 'button', on: { click: () => poser(valeurBase) } }, t('Revenir à {niveau}', { niveau: nomNiveau(base) })) : null,
       sans.length ? h('span', { class: 'badge st-gris' }, t('sans effet pour {fournisseurs}', { fournisseurs: sans.join(', ') })) : null,
-      note ? h('small', { class: 'meta' }, note) : null);
+      change ? h('small', { class: 'meta' }, t('Niveau {niveau} : {valeur}.', { niveau: nomNiveau(base), valeur: texteValeur(b, valeurBase) })) : null);
   }
 
   // ---------------------------------------------------------------- comptes IA
@@ -331,6 +408,22 @@ export class Parametres {
     const fournisseurs = S.fournisseurs && S.fournisseurs.length ? S.fournisseurs : [{ id: 'claude', nom: 'Claude', acces: ['abonnement', 'cle'], connexions: ['navigateur'], present: true }];
     const nomFournisseur = (id) => (fournisseurs.find((f) => f.id === id) || { nom: id }).nom;
     const agentsAcp = S.agentsAcp || [];
+    const AIDE_FOURNISSEUR = {
+      claude: t('Claude, d’Anthropic : par abonnement (Pro, Max, Team ou Enterprise) ou par clé API facturée à l’usage. Il sait tout faire dans le QG, y compris le mode prudent et le profil ops.'),
+      codex: t('ChatGPT · Codex, d’OpenAI : par abonnement ChatGPT ou par clé API. Il code et relit, mais ne prend jamais le profil ops ni le mode prudent : il ne peut pas demander ton accord action par action.'),
+      acp: t('Agents ACP (Grok, Cursor, Gemini…) : les agents d’autres fournisseurs, branchés par le protocole ACP. Le QG répond à chacune de leurs demandes ; profil ops et mode prudent refusés. Pas encore qualifiés par le QG : à essayer d’abord sur un petit projet.'),
+    };
+    // bouton occupé pendant l'envoi : pas de double clic, et on voit que ça travaille
+    const occuper = async (bouton, travail) => {
+      bouton.disabled = true;
+      bouton.classList.add('occupe');
+      try {
+        return await travail();
+      } finally {
+        bouton.disabled = false;
+        bouton.classList.remove('occupe');
+      }
+    };
     const majDepuis = (r) => {
       if (r && r.comptes) {
         S.comptes = r.comptes;
@@ -349,9 +442,9 @@ export class Parametres {
       const action = (lib, route, opts = {}) => h('button', {
         class: 'petit' + (opts.danger ? ' danger' : '') + (opts.ok1 ? ' ok' : ''), type: 'button', title: opts.titre || null,
         on: {
-          click: async () => {
+          click: async (e) => {
             if (opts.confirmer && !window.confirm(opts.confirmer)) return;
-            majDepuis(await this.poster('/api/comptes/' + c.id + '/' + route, opts.corps || {}, opts.ok || null));
+            majDepuis(await occuper(e.currentTarget, () => this.poster('/api/comptes/' + c.id + '/' + route, opts.corps || {}, opts.ok || null)));
           },
         },
       }, lib);
@@ -361,6 +454,18 @@ export class Parametres {
       const cle = c.type === 'api';
       const profils = c.capacites && c.capacites.profils ? c.capacites.profils : null;
       const refuses = profils ? Object.keys(profils).filter((p) => profils[p] === 'refuse') : [];
+      const b = bulle('compte-' + c.id, [
+        cle ? t('Compte par clé API : chaque token est facturé par le fournisseur. Rien à connecter, la clé suffit.')
+          : acp && !agentAcp ? null
+            : acp ? t('Se connecter : ouvre la connexion de l’agent dans une fenêtre de terminal ; suis ses étapes.')
+              : t('Se connecter, Reconnecter : ouvre la connexion officielle dans ton navigateur. Le QG ne voit jamais ton mot de passe ni ton jeton.'),
+        codex && !cle ? t('Par code d’appareil : si la page de connexion ne s’ouvre pas, tu saisis un code sur la page ChatGPT (à activer dans les paramètres de sécurité ChatGPT).') : null,
+        c.connecte && !cle && !acp ? t('Déconnecter : ferme la connexion de ce compte sur ce PC. Une tâche qui en a encore besoin attend que tu le reconnectes : ce compte se met en pause, ou tout le QG (selon Réglages › Priorités › Limite d’usage).') : null,
+        c.id !== S.compteDefaut ? t('Par défaut : ce compte est choisi d’avance en bas de l’écran pour tes nouvelles demandes.') : t('Ce compte est celui par défaut : il est choisi d’avance en bas de l’écran pour tes nouvelles demandes.'),
+        c.connecte && !acp ? t('Lire les limites : relit ce qu’il reste de ton forfait, sans dépenser de tokens.') : null,
+        t('Retirer : enlève le compte de la liste ; son dossier de connexion reste sur le disque.'),
+        acp ? null : exempleAide(t('ta limite de la semaine approche : « Lire les limites » te montre ce qu’il reste, puis « Par défaut » sur un autre compte envoie là-bas tes prochaines demandes.')),
+      ], { titre: c.nom });
       return h('div', { class: 'param-compte' + (c.connecte ? ' connecte' : '') },
         h('div', { class: 'param-compte-tete' },
           nom,
@@ -368,7 +473,9 @@ export class Parametres {
           h('span', { class: 'badge ' + (c.connecte ? 'st-ok' : 'st-ko') }, c.connecte ? t('connecté') : t('non connecté')),
           badgeQualification(c),
           c.id === S.compteDefaut ? h('span', { class: 'badge perso' }, t('par défaut')) : null,
-          c.id === S.compteAgents ? h('span', { class: 'badge perso' }, t('agents')) : null),
+          c.id === S.compteAgents ? h('span', { class: 'badge perso' }, t('agents')) : null,
+          b.bouton),
+        b.panneau,
         h('div', { class: 'meta' }, [cle ? t('clé API') : t('abonnement'), c.abonnement, c.email, c.partage ? t('partagé avec Claude Code sur ce PC') : null].filter(Boolean).join(' · ')),
         h('div', { class: 'meta' }, h('code', {}, c.dossier || '')),
         codex && refuses.length ? h('div', { class: 'meta' }, t('Profils refusés sur ce compte : {profils} (Codex ne peut pas demander ton accord action par action).', { profils: refuses.join(', ') })) : null,
@@ -376,7 +483,7 @@ export class Parametres {
         h('div', { class: 'boutons' },
           cle || (acp && !agentAcp) ? null : action(c.connecte ? t('Reconnecter') : t('Se connecter'), 'connecter', { ok: acp ? t('Une fenêtre de connexion s’est ouverte : suis les étapes de l’agent.') : t('Une fenêtre de connexion s’est ouverte : suis les étapes dans ton navigateur.'), titre: acp ? t('Ouvre la connexion de l’agent dans une fenêtre de terminal') : codex ? t('Ouvre la connexion officielle de Codex (navigateur)') : t('Ouvre la connexion officielle de Claude Code (navigateur)'), ok1: !c.connecte }),
           codex && !cle ? action(t('Par code d’appareil'), 'connecter', { corps: { mode: 'code' }, ok: t('Une fenêtre s’est ouverte : saisis le code affiché sur la page ChatGPT.'), titre: t('Si la page de connexion ne s’ouvre pas : connexion par code (à activer dans les paramètres de sécurité ChatGPT)') }) : null,
-          c.connecte && !cle && !acp ? action(t('Déconnecter'), 'deconnecter', { confirmer: t('Déconnecter {nom} ? Les dossiers en cours sur ce compte s’arrêteront.', { nom: c.nom }) }) : null,
+          c.connecte && !cle && !acp ? action(t('Déconnecter'), 'deconnecter', { confirmer: t('Déconnecter {nom} ? Les tâches qui en ont encore besoin attendront que tu le reconnectes.', { nom: c.nom }) }) : null,
           c.id !== S.compteDefaut ? action(t('Par défaut'), 'modifier', { corps: { defaut: true }, titre: t('Compte choisi par défaut pour les nouvelles demandes') }) : null,
           c.connecte && !acp ? action(t('Lire les limites'), 'limites', { titre: t('Relit les limites du forfait (sans tokens)') }) : null,
           action(t('Retirer'), 'supprimer', { danger: true, confirmer: t('Retirer {nom} de la liste ? Son dossier de connexion reste sur le disque.', { nom: c.nom }) })));
@@ -384,7 +491,7 @@ export class Parametres {
     const groupes = fournisseurs.map((f) => {
       const liste = S.comptes.filter((c) => (c.fournisseur || 'claude') === f.id);
       if (!liste.length) return null;
-      return h('div', { class: 'param-groupe' }, h('h4', {}, f.nom), ...liste.map(ligneCompte));
+      return h('div', { class: 'param-groupe' }, ...(AIDE_FOURNISSEUR[f.id] ? titreI('fournisseur-' + f.id, f.nom, AIDE_FOURNISSEUR[f.id]) : [h('h4', {}, f.nom)]), ...liste.map(ligneCompte));
     });
     // ---- ajout : fournisseur → accès → nom (ou clé)
     const selF = h('select', { class: 'champ', 'aria-label': t('Fournisseur') }, fournisseurs.map((f) => h('option', { value: f.id, selected: f.id === this.ajoutFournisseur ? true : null }, f.nom + (f.present ? '' : ' — ' + t('non installé')))));
@@ -425,25 +532,29 @@ export class Parametres {
     const varCleAcp = champ({ placeholder: t('variable de la clé, ex. MON_AGENT_API_KEY'), maxlength: '64', 'aria-label': t('Variable de la clé') });
     const nouveau = champ({ placeholder: t('Nom du compte (ex. perso, pro)'), maxlength: '40' });
     const cle = champ({ type: 'password', placeholder: 'sk-…', autocomplete: 'off', 'aria-label': t('Clé API') });
-    const aide = h('small', { class: 'meta' });
+    const aide = h('div', { class: 'param-ajout-aide' });
     const boutons = h('div', { class: 'param-ajout' });
-    const ajouter = async (opts = {}) => {
+    const manque = (champVide, message) => {
+      this.ui.toast('erreur', message);
+      champVide.focus();
+    };
+    const ajouter = async (bouton, opts = {}) => {
       const f = selF.value;
       const acces = selAcces.value;
       const corps = { fournisseur: f, nom: nouveau.value, ...opts };
       if (f === 'acp') {
         corps.agent = selAgent.value;
         if (selAgent.value === 'personnalise') {
-          if (!commandeAcp.value.trim()) return;
+          if (!commandeAcp.value.trim()) return manque(commandeAcp, t('Écris d’abord la commande qui lance l’agent en mode ACP.'));
           corps.commande = commandeAcp.value.trim();
           if (varCleAcp.value.trim()) corps.varCle = varCleAcp.value.trim();
         }
       }
       if (acces === 'cle') {
-        if (!cle.value.trim()) return;
+        if (!cle.value.trim()) return manque(cle, t('Colle d’abord la clé API dans la case prévue.'));
         corps.cleApi = cle.value.trim();
       }
-      const r = await this.poster('/api/comptes/ajouter', corps, null);
+      const r = await occuper(bouton, () => this.poster('/api/comptes/ajouter', corps, null));
       if (!r) return;
       if (r.avertissement) this.ui.toast('erreur', r.avertissement);
       else this.ui.toast('info', r.connexion ? t('Compte ajouté : une fenêtre de connexion s’est ouverte, suis les étapes dans ton navigateur.') : t('Compte ajouté.'));
@@ -470,44 +581,63 @@ export class Parametres {
       cle.placeholder = f.id === 'claude' ? 'sk-ant-…' : acp ? t('clé API de l’agent') : 'sk-…';
       const dejaPartage = S.comptes.some((c) => c.partage);
       boutons.replaceChildren(...[
-        parCle
-          ? h('button', { class: 'petit ok', type: 'button', on: { click: () => ajouter() } }, t('Ajouter'))
-          : h('button', { class: 'petit ok', type: 'button', on: { click: () => ajouter() } }, t('Ajouter et se connecter')),
-        !parCle && f.connexions && f.connexions.includes('code') ? h('button', { class: 'petit', type: 'button', on: { click: () => ajouter({ mode: 'code' }) } }, t('Ajouter et se connecter par code')) : null,
-        !parCle && f.id === 'claude' && R.claudeCodeLocal && !dejaPartage ? h('button', { class: 'petit', type: 'button', on: { click: () => ajouter({ partage: true }) } }, t('Utiliser le compte Claude Code déjà connecté sur ce PC')) : null,
+        h('button', { class: 'petit ok', type: 'button', on: { click: (e) => ajouter(e.currentTarget) } }, parCle ? t('Ajouter') : t('Ajouter et se connecter')),
+        !parCle && f.connexions && f.connexions.includes('code') ? h('button', { class: 'petit', type: 'button', on: { click: (e) => ajouter(e.currentTarget, { mode: 'code' }) } }, t('Ajouter et se connecter par code')) : null,
+        !parCle && f.id === 'claude' && R.claudeCodeLocal && !dejaPartage ? h('button', { class: 'petit', type: 'button', on: { click: (e) => ajouter(e.currentTarget, { partage: true }) } }, t('Utiliser le compte Claude Code déjà connecté sur ce PC')) : null,
       ].filter(Boolean));
+      const texteAide = (avertissement, texte) => aide.replaceChildren(...[
+        avertissement ? h('small', { class: 'meta st-ko' }, avertissement) : null,
+        h('small', { class: 'meta' }, texte),
+      ].filter(Boolean)); // replaceChildren écrirait « null » en texte
       if (acp) {
-        aide.textContent = (perso
-          ? t('Agent qui parle le protocole ACP (agentclientprotocol.com) : donne la commande qui le lance en mode ACP.') + ' '
-          : agent ? (agent.present ? '' : t('{nom} n’est pas installé sur ce PC : {installation}', { nom: agent.nomCourt, installation: t(agent.installation) }) + ' ') + (!parCle && agent.connexion ? t(agent.connexion) + ' ' : '') : '')
+        texteAide(agent && !agent.present ? t('{nom} n’est pas installé sur ce PC : {installation}', { nom: agent.nomCourt, installation: t(agent.installation) }) : null,
+          (perso ? t('Agent qui parle le protocole ACP (agentclientprotocol.com) : donne la commande qui le lance en mode ACP.') + ' '
+            : agent && !parCle && agent.connexion ? t(agent.connexion) + ' ' : '')
           + (parCle ? t('La clé reste sur ce PC, dans config\\comptes.json ; seul cet agent la reçoit, les autres agents ne peuvent pas la lire.') : t('La connexion se fait dans l’agent lui-même ; le QG ne voit jamais ton jeton.')) + ' '
-          + t('Le QG répond à chacune des demandes de l’agent (fichiers, commandes, permissions) et refuse le profil ops et le mode prudent.');
+          + t('Le QG répond à chacune des demandes de l’agent (fichiers, commandes, permissions) et refuse le profil ops et le mode prudent.'));
       } else if (f.id === 'codex') {
-        aide.textContent = parCle
+        texteAide(null, parCle
           ? t('Clé API OpenAI (platform.openai.com), facturée à l’usage. La clé reste sur ce PC, dans config\\comptes.json ; les agents ne peuvent pas la lire.')
-          : t('Abonnement ChatGPT (Plus, Pro, Business…). Un compte = une personne, sur son propre PC : pas de partage ni de rotation de comptes. La connexion se fait dans une fenêtre puis sur la page ChatGPT ; le jeton reste dans le dossier du compte, jamais lu par le QG.') + (f.present ? '' : ' ' + t('Codex n’est pas encore installé sur ce PC : le bouton « Installer Codex » l’installe dans le dossier du QG (ou installe le Codex CLI officiel).'));
+          : t('Abonnement ChatGPT (Plus, Pro, Business…). Un compte = une personne, sur son propre PC : pas de partage ni de rotation de comptes. La connexion se fait dans une fenêtre puis sur la page ChatGPT ; le jeton reste dans le dossier du compte, jamais lu par le QG.') + (f.present ? '' : ' ' + t('Codex n’est pas encore installé sur ce PC : le bouton « Installer Codex » l’installe dans le dossier du QG (ou installe le Codex CLI officiel).')));
       } else {
-        aide.textContent = parCle
+        texteAide(null, parCle
           ? t('Facturée au token par Anthropic (console.anthropic.com). La clé reste sur ce PC, dans config\\comptes.json ; les agents ne peuvent pas la lire.')
-          : t('Abonnement Claude (Pro, Max, Team ou Enterprise). La connexion se fait dans une petite fenêtre puis dans ton navigateur : le QG ne voit jamais ton mot de passe ni ton jeton.');
+          : t('Abonnement Claude (Pro, Max, Team ou Enterprise). La connexion se fait dans une petite fenêtre puis dans ton navigateur : le QG ne voit jamais ton mot de passe ni ton jeton.'));
       }
     };
     selF.addEventListener('change', rafraichirAjout);
     selAgent.addEventListener('change', rafraichirAjout);
     selAcces.addEventListener('change', rafraichirAjout);
     rafraichirAjout();
-    const intro = h('p', { class: 'meta' }, t('Chaque compte est une connexion séparée à un fournisseur d’IA (Claude, ChatGPT · Codex, Grok, Cursor et d’autres agents ACP), avec son propre dossier de connexion : le QG ne voit jamais ton mot de passe ni ton jeton. Le compte par défaut reçoit tes demandes (le DG) ; les tâches peuvent tourner sur un autre compte.'));
+    const intro = [
+      ...titreI('comptes-intro', t('Tes comptes'), [
+        t('Chaque compte est une connexion séparée à un fournisseur d’IA (Claude, ChatGPT · Codex, Grok, Cursor et d’autres agents ACP), avec son propre dossier de connexion : le QG ne voit jamais ton mot de passe ni ton jeton. Le compte par défaut est choisi d’avance en bas de l’écran pour tes demandes ; le DG et les tâches peuvent tourner sur d’autres comptes (Réglages › Priorités).'),
+        exempleAide(t('un compte Claude « perso » pour tes projets à toi, et un compte ChatGPT · Codex « pro » pour le code du travail.')),
+      ]),
+      S.comptes.length ? null : h('p', { class: 'meta' }, t('Aucun compte pour l’instant : ajoute le premier juste en dessous.')),
+    ];
     const ajout = [
-      h('h4', {}, t('Ajouter un compte')),
-      h('div', { class: 'param-ajout' }, selF, selAgent, selAcces, commandeAcp, nouveau, cle, varCleAcp),
+      ...titreI('comptes-ajout', t('Ajouter un compte'), [
+        t('Choisis le fournisseur, le type d’accès, puis donne un nom au compte. Avec un abonnement, la connexion s’ouvre ensuite : une page de ton navigateur pour Claude et ChatGPT · Codex, une fenêtre de terminal pour les autres agents. Tu t’y connectes avec ton compte chez ce fournisseur.'),
+        exempleAide(t('Claude, abonnement, « perso » : ton compte Claude personnel, connecté une fois pour toutes.')),
+      ]),
+      ligneI('comptes-ajout-fournisseur', t('1. Fournisseur'), [
+        t('L’entreprise dont l’IA travaillera pour toi.'),
+        ...fournisseurs.map((f) => (AIDE_FOURNISSEUR[f.id] ? choixAide(f.nom, AIDE_FOURNISSEUR[f.id]) : null)),
+      ], selF, selAgent, commandeAcp),
+      ligneI('comptes-ajout-acces', t('2. Type d’accès'), [
+        choixAide(t('abonnement'), t('ton forfait mensuel (Claude Pro ou Max, ChatGPT Plus…) : le QG utilise ses limites, sans frais en plus.')),
+        choixAide(t('clé API (facturée à l’usage)'), t('chaque token est facturé par le fournisseur, en plus de tout abonnement. La clé reste sur ce PC.')),
+      ], selAcces, cle, varCleAcp),
+      ligneI('comptes-ajout-nom', t('3. Nom du compte'), [t('Un nom pour t’y retrouver, comme « perso » ou « pro ». Il apparaît en bas de l’écran et dans Réglages › Priorités. Laissé vide, le QG en choisit un.')], nouveau),
       boutons,
       zoneInstall,
       aide,
     ];
-    if (accueil) return [intro, ...groupes, ...ajout];
+    if (accueil) return [...intro, ...groupes, ...ajout];
     // ---- compte qui exécute les tâches
     const selAgents = h('select', { class: 'champ', 'aria-label': t('Agents de la demande') },
-      h('option', { value: '', selected: !S.compteAgents ? true : null }, t('même compte que le DG')),
+      h('option', { value: '', selected: !S.compteAgents ? true : null }, t('même compte que la demande')),
       ...S.comptes.map((c) => h('option', { value: c.id, selected: c.id === S.compteAgents ? true : null }, c.nom + ' (' + nomFournisseur(c.fournisseur || 'claude') + ')' + (c.connecte ? '' : ' — ' + t('non connecté')))));
     selAgents.addEventListener('change', async () => {
       const r = await this.reglage({ compteAgents: selAgents.value || null }, t('Réglage enregistré : s’applique aux prochaines demandes.'));
@@ -516,13 +646,19 @@ export class Parametres {
     });
     const strict = h('input', { type: 'checkbox', checked: R.codex && R.codex.lectureStricte ? true : null, on: { change: (e) => this.reglage({ codex: { lectureStricte: e.target.checked } }) } });
     return [
-      intro,
+      ...intro,
       ...groupes,
       ...ajout,
       h('h4', {}, t('Agents de la demande')),
-      ligne(t('Les tâches sont exécutées par'), selAgents, h('small', { class: 'meta' }, t('Le DG planifie sur le compte de la demande ; ses agents et vérificateurs tournent sur ce compte-ci. Avec Codex : profils lecture, édition et édition+tests (jamais ops ni mode prudent), écriture limitée aux dossiers de la tâche, réseau coupé.'))),
+      ligneI('comptes-agents', t('Les tâches sont exécutées par'), [
+        t('Les agents et vérificateurs des prochaines demandes tournent sur ce compte-ci au lieu du compte de la demande. Le DG garde le sien (Réglages › Priorités › DG). Avec Codex : profils lecture, édition et édition+tests (jamais ops ni mode prudent), écriture limitée aux dossiers de la tâche, réseau coupé.'),
+        exempleAide(t('tu demandes sur ton compte Claude et tu choisis ici ton compte ChatGPT · Codex : les tâches se font sur Codex, le DG reste sur le compte prévu dans Priorités.')),
+      ], selAgents),
       S.comptes.some((c) => c.fournisseur === 'codex')
-        ? h('label', { class: 'param-case' }, strict, ' ', t('Lecture stricte pour Codex : refuser aussi les profils de lecture (en sandbox lecture seule, Codex peut lancer des commandes sans rien écrire ni envoyer).'))
+        ? ligneI('comptes-codex-strict', t('Lecture stricte (Codex)'), [
+          choixAide(t('Coché'), t('Codex ne prend plus non plus les tâches de lecture.')),
+          choixAide(t('Décoché'), t('Codex prend aussi les tâches de lecture, dans un bac à sable où il ne peut rien écrire ni envoyer.')),
+        ], h('label', { class: 'param-case' }, strict, ' ', t('Lecture stricte pour Codex : refuser aussi les profils de lecture (en sandbox lecture seule, Codex peut lancer des commandes sans rien écrire ni envoyer).')))
         : null,
       h('p', { class: 'meta' }, t('Tu peux aussi double-cliquer sur {script} dans le dossier du QG.', { script: scriptPlateforme(this.store, 'ajouterCompte') })),
     ];
@@ -552,8 +688,10 @@ export class Parametres {
     const etages = S.etages.filter((e) => e.id !== 'hall').sort((a, b) => b.ordre - a.ordre);
     const libres = (this.projets || []).filter((p) => !p.etage && !p.ignore);
     return [
-      h('p', { class: 'meta' }, t('Tes dossiers racines contiennent tes projets : chaque projet peut devenir un étage. Les agents écrivent librement dans ces dossiers ; écrire ailleurs leur demande ton accord.')),
-      h('h4', {}, t('Dossiers racines')),
+      ...titreI('dossiers-racines', t('Dossiers racines'), [
+        t('Tes dossiers racines contiennent tes projets : chaque projet peut devenir un étage. Les agents écrivent librement dans ces dossiers ; écrire ailleurs leur demande ton accord.'),
+        exempleAide(t('D:\\Dev pour tes jeux et D:\\IA pour ComfyUI : chaque projet trouvé dedans peut devenir un étage.')),
+      ]),
       racines.length
         ? h('ul', { class: 'param-liste' }, racines.map((r) => h('li', {},
           h('code', {}, r),
@@ -564,11 +702,18 @@ export class Parametres {
         h('button', { class: 'petit ok', type: 'button', on: { click: async (ev) => { const b = ev.currentTarget; if (b.disabled) return; const txt = b.textContent; b.disabled = true; b.textContent = t('Fenêtre ouverte…'); let r = null; try { r = await this.poster('/api/choisir-dossier', { titre: t('Choisis un dossier qui contient tes projets') }); } finally { b.disabled = false; b.textContent = txt; } if (r && r.chemin) ajouterRacine(r.chemin); } } }, t('Choisir un dossier…')),
         manuel,
         h('button', { class: 'petit', type: 'button', on: { click: () => ajouterRacine(manuel.value.trim()) } }, t('Ajouter'))),
-      h('h4', {}, t('Étages')),
+      ...titreI('dossiers-etages', t('Étages'), [
+        t('Un étage = un projet de l’immeuble, avec ses agents. « en service » décoché : le DG ne s’en sert plus, mais rien n’est effacé.'),
+        t('Fiche du projet : ce que le DG sait du projet avant de planifier. Documents .md : les fichiers .md écrits par les agents. Dossiers… : les dossiers ouverts aux agents de cet étage ; le premier est leur dossier de travail.'),
+        exempleAide(t('un jeu dont le code est dans D:\\Dev\\Jeu et les images dans D:\\Art\\Jeu : un seul étage, avec ces deux dossiers.')),
+      ]),
       h('div', { class: 'param-ajout' },
         h('button', { class: 'petit ok', type: 'button', title: t('Un étage à toi : un nom, un type et un ou plusieurs dossiers, même sans projet détecté'), on: { click: () => this.formulaireEtage() } }, '＋ ' + t('Nouvel étage'))),
       h('div', { class: 'param-etages' }, etages.map((e) => this.ligneEtage(e))),
-      h('h4', {}, t('Projets détectés sans étage')),
+      ...titreI('dossiers-libres', t('Projets détectés sans étage'), [
+        t('Les projets trouvés dans tes dossiers racines qui n’ont pas encore d’étage. Un projet = un dossier avec .git, package.json, un projet Roblox, Unreal, Unity, Godot, Python…'),
+        t('« Ignorer » le retire de cette liste ; « Ajouter l’étage » en fait un étage.'),
+      ]),
       !this.projets ? h('div', { class: 'vide' }, t('Recherche…'))
         : libres.length
           ? h('ul', { class: 'param-liste' }, libres.map((p) => h('li', {},
@@ -591,7 +736,7 @@ export class Parametres {
     return h('div', { class: 'param-etage' + (e.actif ? '' : ' inactif') },
       h('div', { class: 'param-etage-tete' },
         nom,
-        h('span', { class: 'badge' }, t(TYPES_PROJET[e.type] || e.type)),
+        h('span', { class: 'badge' }, e.libelleType || t(TYPES_PROJET[e.type] || e.type)),
         h('label', { class: 'param-case', title: t('Un étage inactif n’existe plus pour le DG') }, actif, ' ', t('en service'))),
       h('div', { class: 'meta' }, h('code', {}, (e.dossiers || [e.projet]).filter(Boolean).join(' + ') || '—')),
       h('div', { class: 'boutons' },
@@ -608,9 +753,14 @@ export class Parametres {
     const dossiers = e ? [...(e.dossiers || [e.projet])].filter(Boolean) : [];
     const m = ouvrirModale({ titre: e ? t('Dossiers — {nom}', { nom: e.nom }) : t('Nouvel étage'), classe: 'nouvel-etage' });
     const nom = champ({ placeholder: t('Nom de l’étage (ex. Dev)'), maxlength: '40', 'aria-label': t('Nom de l’étage') });
-    const type = h('select', { class: 'champ', 'aria-label': t('Type') },
-      h('option', { value: '' }, t('Automatique (type détecté, sinon Projet)')),
-      TYPES_CHOIX.map((k) => h('option', { value: k }, t(TYPES_PROJET[k]))));
+    // Type : une suggestion de la liste, ou ton propre type (« Mod Minecraft ») ; vide = type détecté, sinon Projet
+    const type = champ({ list: 'types-etage', maxlength: '40', placeholder: t('Automatique (type détecté, sinon Projet)'), 'aria-label': t('Type') });
+    const suggestions = h('datalist', { id: 'types-etage' }, TYPES_CHOIX.map((k) => h('option', { value: t(TYPES_PROJET[k]) })));
+    const typeChoisi = () => {
+      const brut = type.value.replace(/\s+/g, ' ').trim();
+      const cle = TYPES_CHOIX.find((k) => [k, TYPES_PROJET[k], t(TYPES_PROJET[k])].some((v) => v.toLowerCase() === brut.toLowerCase()));
+      return { type: cle || null, libelleType: cle ? null : brut || null };
+    };
     const liste = h('ul', { class: 'param-liste' });
     const manuel = champ({ placeholder: t('ou colle un chemin, ex. D:\\Projets') });
     const dessiner = () => liste.replaceChildren(...(dossiers.length
@@ -635,19 +785,20 @@ export class Parametres {
       b.disabled = true;
       const r = e
         ? await this.poster('/api/etages/' + encodeURIComponent(e.id) + '/modifier', { dossiers }, t('Dossiers de l’étage enregistrés.'))
-        : await this.poster('/api/etages/ajouter', { dossiers, nom: nom.value.trim() || null, type: type.value || null }, t('Étage ajouté.'));
+        : await this.poster('/api/etages/ajouter', { dossiers, nom: nom.value.trim() || null, ...typeChoisi() }, t('Étage ajouté.'));
       b.disabled = false;
       if (!r) return;
       m.fermer();
       this.projets = null;
       if (this.m) this.rendre();
     };
-    m.corps.append(
+    // append() écrirait « null » : sans le nom ni le type quand on modifie un étage
+    m.corps.append(...[
       h('p', { class: 'meta' }, e
         ? t('Le premier dossier est le dossier de travail des agents ; ils écrivent aussi librement dans les autres.')
         : t('Un étage peut couvrir un dossier entier (même sans projet reconnu) ou plusieurs dossiers. Le premier est le dossier de travail des agents ; ils écrivent aussi librement dans les autres. Une fiche est créée automatiquement.')),
       e ? null : ligne(t('Nom'), nom),
-      e ? null : ligne(t('Type'), type),
+      e ? null : ligne(t('Type'), type, suggestions, h('small', { class: 'meta' }, t('Choisis dans la liste ou écris le tien (ex. Mod Minecraft). Le décor et les outils de l’étage suivent le type détecté.'))),
       h('h4', {}, t('Dossiers')),
       liste,
       h('div', { class: 'param-ajout' },
@@ -656,7 +807,8 @@ export class Parametres {
         h('button', { class: 'petit', type: 'button', on: { click: () => { ajouter(manuel.value); manuel.value = ''; } } }, t('Ajouter'))),
       h('div', { class: 'boutons' },
         h('button', { class: 'petit ok', type: 'button', on: { click: valider } }, e ? t('Enregistrer') : t('Créer l’étage')),
-        h('button', { class: 'petit', type: 'button', on: { click: () => m.fermer() } }, t('Annuler'))));
+        h('button', { class: 'petit', type: 'button', on: { click: () => m.fermer() } }, t('Annuler'))),
+    ].filter(Boolean));
     (e ? manuel : nom).focus();
   }
 
@@ -678,6 +830,94 @@ export class Parametres {
         h('button', { class: 'petit ok', type: 'button', on: { click: async () => { if (await this.poster('/api/etages/' + encodeURIComponent(e.id) + '/modifier', { fiche: zone.value }, t('Fiche enregistrée.'))) m.fermer(); } } }, t('Enregistrer')),
         h('button', { class: 'petit', type: 'button', on: { click: () => m.fermer() } }, t('Annuler'))));
     zone.focus();
+  }
+
+  // ---------------------------------------------------------------- dossiers archivés (1.0.7)
+  // Les dossiers rangés à la main (bouton « Archiver » de l'onglet Dossiers), lus à part avec leurs tâches :
+  // chaque tâche rouvre sa fiche en lecture seule, « Ressortir » remet le dossier dans l'onglet Dossiers.
+  dossiersArchives() {
+    const S = this.store;
+    if (this.listeArchives === null && !this.archivesEnLecture) {
+      this.archivesEnLecture = true;
+      api('/api/dossiers/archives')
+        .then((r) => (this.listeArchives = r.dossiers || []))
+        .catch((e) => {
+          this.listeArchives = [];
+          this.ui.toast('erreur', e.message);
+        })
+        .finally(() => {
+          this.archivesEnLecture = false;
+          if (this.section === 'archives') this.rendre();
+        });
+    }
+    const date = (x) => new Date(x).toLocaleDateString(locale(), { day: 'numeric', month: 'long', year: 'numeric' });
+    const liste = this.listeArchives || [];
+    const carte = (d) => h('div', { class: 'dossier etat-' + d.etat + ' archive' },
+      h('div', { class: 'ligne' },
+        h('span', { class: 'ref' }, d.id),
+        h('span', { class: 'titre' }, d.titre || d.texte || ''),
+        h('span', { class: 'badge d-' + d.etat }, libelleDossier(d.etat))),
+      h('div', { class: 'meta' }, [
+        (d.etages || []).map((x) => S.etage(x)?.nom || x).join(' · '),
+        d.creeLe ? t('demandé le {date}', { date: date(d.creeLe) }) : null,
+        t('archivé le {date}', { date: date(d.archive) }),
+      ].filter(Boolean).join(' — ')),
+      d.taches.length
+        ? h('div', { class: 'taches' }, d.taches.map((x) => h('button', { class: 'tache', type: 'button', title: t('Revoir la fiche de {ref}', { ref: x.ref }), on: { click: () => this.ficheArchivee(d, x) } },
+          h('span', { class: 'puce', style: { background: modele(x.modele).c } }),
+          h('span', { class: 'ref' }, S.nom(x) !== x.ref ? S.nom(x) + ' · ' + x.ref : x.ref),
+          h('span', { class: 'titre' }, x.titre || ''),
+          h('span', { class: 'badge t-' + x.etat }, libelleEtat(x.etat)))))
+        : h('div', { class: 'meta' }, t('Aucune tâche dans ce dossier.')),
+      d.synthese ? h('details', {}, h('summary', {}, t('Synthèse du DG')), md(d.synthese, { classe: 'synthese', fichier: (c) => this.ui.ouvrirFichier(c, (d.etages || [])[0] || null) })) : null,
+      h('div', { class: 'boutons' },
+        h('button', { class: 'petit ok', type: 'button', title: t('Remettre ce dossier dans l’onglet Dossiers'), on: { click: (e) => this.ressortir(d, e.currentTarget) } }, t('Ressortir'))));
+    return [
+      ...titreI('archives', t('Tes dossiers rangés'), [
+        t('Dans l’onglet Dossiers, « Archiver » range un dossier terminé, annulé ou en échec : il quitte la liste, les fiches et le fil, mais rien n’est effacé.'),
+        t('Ici, clique sur une tâche (T1, T2…) pour revoir sa fiche, et sur « Ressortir » pour remettre le dossier dans l’onglet Dossiers. Rien ne s’archive tout seul.'),
+        exempleAide(t('ton jeu est fini depuis un mois : archive son dossier pour garder une liste courte ; le jour où tu veux relire ce qu’a fait T3, il est ici.')),
+      ]),
+      this.listeArchives === null
+        ? h('div', { class: 'vide' }, t('Lecture des archives…'))
+        : liste.length
+          ? h('div', { class: 'param-archives' }, liste.map(carte))
+          : h('div', { class: 'vide' }, t('Aucun dossier archivé pour l’instant.')),
+    ];
+  }
+
+  async ressortir(d, bouton) {
+    bouton.disabled = true;
+    const r = await this.poster('/api/dossiers/' + encodeURIComponent(d.id) + '/ressortir', {}, t('Le dossier {dossier} est de retour dans l’onglet Dossiers.', { dossier: d.id }));
+    bouton.disabled = false;
+    if (!r) return;
+    this.listeArchives = null;
+    this.rendre();
+  }
+
+  // Fiche d'une tâche archivée, en lecture seule : les informations de l'onglet Infos de sa fiche et son résultat.
+  ficheArchivee(d, x) {
+    const S = this.store;
+    const m = ouvrirModale({ titre: t('Tâche {nom} (archivée)', { nom: S.nom(x) !== x.ref ? S.nom(x) + ' · ' + x.id : x.id }), classe: 'fiche-archivee' });
+    const heure = (v) => new Date(v).toLocaleString(locale(), { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+    m.corps.append(
+      h('h4', {}, x.titre || x.ref),
+      h('div', { class: 'meta' }, (S.etage(x.etage)?.nom || x.etage) + ' — ' + t('dossier {dossier}', { dossier: d.id }) + (x.nature ? ' — ' + x.nature : '')),
+      h('dl', {},
+        h('dt', {}, t('État')), h('dd', {}, h('span', { class: 'badge t-' + x.etat }, libelleEtat(x.etat))),
+        h('dt', {}, t('Demandé')), h('dd', {}, S.nomModele(x.modele, x.compte || d.compte) + ' · ' + (x.effort || '?')),
+        h('dt', {}, t('Réel')), h('dd', {}, x.modeleReel || x.effortReel ? (x.modeleReel || '?') + ' · ' + (x.effortReel || '?') : '—'),
+        x.compte ? [h('dt', {}, t('IA')), h('dd', {}, S.libelleCompte(x.compte))] : null,
+        x.inputsFrom && x.inputsFrom.length ? [h('dt', {}, t('Reçoit de')), h('dd', {}, x.inputsFrom.join(', '))] : null,
+        h('dt', {}, t('Vérification')), h('dd', {}, x.verif ? x.verif.mode + (x.verif.modele ? ' (' + x.verif.modele + ')' : '') : '—'),
+        h('dt', {}, t('Tentative')), h('dd', {}, String(x.tentative || 1)),
+        x.skills && x.skills.length ? [h('dt', {}, t('Skills')), h('dd', {}, x.skills.join(', '))] : null,
+        x.lignes ? [h('dt', {}, t('Code')), h('dd', {}, '+' + (x.lignes.ajouts || 0) + ' −' + (x.lignes.suppressions || 0) + ' ' + t('dans {n} fichier(s)', { n: x.lignes.fichiers || 0 }))] : null,
+        x.debut ? [h('dt', {}, t('Début')), h('dd', {}, heure(x.debut))] : null,
+        x.fin ? [h('dt', {}, t('Fin')), h('dd', {}, heure(x.fin))] : null,
+        x.agent ? [h('dt', {}, t('Agent')), h('dd', {}, S.equipe.get(x.agent)?.prenom ? S.equipe.get(x.agent).prenom + ' (' + x.agent + ')' : x.agent)] : null),
+      x.resultat ? this.ui.blocResultat(x) : h('div', { class: 'vide' }, t('Pas de résultat enregistré pour cette tâche.')),
+      h('div', { class: 'boutons' }, h('button', { class: 'petit', type: 'button', on: { click: () => m.fermer() } }, t('Fermer'))));
   }
 
   // ---------------------------------------------------------------- MCP
@@ -712,8 +952,11 @@ export class Parametres {
     rendreGrille();
     return [
       this.blocMiniJeu(),
-      h('p', { class: 'meta' }, t('Clique sur un personnage pour changer son nom et son apparence. Un nouveau nom s’applique tout de suite, même à un agent au travail. Les nouvelles recrues prennent un prénom au hasard parmi ceux de cette liste.')),
-      h('p', { class: 'meta' }, t('La couleur de chemise des agents indique leur modèle (Opus, Sonnet…) : elle ne change que pour le DG et Joy.')),
+      ...titreI('equipe-grille', t('Ton équipe'), [
+        t('Clique sur un personnage pour changer son nom et son apparence. Un nouveau nom s’applique tout de suite, même à un agent au travail. Les nouvelles recrues prennent un prénom au hasard parmi ceux de cette liste.'),
+        t('La couleur de chemise des agents indique leur modèle (Opus, Sonnet…) : elle ne change que pour le DG et Joy.'),
+        exempleAide(t('renomme « Recrue 1 » en « Léon » : il s’appelle Léon tout de suite, même au milieu d’une tâche.')),
+      ]),
       grille,
     ];
   }
@@ -734,14 +977,16 @@ export class Parametres {
         n === 0 ? t('en direct (en continu)') : n === 0.5 ? t('toutes les 30 s') : n === 1 ? t('toutes les minutes') : n < 60 ? t('toutes les {n} min', { n }) : n === 60 ? t('toutes les heures') : t('toutes les 2 h'))));
     const modele = (k, defaut) => h('select', { class: 'champ', on: { change: (e) => regler(k, e.target.value) } },
       [['haiku', 'Haiku (' + t('le moins cher') + ')'], ['sonnet', 'Sonnet'], ['opus', 'Opus (' + t('le plus cher') + ')']].map(([v, l]) => h('option', { value: v, selected: (mj[k] || defaut) === v ? true : null }, l)));
+    const bBavard = bulle('minijeu-bavardages', [t('Façon télé-réalité : potins, rumeurs qui circulent (et finissent par revenir aux oreilles de l’intéressé), amitiés, amourettes, brouilles, histoires qui se suivent. Plusieurs scènes peuvent se jouer en même temps. Seulement quand le QG est ouvert et que deux collègues au moins sont au même étage ; sinon, les bavardages tout prêts (gratuits) continuent.')], { titre: t('Bavardages écrits par l’IA entre collègues') });
     return h('div', { class: 'bloc param-minijeu' },
-      h('h4', {}, '🎭 ' + t('Mini-jeu des personnages')),
-      h('p', { class: 'meta' }, t('Discute avec un agent, le DG ou Joy (bouton « Discuter » de sa fiche) : chacun a sa personnalité et sa mémoire, ses collègues présents entendent et réagissent, des amitiés et des rivalités naissent. Juste pour le plaisir : aucun effet sur le travail. Chaque réplique consomme un peu de ton forfait.')),
+      ...titreI('minijeu', '🎭 ' + t('Mini-jeu des personnages'), [
+        t('Discute avec un agent, le DG ou Joy (bouton « Discuter » de sa fiche) : chacun a sa personnalité et sa mémoire, ses collègues présents entendent et réagissent, des amitiés et des rivalités naissent. Juste pour le plaisir : aucun effet sur le travail. Chaque réplique consomme un peu de ton forfait.'),
+        exempleAide(t('ouvre la fiche de Joy, clique sur « Discuter » et demande-lui sa blague préférée : les collègues présents l’entendent et s’en souviendront.')),
+      ]),
       caseMj('actif', t('Activer le mini-jeu')),
       mj.actif === false ? null : [
         caseMj('ecoute', t('Les collègues présents dans la pièce entendent les discussions')),
-        h('div', { class: 'param-ligne' }, caseMj('bavardages', t('Bavardages écrits par l’IA entre collègues')), frequence),
-        h('small', { class: 'meta' }, t('Façon télé-réalité : potins, rumeurs qui circulent (et finissent par revenir aux oreilles de l’intéressé), amitiés, amourettes, brouilles, histoires qui se suivent. Plusieurs scènes peuvent se jouer en même temps. Seulement quand le QG est ouvert et que deux collègues au moins sont au même étage ; sinon, les bavardages tout prêts (gratuits) continuent.')),
+        h('div', { class: 'param-ligne' }, caseMj('bavardages', t('Bavardages écrits par l’IA entre collègues')), h('div', { class: 'param-val' }, frequence, bBavard.bouton), bBavard.panneau),
         Number(mj.bavardagesMinutes) <= 0.5 && mj.bavardages !== false ? h('small', { class: 'meta attention' }, t('En direct ou toutes les 30 s, les scènes s’enchaînent (jusqu’à 3 en même temps) : quelques milliers de tokens par scène avec Haiku, à surveiller dans ⚡ Consommation.')) : null,
         h('div', { class: 'param-ligne' }, h('span', {}, t('Modèle des discussions')), modele('modeleDiscussion', 'sonnet'), h('span', {}, t('Modèle des bavardages')), modele('modeleBavardage', 'haiku')),
         h('div', { class: 'boutons' },
@@ -944,21 +1189,25 @@ export class Parametres {
     const recolte = h('button', { class: 'petit', type: 'button', on: { click: async () => { recolte.disabled = true; recolte.textContent = t('Récolte en cours…'); await this.poster('/api/bonheur/recolter', {}, t('Récolte terminée.')); this.stock = null; this.rendre(); } } }, t('Nouvelle récolte'));
     const lienExport = (format, lib) => h('a', { class: 'petit bouton-lien', href: '/api/bonheur/export?format=' + format, download: '' }, lib);
     return [
-      h('p', { class: 'meta' }, t('Joy fait le tour des étages et raconte blagues et anecdotes aux agents qui attendent. Le stock dépend de la langue des IA.')),
+      ...titreI('bonheur', t('Joy et son stock'), [
+        t('Joy fait le tour des étages et raconte blagues et anecdotes aux agents qui attendent. Le stock dépend de la langue des IA.'),
+        exempleAide(t('un agent attend qu’un collègue finisse : Joy passe le voir et lui raconte une blague, dans une bulle au-dessus de sa tête.')),
+      ]),
       h('dl', {},
         h('dt', {}, t('Stock')), h('dd', {}, t('{b} blagues · {f} anecdotes · {a} phrases de pause', { b: tot.blagues || 0, f: tot.faits || 0, a: tot.ambiance || 0 })),
         h('dt', {}, t('Mise à jour')), h('dd', {}, maj + (B.source ? ' (' + B.source + ')' : ''))),
-      ligne(t('Récolte automatique'), h('label', { class: 'param-case' }, h('input', { type: 'checkbox', checked: R.recolteAuto !== false, on: { change: (e) => this.reglage({ recolteAuto: e.target.checked }) } }), ' ', t('Toutes les 12 h : blagues gratuites en ligne, plus quelques appels Haiku (très peu de tokens).'))),
-      ligne(t('Durée des bulles'),
+      ligneI('bonheur-recolte', t('Récolte automatique'), [t('Coché : le stock de Joy se renouvelle tout seul. Décoché : il ne change plus, sauf si tu lances une récolte avec le bouton ci-dessous.')], h('label', { class: 'param-case' }, h('input', { type: 'checkbox', checked: R.recolteAuto !== false, on: { change: (e) => this.reglage({ recolteAuto: e.target.checked }) } }), ' ', t('Toutes les 12 h : blagues gratuites en ligne, plus quelques appels Haiku (très peu de tokens).'))),
+      ligneI('bonheur-duree', t('Durée des bulles'), [t('Le temps que restent affichées les bulles des agents et de Joy, pour avoir le temps de tout lire.')],
         h('select', { class: 'champ', on: { change: (e) => this.reglage({ dureeBulles: Number(e.target.value) }, t('Enregistré.')) } },
           [[1, t('Normale')], [1.5, t('Un peu plus longue (×1,5)')], [2, t('Longue (×2)')], [3, t('Très longue (×3)')]].map(([v, lib]) =>
-            h('option', { value: String(v), selected: Number(R.dureeBulles || 1) === v ? true : null }, lib))),
-        h('small', { class: 'meta' }, t('Le temps que restent affichées les bulles des agents et de Joy, pour avoir le temps de tout lire.'))),
+            h('option', { value: String(v), selected: Number(R.dureeBulles || 1) === v ? true : null }, lib)))),
       h('div', { class: 'boutons' }, recolte),
-      h('h4', {}, t('Exporter, modifier dans Excel, réimporter')),
+      ...titreI('bonheur-excel', t('Exporter, modifier dans Excel, réimporter'), [
+        t('Excel : une feuille par catégorie (Blagues : Question, Chute ; Anecdotes : Texte ; Pause café : Phrase). CSV : colonnes type ; texte ; chute.'),
+        exempleAide(t('exporte en Excel, ajoute tes blagues de famille dans la feuille Blagues, puis importe le fichier avec « Ajouter aux existants ».')),
+      ]),
       h('div', { class: 'boutons' }, lienExport('xlsx', t('Exporter en Excel')), lienExport('csv', t('Exporter en CSV')), lienExport('json', t('Exporter en JSON'))),
       h('div', { class: 'param-ajout' }, modeImport, h('button', { class: 'petit ok', type: 'button', on: { click: () => fichier.click() } }, t('Importer un fichier…')), fichier),
-      h('small', { class: 'meta' }, t('Excel : une feuille par catégorie (Blagues : Question, Chute ; Anecdotes : Texte ; Pause café : Phrase). CSV : colonnes type ; texte ; chute.')),
       h('h4', {}, t('Modifier directement')),
       this.editeurBonheur(),
     ];
@@ -1043,7 +1292,11 @@ export class Parametres {
     const perm = 'Notification' in window ? Notification.permission : 'unsupported';
     const libPerm = { granted: t('activées'), denied: t('bloquées par le navigateur (réglages du site)'), default: t('non activées'), unsupported: t('non gérées par ce navigateur') }[perm];
     return [
-      h('h4', {}, t('Dictée')),
+      ...titreI('dictee', t('Dictée'), [
+        t('Parler au lieu d’écrire : tu cliques sur 🎤, tu parles, et ton texte s’écrit dans la zone de saisie.'),
+        t('La dictée locale (Whisper) tourne sur ton ordinateur : rien ne part sur Internet, et c’est gratuit.'),
+        exempleAide(t('tu cliques sur 🎤, tu dis « Ajoute un bouton pause au jeu », tu relis, puis tu envoies.')),
+      ]),
       dic.disponible
         ? h('p', {}, t('Transcription locale disponible ({appareil}). Bouton 🎤 en bas de l’écran, ou {raccourci}.', { appareil: dic.appareil || t('chargement du modèle…'), raccourci: infosPlateforme(this.store).raccourciDictee }))
         : !infosPlateforme(this.store).dicteeLocale
@@ -1053,7 +1306,7 @@ export class Parametres {
             h('p', {}, t('La dictée locale (Whisper, sur ton PC, gratuite et privée) n’est pas installée.')),
             h('p', { class: 'meta' }, t('Installation : environ 4 Go avec une carte NVIDIA (rapide), 1,5 Go sans (plus lent). En attendant, la dictée de Windows marche partout : Win+H.')),
             h('div', { class: 'boutons' }, h('button', { class: 'petit ok', type: 'button', on: { click: () => this.poster('/api/dictee/installer', {}, t('L’installation s’ouvre dans une fenêtre à part. Relance le QG quand elle est finie.')) } }, t('Installer la dictée locale')))),
-      h('h4', {}, t('Notifications')),
+      ...titreI('notifications', t('Notifications'), [t('Pour être prévenu quand un agent lève la main ou pose une question, même si le QG est en arrière-plan.')]),
       h('p', { class: 'meta' }, t('Navigateur : {etat}. Quand le QG est au premier plan, la cloche suffit.', { etat: libPerm })),
       perm === 'default' ? h('button', { class: 'petit', type: 'button', on: { click: () => this.ui.notifs.activer() } }, t('Activer les notifications')) : null,
     ];
@@ -1074,7 +1327,9 @@ export class Parametres {
           h('div', { class: 'boutons' }, h('button', { class: 'petit', type: 'button', on: { click: () => this.quitterDemo() } }, t('Quitter la démo'))))
         : h('div', {}, h('p', {}, t('Découvre le QG sans rien consommer : un immeuble fictif où une douzaine d’agents simulés travaillent en parallèle, se réunissent et se passent le relais. La démo s’ouvre dans sa propre fenêtre, sur un autre port ; ton QG continue de tourner normalement.')),
           h('div', { class: 'boutons' }, h('button', { class: 'petit ok', type: 'button', on: { click: (e) => this.lancerDemo(e.currentTarget) } }, t('Lancer la démo')))),
-      h('h4', {}, t('Mises à jour')),
+      ...titreI('maj', t('Mises à jour'), [
+        t('Coché : à chaque lancement, le QG regarde s’il existe une version plus récente et l’installe avant de démarrer. Décoché : rien ne change tant que tu ne le demandes pas, juste en dessous.'),
+      ]),
       h('label', { class: 'param-case' },
         h('input', { type: 'checkbox', checked: R.miseAJourAuto !== false, on: { change: (e) => this.reglage({ miseAJourAuto: e.target.checked }, t('Enregistré.')) } }),
         ' ', t('Mettre à jour automatiquement au lancement du QG (si une nouvelle version est publiée, elle s’installe avant que le QG démarre).')),

@@ -1,11 +1,13 @@
 // Routeur multi-IA (docs/multi-ia/conception.md §5) : quel compte, quel modèle et quel effort pour chaque rôle
 // (DG, production selon la nature de la tâche, vérificateur, questions, ambiance). Les priorités se règlent
-// dans config/priorites.json (défauts : config/defauts/priorites.json, listes vides = comme en 1.0.5, tout sur
-// le compte de la demande).
+// dans config/priorites.json (défauts : config/defauts/priorites.json ; listes vides : tout tourne sur le compte
+// de la demande). Le même fichier garde le réglage du DG (compte, modèle, effort), les consignes de l'utilisateur
+// au DG (une générale, une par type de tâche) et l'ordre des comptes vers lesquels basculer (quota.ordre).
 // Règle D4 : le routeur ne bascule jamais seul d'un compte à un autre. Un compte choisi qui est en pause
-// (limite d'usage, connexion perdue) met la tâche en attente, avec une proposition que seul l'utilisateur peut
-// accepter (carte de décision de l'ordonnanceur). Un compte qui ne sait pas faire le profil d'une tâche, lui,
-// est écarté sans bruit (ce n'est pas un contournement de limite) : le rôle n'est jamais laissé sans IA tant
+// (limite d'usage, connexion perdue) met la tâche en attente, avec une proposition : selon quota.bascule,
+// l'utilisateur l'accepte (carte de décision de l'ordonnanceur, défaut), l'ordonnanceur la prend tout seul
+// (« auto », que l'utilisateur a choisi), ou il n'y en a pas (« jamais »). Un compte qui ne sait pas faire le
+// profil d'une tâche, lui, est écarté sans bruit (ce n'est pas un contournement de limite) : le rôle n'est jamais laissé sans IA tant
 // qu'un compte connecté peut le faire, qualifié de préférence.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -23,6 +25,9 @@ export const TYPES = ['code', 'recherche', 'redaction', 'image', 'defaut'];
 export const NATURES = ['analyse', 'impl', 'bench', 'test', 'review', 'doc', 'asset', 'synthese', 'ops'];
 const ROLES = ['verif', 'ambiance'];
 const MOTEURS = ['abonnement', 'api'];
+// Compte en pause, un autre est libre : demander (carte), auto (y passer tout seul), jamais (attendre).
+export const BASCULES = ['demander', 'auto', 'jamais'];
+export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
 
 const lireJson = (f) => {
   try {
@@ -38,7 +43,7 @@ let cache = null;
 export function chargerPriorites() {
   if (cache) return cache;
   const base = lireJson(DEFAUTS) || {};
-  cache = normaliser(lireJson(fichierPriorites()) || {}, normaliser(base, null));
+  cache = normaliser(migrer(lireJson(fichierPriorites()) || {}), normaliser(base, null));
   return cache;
 }
 
@@ -47,7 +52,22 @@ export function rechargerPriorites() {
   return chargerPriorites();
 }
 
-const texte = (v, max) => (typeof v === 'string' ? v.replace(/[\r\t]+/g, ' ').trim().slice(0, max) : '');
+// texte : une ligne ; texteLong : plusieurs lignes (consignes), sans tabulation ni grands blancs
+const texte = (v, max) => (typeof v === 'string' ? v.replace(/[\r\n\t]+/g, ' ').trim().slice(0, max) : '');
+const texteLong = (v, max) => (typeof v === 'string' ? v.replace(/\r\n?/g, '\n').replace(/\t/g, ' ').replace(/\n{3,}/g, '\n\n').trim().slice(0, max) : '');
+const idCompte = (v) => (typeof v === 'string' && /^[\w.-]{1,40}$/.test(v) ? v : null);
+
+// Fichier d'avant la 1.0.7 (version 1) : dg.modele et dg.effort ne pouvaient que relever le modèle et l'effort
+// du DG des réglages ; une valeur plus basse était sans effet. Ils sont maintenant le réglage lui-même : une
+// valeur plus basse est retirée (le DG garde ce qu'il avait).
+function migrer(brut) {
+  if ((brut.version || 1) >= 2 || !brut.dg || typeof brut.dg !== 'object') return brut;
+  const dg = { ...brut.dg };
+  const ref = REGLAGES.dg || {};
+  if (typeof dg.modele === 'string' && ref.modele && rangNiveau(niveauModele(dg.modele)) < rangNiveau(niveauModele(ref.modele))) dg.modele = null;
+  if (typeof dg.effort === 'string' && EFFORTS.indexOf(dg.effort) <= EFFORTS.indexOf(ref.effort)) dg.effort = null;
+  return { ...brut, dg };
+}
 
 function entree(e) {
   if (!e || typeof e !== 'object') return null;
@@ -65,14 +85,24 @@ const ordre = (liste) => (Array.isArray(liste) ? liste.map(entree).filter(Boolea
 
 // Ramène un brut (fichier ou modification du site) à la forme attendue ; base : valeurs à garder.
 function normaliser(brut, base) {
-  const b = base || { version: 1, types: {}, roles: {}, dg: { compte: null, modele: null, effort: null }, consigneDg: '', quota: { pause: 'compte', proposerBascule: true }, delegation: DELEGATION_DEFAUT };
-  const r = { version: 1, types: {}, roles: {}, dg: { ...b.dg }, consigneDg: b.consigneDg, quota: { ...b.quota }, delegation: structuredClone(b.delegation || DELEGATION_DEFAUT) };
+  const b = base || { version: 2, types: {}, roles: {}, dg: { compte: null, modele: null, effort: null }, consigneDg: '', quota: { pause: 'compte', bascule: 'demander', ordre: [], seulementListe: false }, delegation: DELEGATION_DEFAUT };
+  const r = {
+    version: 2,
+    types: {},
+    roles: {},
+    dg: { ...b.dg },
+    consigneDg: b.consigneDg || '',
+    quota: { pause: b.quota.pause || 'compte', bascule: b.quota.bascule || 'demander', ordre: [...(b.quota.ordre || [])], seulementListe: b.quota.seulementListe === true },
+    delegation: structuredClone(b.delegation || DELEGATION_DEFAUT),
+  };
   for (const ty of TYPES) {
     const src = brut.types?.[ty] || {};
-    const avant = b.types[ty] || { natures: [], ordre: [] };
+    const avant = b.types[ty] || { natures: [], ordre: [], consigne: '' };
     r.types[ty] = {
       ...(ty === 'defaut' ? {} : { natures: Array.isArray(src.natures) ? [...new Set(src.natures.filter((n) => NATURES.includes(n)))] : [...(avant.natures || [])] }),
       ordre: ordre(src.ordre) ?? [...avant.ordre],
+      // consigne de l'utilisateur pour ce type de tâche (recopiée dans la mission de chaque tâche du type)
+      consigne: typeof src.consigne === 'string' ? texteLong(src.consigne, 1000) : avant.consigne || '',
     };
   }
   // une nature n'appartient qu'à un type : le dernier qui la réclame dans cette modification la garde
@@ -81,13 +111,23 @@ function normaliser(brut, base) {
     for (const n of r.types[ty].natures) for (const autre of TYPES) if (autre !== ty && r.types[autre].natures) r.types[autre].natures = r.types[autre].natures.filter((x) => x !== n);
   }
   for (const ro of ROLES) r.roles[ro] = { ordre: ordre(brut.roles?.[ro]?.ordre) ?? [...(b.roles[ro]?.ordre || [])] };
+  // DG des nouvelles demandes : compte (null = celui de la demande), modèle et effort (null = ceux des réglages)
   if (brut.dg && typeof brut.dg === 'object') {
-    for (const k of ['compte', 'modele', 'effort']) if (k in brut.dg) r.dg[k] = texte(brut.dg[k], 80) || null;
+    if ('compte' in brut.dg) r.dg.compte = idCompte(brut.dg.compte);
+    if ('modele' in brut.dg) r.dg.modele = texte(brut.dg.modele, 80) || null;
+    if ('effort' in brut.dg) r.dg.effort = EFFORTS.includes(brut.dg.effort) ? brut.dg.effort : null;
   }
-  if (typeof brut.consigneDg === 'string') r.consigneDg = texte(brut.consigneDg, 2000);
+  if (typeof brut.consigneDg === 'string') r.consigneDg = texteLong(brut.consigneDg, 2000);
   if (brut.quota && typeof brut.quota === 'object') {
     if (['compte', 'globale'].includes(brut.quota.pause)) r.quota.pause = brut.quota.pause;
-    if (typeof brut.quota.proposerBascule === 'boolean') r.quota.proposerBascule = brut.quota.proposerBascule;
+    if (BASCULES.includes(brut.quota.bascule)) r.quota.bascule = brut.quota.bascule;
+    // avant la 1.0.7 : proposerBascule oui / non
+    else if (typeof brut.quota.proposerBascule === 'boolean') r.quota.bascule = brut.quota.proposerBascule ? 'demander' : 'jamais';
+    // comptes vers lesquels basculer, dans l'ordre ; seulementListe : jamais un autre compte que ceux-là
+    if (Array.isArray(brut.quota.ordre)) r.quota.ordre = [...new Set(brut.quota.ordre.map(idCompte).filter(Boolean))].slice(0, 20);
+    if (typeof brut.quota.seulementListe === 'boolean') r.quota.seulementListe = brut.quota.seulementListe;
+    // liste vidée : la case « seulement ces comptes » n'est plus montrée, elle ne filtre plus rien
+    if (!r.quota.ordre.length) r.quota.seulementListe = false;
   }
   if (brut.delegation?.images && typeof brut.delegation.images === 'object') normaliserImages(brut.delegation.images, r.delegation.images);
   return r;
@@ -128,6 +168,40 @@ export function modifierPriorites(patch = {}) {
 
 export function typeDe(nature, prio = chargerPriorites()) {
   return TYPES.find((ty) => ty !== 'defaut' && prio.types[ty]?.natures?.includes(nature)) || 'defaut';
+}
+
+// ---------------------------------------------------------------- DG et consignes (Réglages › Priorités)
+
+/** Modèle et effort conseillés pour le DG (config/defauts/reglages.json), pour le bouton « Remettre le conseillé ». */
+export function dgConseille() {
+  const d = lireJson(path.join(RACINE, 'config', 'defauts', 'reglages.json'))?.dg || {};
+  return { modele: d.modele || 'opus', effort: d.effort || 'xhigh' };
+}
+
+/** Vrai si le modèle ou l'effort du DG est plus bas que le conseillé : le site le signale, sans rien changer. */
+export function dgSousConseille(dg = reglageDg()) {
+  const c = dgConseille();
+  const r = rangNiveau(niveauModele(dg.modele));
+  const rc = rangNiveau(niveauModele(c.modele));
+  return (r >= 0 && rc >= 0 && r < rc) || EFFORTS.indexOf(dg.effort) < EFFORTS.indexOf(c.effort);
+}
+
+/** DG des nouvelles demandes : compte (null = celui de la demande), modèle, effort. Le coût ne le change jamais. */
+export function reglageDg(prio = chargerPriorites()) {
+  return { compte: prio.dg.compte || null, modele: prio.dg.modele || REGLAGES.dg.modele, effort: prio.dg.effort || REGLAGES.dg.effort };
+}
+
+// Consignes de l'utilisateur au DG : une générale (méthode, style, choix des IA) et une par type de tâche. Figées
+// dans le dossier à l'envoi (d.consignes) : changer les réglages ne touche pas une demande déjà partie.
+export function consignesActuelles(prio = chargerPriorites()) {
+  return { generale: prio.consigneDg || '', types: Object.fromEntries(TYPES.filter((ty) => prio.types[ty]?.consigne).map((ty) => [ty, prio.types[ty].consigne])) };
+}
+export const consignesDossier = (d) => d?.consignes || consignesActuelles();
+
+/** Consigne d'une tâche : celle de son type, sinon celle « par défaut » ; '' s'il n'y en a pas. */
+export function consigneTache(t, d) {
+  const c = consignesDossier(d).types || {};
+  return c[typeDe(t.nature)] || c.defaut || '';
 }
 
 // ---------------------------------------------------------------- comptes
@@ -328,7 +402,7 @@ export function modelePour(c, modele, effort, e = null) {
       pourquoi = tr('priorités, niveau {niveau}', { niveau: e.niveau });
     }
   }
-  // Claude : effort transmis tel quel (comme en 1.0.5) ; autres : le plus proche disponible pour ce modèle
+  // Claude : effort transmis tel quel ; autres : le plus proche disponible pour ce modèle
   const eff = f === 'claude' || !effort ? effort : convertirEffort(c, choisi, effort);
   const justification = choisi !== demande || eff !== effort
     ? `${demande || '?'}${effort ? `/${effort}` : ''} → ${choisi || tr('défaut')}${eff ? `/${eff}` : ''}${pourquoi ? ` (${pourquoi})` : ''}`
@@ -360,11 +434,12 @@ function replis(comptes, profil, exclure = new Set()) {
 
 /**
  * Compte pour un travail : liste ordonnée de candidats [{ id, e, base }] → premier compte apte.
- * - inconnu, profil refusé, non connecté : écarté sans bruit (sauf le compte de la demande, `base`, passé tel
- *   quel s'il n'est pas dans la liste : même comportement qu'en 1.0.5) ;
+ * - inconnu, profil refusé, non connecté : écarté sans bruit (sauf le compte de la demande, `base`, dernier
+ *   recours gardé tel quel, même absent de la liste des comptes) ;
  * - en pause : jamais sauté ; attente + proposition (bascule acceptée pour ce dossier : prise directement).
+ * quota : priorités.quota (ordre des comptes proposés à la place d'un compte bloqué).
  */
-function premierApte(candidats, { profil, comptes, bascules = {}, impose = false }) {
+function premierApte(candidats, { profil, comptes, bascules = {}, impose = false, quota = {} }) {
   const parId = new Map(comptes.map((c) => [c.id, c]));
   const raisons = [];
   const vus = new Set();
@@ -388,23 +463,28 @@ function premierApte(candidats, { profil, comptes, bascules = {}, impose = false
     if (!pause && !cand.base && !connecte(c)) {
       const m = tr('{nom} non connecté', { nom: nomDe(c) });
       raisons.push(m);
-      if (impose) return { attente: { motif: m, compteBloque: c.id, raison: m, proposition: propositionPour(c.id, profil, comptes) } };
+      if (impose) return { attente: { motif: m, compteBloque: c.id, raison: m, proposition: propositionPour(c.id, profil, comptes, quota) } };
       continue;
     }
     if (pause) {
       // bascule acceptée par l'utilisateur pour ce dossier : le compte de remplacement, s'il peut travailler
       const vers = bascules[c.id] && parId.get(bascules[c.id]);
       if (vers && profilPour(vers, profil).ok && !pauseDe(vers.id) && connecte(vers)) return { compte: vers.id, c: vers, e: null, bascule: c.id };
-      return { attente: { motif: motifPause(c, pause), compteBloque: c.id, raison: pause.raison, pause, proposition: propositionPour(c.id, profil, comptes) } };
+      return { attente: { motif: motifPause(c, pause), compteBloque: c.id, raison: pause.raison, pause, proposition: propositionPour(c.id, profil, comptes, quota) } };
     }
     return { compte: c.id, c, e: cand.e };
   }
   return { raisons };
 }
 
-// Compte que l'on peut proposer à l'utilisateur à la place d'un compte bloqué (jamais pris sans son accord).
-function propositionPour(bloque, profil, comptes) {
-  const c = replis(comptes, profil, new Set([bloque])).find((x) => !pauseDe(x.id)) || null;
+// Compte que l'on peut proposer à l'utilisateur à la place d'un compte bloqué (pris sans lui demander
+// seulement s'il l'a permis : quota.bascule « auto »). Parmi les comptes libres : ceux de quota.ordre d'abord,
+// dans cet ordre, puis les autres (qualifiés d'abord) ; avec quota.seulementListe, ceux de la liste seulement.
+function propositionPour(bloque, profil, comptes, quota = {}) {
+  const liste = quota.ordre || [];
+  const rang = (c) => (liste.includes(c.id) ? liste.indexOf(c.id) : liste.length);
+  const libres = replis(comptes, profil, new Set([bloque])).filter((x) => !pauseDe(x.id) && (!quota.seulementListe || !liste.length || liste.includes(x.id)));
+  const c = libres.sort((a, b) => rang(a) - rang(b))[0] || null;
   return c ? { compte: c.id, nom: c.nom } : null;
 }
 
@@ -440,7 +520,7 @@ export function choisirProduction(t, d, ctx = {}) {
   const collant = t.x?.session && t.x?.compteSession && (t.x.compteSession === base || comptes.some((c) => c.id === t.x.compteSession)) ? t.x.compteSession : null;
   const impose = collant || d?.compteImpose || t.x?.compteDemande || null;
   if (impose) {
-    const choix = premierApte([{ id: impose, base: impose === base }], { profil, comptes, bascules, impose: true });
+    const choix = premierApte([{ id: impose, base: impose === base }], { profil, comptes, bascules, impose: true, quota: prio.quota });
     if (choix.attente) return { compte: impose, fournisseur: null, modele: t.modele, effort: t.effort, justification: null, attente: choix.attente, bascule: null };
     return resultat(choix, t.modele, t.effort, { impose: true });
   }
@@ -453,13 +533,13 @@ export function choisirProduction(t, d, ctx = {}) {
   } else {
     candidats = [...deplier(entrees, comptes), { id: base, e: null, base: true }];
   }
-  const choix = premierApte(candidats, { profil, comptes, bascules });
+  const choix = premierApte(candidats, { profil, comptes, bascules, quota: prio.quota });
   if (choix.attente) return { compte: choix.attente.compteBloque, fournisseur: null, modele: t.modele, effort: t.effort, justification: null, attente: choix.attente, bascule: null };
   if (choix.compte) return resultat(choix, t.modele, t.effort);
   // IA imposée sans compte apte : on ne la remplace pas par une autre IA (le DG l'a demandée explicitement)
   if (ia) return attenteAucun(profil, choix.raisons.length ? choix.raisons : [tr('aucun compte {ia} connecté', { ia })]);
   const repli = replis(comptes, profil).map((c) => ({ id: c.id, e: null }));
-  const r2 = premierApte(repli, { profil, comptes, bascules });
+  const r2 = premierApte(repli, { profil, comptes, bascules, quota: prio.quota });
   if (r2.attente) return { compte: r2.attente.compteBloque, fournisseur: null, modele: t.modele, effort: t.effort, justification: null, attente: r2.attente, bascule: null };
   if (r2.compte) return resultat(r2, t.modele, t.effort, { repli: true });
   return attenteAucun(profil, [...choix.raisons, ...r2.raisons]);
@@ -468,7 +548,7 @@ export function choisirProduction(t, d, ctx = {}) {
 /**
  * Vérificateur : un compte d'un autre fournisseur si le DG a choisi un modèle de cet autre fournisseur (relecture
  * croisée) et qu'un compte connecté et libre l'a ; sinon la liste « verif » des priorités ; sinon le compte qui a
- * produit la tâche (comme en 1.0.5).
+ * produit la tâche.
  */
 export function choisirVerif(t, d, ctx = {}) {
   const v = t.x?.verification || {};
@@ -484,30 +564,32 @@ export function choisirVerif(t, d, ctx = {}) {
   }
   candidats.push(...deplier(prio.roles.verif?.ordre, comptes), { id: prod, e: null, base: true });
   const bascules = d?.x?.bascules || {};
-  const choix = premierApte(candidats, { profil: 'verif', comptes, bascules });
+  const choix = premierApte(candidats, { profil: 'verif', comptes, bascules, quota: prio.quota });
   if (choix.attente) return { compte: choix.attente.compteBloque, fournisseur: null, modele: v.modele, effort: v.effort, justification: null, attente: choix.attente };
   if (choix.compte) return resultat(choix, v.modele, v.effort, { croise: !!(choix.c && cProd && fournisseurDe(choix.c) !== fournisseurDe(cProd)) });
   // le compte de production ne sait pas vérifier : un autre compte qui le sait (qualifié d'abord)
-  const r2 = premierApte(replis(comptes, 'verif').map((c) => ({ id: c.id, e: null })), { profil: 'verif', comptes, bascules });
+  const r2 = premierApte(replis(comptes, 'verif').map((c) => ({ id: c.id, e: null })), { profil: 'verif', comptes, bascules, quota: prio.quota });
   if (r2.attente) return { compte: r2.attente.compteBloque, fournisseur: null, modele: v.modele, effort: v.effort, justification: null, attente: r2.attente };
   if (r2.compte) return resultat(r2, v.modele, v.effort, { repli: true });
   return { ...attenteAucun('verif', [...choix.raisons, ...r2.raisons]), modele: v.modele, effort: v.effort };
 }
 
 /**
- * DG d'une nouvelle demande. demandeCompte : compte choisi sur la demande ('auto' ou absent = automatique).
- * Automatique : priorités (dg.compte), puis le compte par défaut, puis le premier compte connecté (qualifié
- * d'abord). Un compte choisi explicitement est pris tel quel (comme en 1.0.5). Un compte en pause n'est pas
- * remplacé (D4) : le DG attendra la remise à zéro.
+ * Compte du DG d'une nouvelle demande. demandeCompte : compte de la demande (barre du bas ; 'auto' ou absent :
+ * aucun). Ordre : le compte de Réglages › Priorités › DG (dg.compte) s'il est connecté, sinon le compte de la
+ * demande, sinon le compte par défaut, sinon le premier compte connecté (qualifié d'abord). Un compte en pause
+ * reste choisi (D4) : le DG attendra la remise à zéro, il ne bascule jamais.
  */
 export function choisirDg(demandeCompte = null, ctx = {}) {
   const { defaut } = chargerComptes();
   const comptes = ctx.comptes || comptesActifs();
   const prio = ctx.priorites || chargerPriorites();
-  if (demandeCompte && demandeCompte !== 'auto') return comptes.find((c) => c.id === demandeCompte) || null;
   const apte = (c) => c && profilPour(c, 'lecture').ok && connecte(c);
   const parId = new Map(comptes.map((c) => [c.id, c]));
-  for (const c of [parId.get(prio.dg.compte), parId.get(defaut)]) if (apte(c)) return c;
+  const regle = parId.get(prio.dg.compte);
+  if (apte(regle)) return regle;
+  if (demandeCompte && demandeCompte !== 'auto') return parId.get(demandeCompte) || null;
+  if (apte(parId.get(defaut))) return parId.get(defaut);
   return replis(comptes, 'lecture')[0] || parId.get(defaut) || comptes[0] || null;
 }
 
@@ -540,7 +622,7 @@ export function choisirAmbiance({ modeleClaude = 'haiku', defautDabord = true, c
 /** Comptes actifs et connectés (le DG ne choisit que parmi eux). */
 export const comptesDisponibles = (comptes = comptesActifs()) => comptes.filter((c) => connecte(c));
 
-/** Un compte connecté autre que Claude ? (sinon le schéma et la directive du DG restent ceux de la 1.0.5) */
+/** Un compte connecté autre que Claude ? (sinon le schéma et la directive du DG ne parlent que de Claude) */
 // sans liste : seuls les comptes autres que Claude sont sondés (le chemin tout Claude ne teste aucune connexion)
 export const multiIa = (comptes = null) =>
   comptes ? comptes.some((c) => fournisseurDe(c) !== 'claude') : comptesActifs().some((c) => fournisseurDe(c) !== 'claude' && connecte(c));
@@ -572,7 +654,7 @@ export function choisirImage({ precise = false } = {}, prio = chargerPriorites()
     const p = a ? pauseDe(a.id) : null;
     if (a && !p) return { moteur: 'api', compte: a.id };
     raisons.push(a ? motifPause(a, p, a.id) : tr("aucun compte ChatGPT · Codex avec clé API pour l'API Images"));
-  } else if (precise || !abo) raisons.push(tr('API Images désactivée (Réglages › Priorités › Délégation)'));
+  } else if (precise || !abo) raisons.push(tr('API Images désactivée (Réglages › Priorités › Images)'));
   if (!cands.length) raisons.unshift(tr('aucun compte ChatGPT · Codex'));
   return { indisponible: raisons.join(' ; ') };
 }
@@ -600,24 +682,25 @@ export function resumePriorites(prio = chargerPriorites()) {
 
 /**
  * Préréglages proposés selon les comptes présents (site, configuration guidée). Chaque préréglage est un patch
- * pour modifierPriorites.
+ * pour modifierPriorites. Un bouton par compte, au nom que l'utilisateur lui a donné (« Tout sur Perso Claude »).
  */
 export function prereglages(comptes = comptesActifs()) {
   const parF = (f) => comptes.filter((c) => fournisseurDe(c) === f);
   const vide = Object.fromEntries(TYPES.map((ty) => [ty, { ordre: [] }]));
-  const r = [{ id: 'demande', libelle: tr('Tout sur le compte de la demande'), patch: { types: vide, roles: { verif: { ordre: [] }, ambiance: { ordre: [] } } } }];
-  for (const f of ['claude', 'codex', 'acp']) {
-    if (!parF(f).length) continue;
-    const nom = f === 'acp' ? tr('Autres agents') : FOURNISSEURS[f].nom.split(' ')[0];
-    const tout = Object.fromEntries(TYPES.map((ty) => [ty, { ordre: [{ fournisseur: f }] }]));
-    r.push({ id: `tout-${f}`, libelle: tr('Tout sur {ia}', { ia: nom }), patch: { types: tout, roles: { verif: { ordre: [] }, ambiance: { ordre: [{ fournisseur: f }] } }, dg: { compte: parF(f)[0].id } } });
+  const r = [{ id: 'demande', libelle: tr('Tout sur le compte de la demande'), patch: { types: vide, roles: { verif: { ordre: [] }, ambiance: { ordre: [] } }, dg: { compte: null } } }];
+  for (const c of comptes) {
+    const sur = [{ compte: c.id }];
+    const tout = Object.fromEntries(TYPES.map((ty) => [ty, { ordre: sur }]));
+    r.push({ id: `tout-${c.id}`, libelle: tr('Tout sur {compte}', { compte: nomDe(c, c.id) }), patch: { types: tout, roles: { verif: { ordre: [] }, ambiance: { ordre: sur } }, dg: { compte: c.id } } });
   }
-  if (parF('claude').length && parF('codex').length) {
+  const [claude, codex] = [parF('claude')[0], parF('codex')[0]];
+  if (claude && codex) {
+    const [a, b] = [[{ compte: claude.id }], [{ compte: codex.id }]];
     r.push({
       id: 'claude-code-codex-redaction',
-      libelle: tr('Claude pour le code, Codex pour la rédaction et les images'),
+      libelle: tr('{code} pour le code, {redaction} pour la rédaction et les images', { code: nomDe(claude, claude.id), redaction: nomDe(codex, codex.id) }),
       patch: {
-        types: { code: { ordre: [{ fournisseur: 'claude' }] }, recherche: { ordre: [{ fournisseur: 'claude' }] }, redaction: { ordre: [{ fournisseur: 'codex' }] }, image: { ordre: [{ fournisseur: 'codex' }] }, defaut: { ordre: [{ fournisseur: 'claude' }] } },
+        types: { code: { ordre: a }, recherche: { ordre: a }, redaction: { ordre: b }, image: { ordre: b }, defaut: { ordre: a } },
         roles: { verif: { ordre: [] }, ambiance: { ordre: [] } },
       },
     });
@@ -630,23 +713,47 @@ export function prereglages(comptes = comptesActifs()) {
  * leurs connexions et leurs pauses. Simulation seule : rien n'est lancé. Les questions suivent le compte de la
  * tâche qui les pose.
  * → { dg, types: { code: ligne… }, verif, ambiance, images } ; ligne = { compte, attente, repli }.
+ * dg : en plus, demande (sans compte réglé, le DG prend celui de la demande ; l'aperçu montre le compte par
+ * défaut) et repli avec son motif (compte réglé non connecté).
  */
 export function apercu(prio = chargerPriorites(), comptes = comptesActifs()) {
   const ctx = { priorites: prio, comptes };
   const ligne = (r) => ({ compte: r?.compte || null, attente: r?.attente?.motif || (r?.compte ? null : tr('aucun compte connecté')), repli: !!r?.repli });
   const dg = choisirDg(null, ctx);
   const pDg = dg ? pauseDe(dg.id) : null;
-  const d = dg ? { compte: dg.id } : null;
+  // les tâches tournent sur le compte de la demande (ici : le compte par défaut) ou sur « Agents de la demande »,
+  // jamais sur celui du DG
+  const demande = choisirDg(null, { comptes, priorites: { ...prio, dg: { ...prio.dg, compte: null } } });
+  const agents = REGLAGES.compteAgents && comptes.some((c) => c.id === REGLAGES.compteAgents) ? REGLAGES.compteAgents : null;
+  const d = demande ? { compte: demande.id, compteAgents: agents } : null;
+  // Seulement des comptes Claude connectés : quand une liste ne donne rien, l'ordonnanceur garde les tâches sur le
+  // compte de la demande et le vérificateur sur le compte de la tâche (pas de repli ; calculerRoute, routerVerif).
+  const multi = comptes.some((c) => fournisseurDe(c) !== 'claude' && connecte(c));
+  const base = compteTache(d);
+  const production = (a) => {
+    if (multi || !base) return ligne(a);
+    if (a.attente && (a.attente.pause || (a.attente.compteBloque && a.attente.compteBloque !== base))) return ligne(a);
+    return a.attente || a.repli ? ligne({ compte: base }) : ligne(a);
+  };
   const types = {};
   for (const ty of TYPES) {
     const nature = ty === 'defaut' ? '-' : prio.types[ty]?.natures?.[0];
-    types[ty] = nature ? ligne(choisirProduction({ nature, x: { profil: 'edition' } }, d, ctx)) : null;
+    types[ty] = nature ? production(choisirProduction({ nature, x: { profil: 'edition' } }, d, ctx)) : null;
   }
-  const verif = ligne(choisirVerif({ compte: types.code?.compte || dg?.id, x: { verification: {} } }, d, ctx));
-  const amb = choisirAmbiance({ comptes, priorites: prio });
+  const prodCode = types.code?.compte || base;
+  const v = choisirVerif({ compte: prodCode, x: { verification: {} } }, d, ctx);
+  const verif = !multi && prodCode && (v.repli || v.attente || !v.compte) ? ligne({ compte: prodCode }) : ligne(v);
+  // comme bonheur.js : la liste de l'ambiance, puis les comptes connectés (qualifiés d'abord)
+  const amb = choisirAmbiance({ comptes, priorites: prio, defautDabord: false });
   const im = prio.delegation.images.actif ? choisirImage({}, prio, comptes) : null;
   return {
-    dg: { compte: dg?.id || null, attente: pDg ? motifPause(dg, pDg, dg.id) : dg ? null : tr('aucun compte connecté'), repli: false },
+    dg: {
+      compte: dg?.id || null,
+      attente: pDg ? motifPause(dg, pDg, dg.id) : dg ? null : tr('aucun compte connecté'),
+      demande: !prio.dg.compte,
+      repli: !!(prio.dg.compte && dg?.id !== prio.dg.compte),
+      motif: prio.dg.compte && dg?.id !== prio.dg.compte ? tr('{nom} non connecté', { nom: nomDe(comptes.find((c) => c.id === prio.dg.compte), prio.dg.compte) }) : null,
+    },
     types,
     verif,
     ambiance: { compte: amb?.compte || null, attente: amb ? null : tr('aucun compte connecté'), repli: false },

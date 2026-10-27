@@ -36,7 +36,7 @@ const JOY_VISITE = [20000, 30000]; // salle de pause : Joy passe voir un joueur,
 
 // ---------- où voit-on qui ? ----------
 // Une tâche qui n'a pas démarré attend dans la salle de pause ; un agent en réserve dort dans la salle de repos.
-// Sans ces étages (ancien serveur), tout le monde reste sur l'étage de son projet, comme avant.
+// Sans ces étages (serveur qui ne les publie pas), tout le monde reste sur l'étage de son projet.
 const EN_ATTENTE = new Set(['planned', 'waiting', 'ready', 'queued']);
 export function etageDeType(S, type) {
   return (S.etages || []).find((e) => e && e.type === type) || null;

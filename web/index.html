@@ -19,6 +19,7 @@
     <div class="marque">
       <span class="logo" aria-hidden="true"></span>
       <span class="nom" data-t>QG des agents</span>
+      <button id="btn-version" class="version-bouton" type="button" hidden data-t-title="Notes de version : ce qui a changé à chaque version" title="Notes de version : ce qui a changé à chaque version"></button>
       <span id="badge-demo" class="badge-demo" hidden data-t-title="Démo : agents simulés, aucun token consommé" title="Démo : agents simulés, aucun token consommé" data-t>DÉMO</span>
       <span id="statut" class="statut"></span>
       <label class="choix-langue" data-t-title="Langue de l’interface" title="Langue de l’interface">
@@ -30,7 +31,6 @@
         <select id="choix-langue-ia" data-t-aria="Langue des IA" aria-label="Langue des IA"></select>
       </label>
     </div>
-    <div id="alertes" aria-live="polite"></div>
     <div class="actions-haut">
       <button id="btn-conso" class="conso-bouton" type="button" data-t-aria="Consommation" aria-label="Consommation"></button>
       <button id="btn-documents" class="discret" type="button" data-t-title="Les fichiers .md de cet étage, mis en forme" title="Les fichiers .md de cet étage, mis en forme">📄 <span data-t>Documents</span></button>
@@ -44,9 +44,12 @@
       </div>
       <button id="btn-reglages" class="discret" type="button" data-t-title="Réglages : comptes, dossiers, connecteurs, équipe, blagues…" title="Réglages">⚙ <span data-t>Réglages</span></button>
       <button id="btn-recentrer" class="discret" data-t-title="Recentrer la vue (double-clic sur la scène)" title="Recentrer la vue (double-clic sur la scène)" data-t>Recentrer</button>
+      <button id="btn-fermer" class="discret" type="button" data-t-title="Fermer le QG : les agents s’arrêtent, puis le serveur et sa fenêtre se ferment" title="Fermer le QG : les agents s’arrêtent, puis le serveur et sa fenêtre se ferment" data-t>Fermer</button>
       <button id="btn-urgence" class="urgence" data-t-title="Arrêt d'urgence : tout s'arrête" title="Arrêt d'urgence : tout s'arrête" data-t>Arrêt d'urgence</button>
     </div>
   </header>
+  <!-- hors du bandeau du haut (z-index 60) : les messages passent devant les fenêtres comme Réglages -->
+  <div id="alertes" aria-live="polite"></div>
 
   <div id="bandeau-pause" hidden>
     <span class="icone-pause" aria-hidden="true"></span>
@@ -114,24 +117,19 @@
     <button id="btn-joindre" class="outil-saisie" type="button" data-t-title="Joindre des images (png, jpg, webp, gif ; 10 au plus, 15 Mo chacune). Tu peux aussi coller (Ctrl+V) ou glisser-déposer." title="Joindre des images" data-t-aria="Joindre des images" aria-label="Joindre des images">📎</button>
     <input id="fichier-joindre" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden>
     <button id="btn-dictee" class="outil-saisie dictee" type="button" data-t-aria="Dicter" aria-label="Dicter"><span class="micro" aria-hidden="true">🎤</span><span class="etiquette"></span></button>
-    <div id="comptes" role="group" data-t-aria="Compte Claude" aria-label="Compte Claude"></div>
-    <div id="reglage-cout" class="reglage-dg reglage-cout" hidden>
+    <div id="comptes" role="group" data-t-aria="Compte IA de la prochaine demande" aria-label="Compte IA de la prochaine demande"></div>
+    <div id="reglage-cout" class="pastille-envoi reglage-cout" hidden>
       <span class="lib" data-t>Coût :</span>
       <select id="cout-demande" data-t-aria="Coût de cette demande" aria-label="Coût de cette demande"></select>
     </div>
-    <div id="reglage-dg" class="reglage-dg" hidden>
-      <span class="lib" data-t>DG :</span>
-      <select id="dg-modele" data-t-aria="Modèle du DG pour cette demande" aria-label="Modèle du DG pour cette demande"></select>
-      <span class="sep">·</span>
-      <select id="dg-effort" data-t-aria="Effort du DG pour cette demande" aria-label="Effort du DG pour cette demande"></select>
-      <button id="btn-skills" class="outil-saisie skills" type="button" data-t-aria="Skills pour ce dossier" aria-label="Skills pour ce dossier">🧩<span class="nb" hidden></span></button>
-    </div>
+    <button id="btn-skills" class="outil-saisie skills" type="button" data-t-aria="Skills pour ce dossier" aria-label="Skills pour ce dossier">🧩<span class="nb" hidden></span></button>
     <div class="envoi" role="group" data-t-aria="Envoi du message" aria-label="Envoi du message">
       <select id="cible-saisie" class="cible-saisie" data-t-aria="Où va le message" aria-label="Où va le message">
         <option value="nouveau" data-t>Nouveau dossier</option>
       </select>
       <button id="btn-envoyer" class="envoyer" data-t>Envoyer</button>
     </div>
+    <button id="btn-reglages-envoi" class="outil-saisie reglages-envoi" type="button" data-t-title="Réglages avant l’envoi : DG, consignes, comptes (Réglages › Priorités)" title="Réglages avant l’envoi : DG, consignes, comptes (Réglages › Priorités)" data-t-aria="Réglages avant l’envoi" aria-label="Réglages avant l’envoi">⚙</button>
     <button id="btn-rejouer" class="outil-saisie" data-t-title="Rejouer la maquette depuis le début" title="Rejouer la maquette depuis le début" data-t-aria="Rejouer la maquette" aria-label="Rejouer la maquette" hidden>↻</button>
   </footer>
 

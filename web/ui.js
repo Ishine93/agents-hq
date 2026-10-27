@@ -18,12 +18,14 @@ import { ChoixSkills } from './skills.js';
 import { carteDemandes, grouperPermissions, clePermissions } from './permis.js';
 import { etageJoy, etageVisibleTache, etageVisibleAgent } from './scenes.js';
 import { md } from './markdown.js';
+import { script as scriptPlateforme } from './plateforme.js';
 import { FilPensees } from './fil-pensees.js';
 import { Lecteur } from './lecteur.js';
 import { Conso } from './conso.js';
 import { Parametres } from './parametres.js';
+import { NotesVersion } from './notes.js';
 import { Accueil } from './accueil.js';
-import { NIVEAUX, nomNiveau, phraseNiveau, travailDe, sansCapacite } from './cout.js';
+import { COUTS, PERSONNALISE, nomNiveau, nomTravail, phraseNiveau, travailDe, sansCapacite } from './cout.js';
 import { texteEstimation, montant, texteMesures } from './estimation.js';
 import { brancherRedimensionnement } from './redim.js';
 import { modaleOuverte, api } from './modale.js';
@@ -103,8 +105,7 @@ export class Interface {
     this.envoiEnCours = false;
     this.mode = null; // { type: 'completer' | 'repondre' | 'nouveau', dossier }
     this.modeEffectif = null;
-    this.dgChoix = null;
-    this.coutChoix = null; // niveau de coût choisi pour la prochaine demande (pastille) ; null = celui des réglages
+    this.coutChoix = null; // coût choisi pour la prochaine demande (pastille : un niveau ou Personnalisé) ; null = celui des réglages
     this.decouvertes = new Set();
     this.mcpEnCours = new Map();
     this.brouillons = new Map(); // texte en cours de saisie dans les cartes de question
@@ -212,7 +213,10 @@ export class Interface {
     $('#etage-bas').addEventListener('click', () => this.etageVoisin(-1));
     $('#btn-suivre').addEventListener('click', () => this.basculerSuivre());
     $('#btn-envoyer').addEventListener('click', () => this.envoyerSaisie());
+    $('#btn-reglages-envoi').addEventListener('click', () => this.parametres.ouvrir('priorites'));
     $('#btn-urgence').addEventListener('click', () => this.urgence());
+    $('#btn-fermer').addEventListener('click', () => this.fermerQg());
+    $('#btn-version').addEventListener('click', () => this.notesVersion.ouvrir());
     $('#btn-reprendre').addEventListener('click', () => this.action('/api/reprendre'));
     $('#btn-recentrer').addEventListener('click', () => this.moteur.recentrer());
     this.visionneuse = new Visionneuse();
@@ -227,6 +231,7 @@ export class Interface {
     this.lecteur = new Lecteur(this.store);
     this.conso = new Conso(this.store, this);
     this.parametres = new Parametres(this.store, this);
+    this.notesVersion = new NotesVersion(this);
     this.accueil = new Accueil(this.store, this);
     traduireStatique();
     $('#btn-reglages').addEventListener('click', () => this.parametres.ouvrir());
@@ -261,12 +266,6 @@ export class Interface {
       surTexte: (t) => this.insererTexte(t),
       surErreur: (m) => this.toast('warn', m),
     });
-    const choixDg = () => {
-      this.dgChoix = { modele: $('#dg-modele').value, effort: $('#dg-effort').value };
-      this.majReglageDg();
-    };
-    $('#dg-modele').addEventListener('change', choixDg);
-    $('#dg-effort').addEventListener('change', choixDg);
     $('#cout-demande').addEventListener('change', () => {
       this.coutChoix = $('#cout-demande').value;
       this.majReglageCout();
@@ -519,6 +518,12 @@ export class Interface {
     // démo : bien visible, pour ne pas la confondre avec le vrai QG ouvert à côté
     const badge = $('#badge-demo');
     if (badge) badge.hidden = !R.demo;
+    // numéro de version : ouvre les notes de version
+    const bVersion = $('#btn-version');
+    if (bVersion && R.version) {
+      bVersion.textContent = 'v' + R.version;
+      bVersion.hidden = false;
+    }
     document.title = R.demo ? tr('QG des agents — démo') : tr('QG des agents');
   }
 
@@ -580,7 +585,7 @@ export class Interface {
   }
 
   // ---------- comptes ----------
-  // Menu déroulant : le compte qui reçoit la prochaine demande, et « Ajouter un Claude… ».
+  // Menu déroulant : le compte de la prochaine demande, « Ajouter un compte IA… » et « Gérer les comptes… ».
   majComptes() {
     const S = this.store;
     const box = $('#comptes');
@@ -618,7 +623,7 @@ export class Interface {
       }
       this.compte = v;
       this.majComptes();
-      this.majReglageDg();
+      this.majReglageCout();
       this.conso.majBouton();
     });
     box.replaceChildren(sel);
@@ -793,8 +798,8 @@ export class Interface {
     } else q.hidden = true;
     document.body.classList.toggle('clarification', !!(m && m.type === 'repondre'));
     document.body.classList.toggle('complement', !!(m && m.type === 'completer'));
-    // Le modèle et l'effort du DG ne servent qu'à un nouveau dossier.
-    $('#reglage-dg').hidden = !(S.modeles[this.compte] || []).length || !!m;
+    // Le coût et les skills ne servent qu'à un nouveau dossier.
+    $('#btn-skills').hidden = !!m;
     $('#reglage-cout').hidden = !!m;
     $('#au-dessus').hidden = q.hidden && !(this.jointes && this.jointes.liste.length);
   }
@@ -814,8 +819,6 @@ export class Interface {
       else if (m && m.type === 'completer') await envoyer('/api/dossiers/' + encodeURIComponent(m.dossier) + '/completer', avecPieces({ texte }));
       else {
         const corps = { texte, etageAffiche: this.etageId, compte: this.compte, ...this.choixSkills.pourEnvoi() };
-        const dg = this.reglageDg();
-        if (dg) corps.dg = dg;
         corps.travail = { cout: this.coutDemande() };
         await envoyer('/api/dossiers', avecPieces(corps));
         this.choixSkills.vider(); // les skills choisis valent pour ce dossier-là
@@ -839,18 +842,17 @@ export class Interface {
     }
   }
 
-  // ---------- réglage du DG par demande ----------
-  reglageDg() {
-    const liste = this.store.modeles[this.compte] || [];
-    if (!liste.length) return null;
-    const m = $('#dg-modele').value;
-    const e = $('#dg-effort').value;
-    return m ? { modele: m, effort: e || null } : null;
+  // ---------- coût de la demande (pastille, 1.0.6 B2 ; Personnalisé en 1.0.7) ----------
+  coutDemande() {
+    return COUTS.includes(this.coutChoix) ? this.coutChoix : travailDe(this.store.reglages).cout;
   }
 
-  // ---------- coût de la demande (pastille, 1.0.6 B2) ----------
-  coutDemande() {
-    return NIVEAUX.includes(this.coutChoix) ? this.coutChoix : travailDe(this.store.reglages).cout;
+  // Phrase d'un choix de la pastille ; Personnalisé : sa base et le nombre de valeurs changées dans les Réglages.
+  phraseCout(n) {
+    if (n !== PERSONNALISE) return phraseNiveau(n);
+    const { base, personnalise } = travailDe(this.store.reglages);
+    const nb = Object.keys(personnalise).length;
+    return tr('tes valeurs des Réglages, à partir de {niveau}', { niveau: nomNiveau(base) }) + (nb ? ', ' + tr('{n} valeur(s) changée(s)', { n: nb }) : '');
   }
 
   majReglageCout() {
@@ -859,43 +861,22 @@ export class Interface {
     const def = travailDe(this.store.reglages).cout;
     const choix = this.coutDemande();
     const sel = $('#cout-demande');
-    sel.replaceChildren(...NIVEAUX.map((n) => h('option', { value: n, title: phraseNiveau(n) }, nomNiveau(n))));
+    sel.replaceChildren(...COUTS.map((n) => h('option', { value: n, title: this.phraseCout(n) }, nomNiveau(n))));
     sel.value = choix;
     box.classList.toggle('modifie', choix !== def);
-    const vars = { niveau: nomNiveau(choix), phrase: phraseNiveau(choix) };
+    const vars = { niveau: nomNiveau(choix), phrase: this.phraseCout(choix) };
     box.title = choix === def ? tr('Coût de la prochaine demande : {niveau}, {phrase} (par défaut)', vars) : tr('Coût de la prochaine demande : {niveau}, {phrase} (choisi pour cette demande)', vars);
   }
 
-  majReglageDg() {
-    this.majReglageCout();
-    const S = this.store;
-    const box = $('#reglage-dg');
-    const liste = S.modeles[this.compte] || [];
-    box.hidden = !liste.length || !!this.calculerMode();
-    if (!liste.length) return;
-    const def = S.dgDefaut || {};
-    const voulu = this.dgChoix || def;
-    const mod = liste.find((x) => x.id === voulu.modele) || liste.find((x) => x.id === def.modele) || liste[0];
-    const efforts = mod.efforts || [];
-    const eff = efforts.includes(voulu.effort) ? voulu.effort : efforts.includes(def.effort) ? def.effort : efforts.includes('high') ? 'high' : efforts[efforts.length - 1];
-    const selM = $('#dg-modele');
-    const selE = $('#dg-effort');
-    selM.replaceChildren(...liste.map((x) => h('option', { value: x.id }, x.nom || x.id)));
-    selM.value = mod.id;
-    selE.replaceChildren(...efforts.map((x) => h('option', { value: x }, x)));
-    selE.value = eff || '';
-    const parDefaut = mod.id === def.modele && eff === def.effort;
-    box.classList.toggle('modifie', !parDefaut);
-    const varsDg = { modele: mod.nom || mod.id, effort: eff };
-    box.title = parDefaut ? tr('DG de la prochaine demande : {modele} · {effort} (par défaut)', varsDg) : tr('DG de la prochaine demande : {modele} · {effort} (réglé pour cette demande)', varsDg);
-  }
-
-  // Niveau de coût d'un dossier, avec ce qui est sans effet pour le fournisseur qui exécute ses tâches (Codex).
+  // Coût d'un dossier (niveau, ou Personnalisé avec sa base et ses valeurs figées à l'envoi), avec ce qui est
+  // sans effet pour le fournisseur qui exécute ses tâches (Codex).
   texteCoutDossier(d) {
     const S = this.store;
     const c = S.comptes.find((x) => x.id === (d.compteAgents || d.compte));
     const sans = c ? sansCapacite(S, 'compaction', [c]) : [];
-    return nomNiveau(d.travail.cout) + ' — ' + phraseNiveau(d.travail.cout) + (sans.length ? ' (' + tr('compaction, plafond par tâche et sous-agent d’exploration sans effet pour {fournisseurs}', { fournisseurs: sans.join(', ') }) + ')' : '');
+    const nb = d.travail.cout === PERSONNALISE && d.travail.personnalise ? Object.keys(d.travail.personnalise).length : 0;
+    const phrase = d.travail.cout === PERSONNALISE ? tr('{n} valeur(s) changée(s)', { n: nb }) : phraseNiveau(d.travail.cout);
+    return nomTravail(d.travail) + ' — ' + phrase + (sans.length ? ' (' + tr('compaction, plafond par tâche et sous-agent d’exploration sans effet pour {fournisseurs}', { fournisseurs: sans.join(', ') }) + ')' : '');
   }
 
   async action(route, corps, confirmer) {
@@ -911,6 +892,24 @@ export class Interface {
 
   urgence() {
     this.action('/api/urgence', undefined, tr('Arrêt d’urgence : stopper toutes les sessions en cours ?'));
+  }
+
+  // Bouton « Fermer » (1.0.7) : le serveur enregistre l'état, arrête les agents et se ferme avec sa fenêtre de lancement ;
+  // la fenêtre application se ferme aussi, un onglet de navigateur garde le message « Le QG est fermé ».
+  async fermerQg() {
+    if (MAQUETTE) return this.toast('info', tr('Mode maquette : aucune requête n’est envoyée au serveur.'));
+    const demo = !!this.store.reglages?.demo;
+    const question = demo
+      ? tr('Fermer la démo ? Les agents simulés s’arrêtent, puis le serveur de la démo et sa fenêtre se ferment.')
+      : tr('Fermer le QG ? Les agents s’arrêtent, puis le serveur et sa fenêtre se ferment. Les dossiers en cours reprendront au prochain lancement.');
+    const ok = await this.action('/api/quitter', undefined, question);
+    if (!ok) return;
+    document.body.replaceChildren(h('div', { class: 'demo-fin' }, h('div', {},
+      h('p', {}, demo ? tr('La démo est fermée. Tu peux fermer cet onglet.') : tr('Le QG est fermé. Tu peux fermer cet onglet.')),
+      h('p', { class: 'meta' }, demo
+        ? tr('Pour la relancer, double-clique sur {script} dans le dossier du QG.', { script: scriptPlateforme(this.store, 'demo') })
+        : tr('Pour le rouvrir, double-clique sur {script} dans le dossier du QG.', { script: scriptPlateforme(this.store, 'lancer') })))));
+    setTimeout(() => window.close(), 400);
   }
 
   basculerSuivre() {
@@ -1019,7 +1018,7 @@ export class Interface {
           taches.length ? ' — ' + tr('{faites}/{total} tâche(s)', { faites, total: taches.length }) : '',
           d.compte ? ' — ' + (S.comptes.find((c) => c.id === d.compte)?.nom || d.compte) : '',
           d.dg && d.dg.modele ? ' — ' + tr('DG : {modele}', { modele: S.nomModele(d.dg.modele, d.dg.compte || d.compte) }) + (d.dg.effort ? ' · ' + d.dg.effort : '') : '',
-          d.travail && d.travail.cout ? ' — ' + tr('Coût : {niveau}', { niveau: nomNiveau(d.travail.cout) }) : '',
+          d.travail && d.travail.cout ? ' — ' + tr('Coût : {niveau}', { niveau: nomTravail(d.travail) }) : '',
           d.skills && d.skills.length ? ' — 🧩 ' + d.skills.map((x) => x.id).join(', ') : ''),
         ouvert && d.question ? h('div', { class: 'question' }, h('b', {}, tr('Question :') + ' '), md(d.question, { fichier: (c) => this.ouvrirFichier(c) })) : null,
         ouvert && d.synthese ? md(d.synthese, { classe: 'synthese', fichier: (c) => this.ouvrirFichier(c, (d.etages || [])[0] || null) }) : null,
@@ -1033,6 +1032,8 @@ export class Interface {
           S.plans.has(d.id) ? h('button', { class: 'petit', title: tr('Le plan du DG en grand, avec les dépendances'), on: { click: () => this.plan.ouvrir(d.id) } }, tr('Voir le plan')) : null,
           d.etat !== 'annule' ? h('button', { class: 'petit', title: tr('Ajouter un complément (texte, images) à ce dossier'), on: { click: () => this.modeCompleter(d.id) } }, d.etat === 'clarification' ? tr('Répondre') : tr('Compléter')) : null,
           actif ? h('button', { class: 'petit danger', on: { click: () => this.action('/api/dossiers/' + encodeURIComponent(d.id) + '/annuler', undefined, tr('Annuler le dossier {dossier} et toutes ses tâches ?', { dossier: d.id })) } }, tr('Annuler le dossier')) : null,
+          // dossier clos : rangé dans Réglages › Dossiers archivés, rien n'est effacé (1.0.7, à la main seulement)
+          ['termine', 'annule', 'echec'].includes(d.etat) ? h('button', { class: 'petit', title: tr('Ranger ce dossier dans Réglages › Dossiers archivés : il quitte cette liste, rien n’est effacé'), on: { click: () => this.action('/api/dossiers/' + encodeURIComponent(d.id) + '/archiver') } }, tr('Archiver')) : null,
           // suppression complète (dossier lancé par erreur…) : il ne reste aucune trace
           h('button', { class: 'petit danger', title: tr('Effacer complètement ce dossier (lancé par erreur…)'), on: { click: () => this.action('/api/dossiers/' + encodeURIComponent(d.id) + '/supprimer', undefined,
             (actif ? tr('Le dossier {dossier} est en cours : il sera d’abord arrêté.', { dossier: d.id }) + '\n\n' : '')
@@ -1423,6 +1424,17 @@ export class Interface {
       t.resultat ? this.blocResultat(t) : null,
       actions.length ? h('div', { class: 'boutons' }, actions) : null,
     );
+  }
+
+  // Dossier supprimé ou archivé : la fiche ouverte d'une de ses tâches se ferme ; fil, demandes et cloche se mettent à jour.
+  retirerDossier(id) {
+    if (this.fiche && String(this.fiche).startsWith(id + '-')) this.selectionner(null);
+    this.dossiersOuverts.delete(id);
+    this.majSaisie();
+    this.majFil();
+    this.majPermissions();
+    this.notifs.majCloche();
+    if (this.notifs.ouvert) this.notifs.rendreMenu();
   }
 
   // Résultat d'une tâche : résumé et notes mis en forme, fichiers produits (les .md s'ouvrent dans le visionneur).
@@ -2053,7 +2065,7 @@ export class Interface {
     }
     if (ev.type === 'comptes') {
       this.majComptes();
-      this.majReglageDg();
+      this.majReglageCout();
       this.conso.majBouton();
       this.parametres.maj();
       this.accueil.maj();
@@ -2090,6 +2102,7 @@ export class Interface {
       if (version && !this.versionPage) {
         this.versionPage = version;
         this.verifierMaj();
+        this.notesVersion.verifier(); // après une mise à jour : ses notes, une fois
       }
       this.majLangues();
       this.majTout();
@@ -2131,7 +2144,7 @@ export class Interface {
         this.majPermissions();
         break;
       case 'mcp':
-        this.majReglageDg();
+        this.majReglageCout();
         this.majReglages();
         break;
       case 'etages':
@@ -2151,17 +2164,21 @@ export class Interface {
         this.majPause();
         break;
       case 'dossier':
-        this.majSaisie();
+        if (ev.dossier && ev.dossier.archive) {
+          this.retirerDossier(ev.dossier.id);
+          this.parametres.listeArchives = null; // Réglages › Dossiers archivés relit la liste
+          this.parametres.maj();
+        } else {
+          // ressorti depuis un autre onglet : Réglages › Dossiers archivés relit la liste
+          if (this.parametres.listeArchives?.some((d) => d.id === ev.dossier?.id)) {
+            this.parametres.listeArchives = null;
+            this.parametres.maj();
+          }
+          this.majSaisie();
+        }
         break;
       case 'dossier_supprime':
-        // la fiche ouverte d'une de ses tâches se ferme ; fil, demandes et cloche se mettent à jour
-        if (this.fiche && String(this.fiche).startsWith(ev.dossier + '-')) this.selectionner(null);
-        this.dossiersOuverts.delete(ev.dossier);
-        this.majSaisie();
-        this.majFil();
-        this.majPermissions();
-        this.notifs.majCloche();
-        if (this.notifs.ouvert) this.notifs.rendreMenu();
+        this.retirerDossier(ev.dossier);
         break;
       case 'tache':
         if (ev.tache && this.store.decisionDe(ev.tache.id)) this.majPermissions();
@@ -2216,7 +2233,7 @@ export class Interface {
       this.moteur.changerEtage(() => this.dir.setEtage(this.etageId), 0);
     }
     this.majComptes();
-    this.majReglageDg();
+    this.majReglageCout();
     this.dictee.maj();
     this.cartes.forEach((el) => el.remove());
     this.cartes.clear();

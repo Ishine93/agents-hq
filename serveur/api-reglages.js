@@ -19,7 +19,9 @@ import { confierValidationsEnAttente } from './ordonnanceur.js';
 import { renommerMemoire, miniJeuPublic } from './personnages.js';
 import { t } from './i18n.js';
 import { travailReglages } from './travail.js';
-import { chargerPriorites, modifierPriorites, prereglages, apercu, pausesComptes, pauseDe, leverPauseCompte, NATURES, TYPES as TYPES_TACHE } from './routeur.js';
+import { chargerPriorites, modifierPriorites, prereglages, apercu, pausesComptes, pauseDe, leverPauseCompte, reglageDg, dgConseille, dgSousConseille, comptesDisponibles, NATURES, TYPES as TYPES_TACHE } from './routeur.js';
+import { modeleDg, effortDg } from './dg.js';
+import { convertirEffort } from './ia/fournisseurs.js';
 
 const publierComptes = () => emettre('comptes', comptesPublics());
 const publierReglages = () => emettre('reglages', { reglages: reglagesPublics() });
@@ -318,7 +320,7 @@ export async function routesReglages(req, res, chemin, ctx) {
     }
   }
 
-  const routes = /^\/api\/(reglages|racines|choisir-dossier|comptes|personnalisation|equipe\/renommer|bonheur\/stock|conso\/limites|dictee\/installer|codex\/installer|onboarding\/terminer|etages\/[^/]+\/(modifier|retirer))/;
+  const routes = /^\/api\/(reglages|priorites|racines|choisir-dossier|comptes|personnalisation|equipe\/renommer|bonheur\/stock|conso\/limites|dictee\/installer|codex\/installer|onboarding\/terminer|etages\/[^/]+\/(modifier|retirer))/;
   if (!routes.test(chemin)) return false;
   const corps = await ctx.lireCorps(req, chemin === '/api/bonheur/stock' ? 30 * 1024 * 1024 : 256 * 1024);
   try {
@@ -331,7 +333,8 @@ export async function routesReglages(req, res, chemin, ctx) {
       if (['auto', 'prudent'].includes(corps.modeTravail)) patch.modeTravail = corps.modeTravail;
       for (const k of ['plafondGlobal', 'plafondEtage']) if (Number.isInteger(corps[k]) && corps[k] >= 0 && corps[k] <= 64) patch[k] = corps[k];
       for (const k of ['recolteAuto', 'rojoPortsAuto', 'gitAuto', 'miseAJourAuto', 'validationUtilisateur', 'ouvrirEnApp', 'entreeEnvoie', 'ecritureHorsProjet', 'traduireReflexion', 'filtreTests']) if (typeof corps[k] === 'boolean') patch[k] = corps[k];
-      if (corps.travail && typeof corps.travail === 'object') patch.travail = travailReglages({ travail: corps.travail }); // réglage Coût (lot B)
+      // réglage Coût : ce qui manque garde sa valeur (les valeurs de Personnalisé restent quand un niveau est choisi)
+      if (corps.travail && typeof corps.travail === 'object') patch.travail = travailReglages({ travail: { ...travailReglages(), ...corps.travail } });
       if (corps.gardeFable && typeof corps.gardeFable === 'object') {
         const g = {};
         if (typeof corps.gardeFable.actif === 'boolean') g.actif = corps.gardeFable.actif;
@@ -349,7 +352,7 @@ export async function routesReglages(req, res, chemin, ctx) {
         patch.miniJeu = p;
       }
       if (typeof corps.dureeBulles === 'number' && corps.dureeBulles >= 0.5 && corps.dureeBulles <= 5) patch.dureeBulles = corps.dureeBulles;
-      // compte qui exécute les tâches des nouvelles demandes : un compte existant, ou null (celui du DG)
+      // compte qui exécute les tâches des nouvelles demandes : un compte existant, ou null (celui de la demande)
       if (corps.compteAgents === null || corps.compteAgents === '') patch.compteAgents = null;
       else if (typeof corps.compteAgents === 'string') {
         const c = trouverCompte(corps.compteAgents);
@@ -360,11 +363,6 @@ export async function routesReglages(req, res, chemin, ctx) {
         patch.codex = {};
         if (typeof corps.codex.lectureStricte === 'boolean') patch.codex.lectureStricte = corps.codex.lectureStricte;
         if (Number.isInteger(corps.codex.sessionsParCompte) && corps.codex.sessionsParCompte >= 1 && corps.codex.sessionsParCompte <= 8) patch.codex.sessionsParCompte = corps.codex.sessionsParCompte;
-      }
-      if (corps.dg && typeof corps.dg === 'object') {
-        patch.dg = {};
-        if (typeof corps.dg.modele === 'string' && corps.dg.modele) patch.dg.modele = corps.dg.modele.slice(0, 60);
-        if (['low', 'medium', 'high', 'xhigh', 'max'].includes(corps.dg.effort)) patch.dg.effort = corps.dg.effort;
       }
       const langueAvant = reglagesPublics().langueIA;
       if (patch.travail) modifierReglages({ travail: { personnalise: null } }); // la personnalisation est remplacée, pas fusionnée
@@ -493,19 +491,40 @@ export async function routesReglages(req, res, chemin, ctx) {
   return false;
 }
 
-// Ajout d'étages en lot (configuration du premier lancement) : [{ dossier, nom }] ou [{ dossiers: [...], nom, type }].
-// Priorités enregistrées, préréglages selon les comptes présents, aperçu de qui ferait quoi maintenant.
+// Priorités enregistrées, préréglages selon les comptes présents, aperçu de qui ferait quoi maintenant, et le DG
+// des nouvelles demandes : son réglage, les valeurs conseillées (et si le réglage est plus bas), et le modèle et
+// l'effort qu'il aurait vraiment sur chaque compte connecté (un modèle absent d'un compte est remplacé par un modèle de
+// même niveau ou au-dessus, sinon par son modèle le plus capable).
 export function prioritesPubliques() {
-  return { priorites: chargerPriorites(), prereglages: prereglages().map(({ id, libelle }) => ({ id, libelle })), apercu: apercu(), pauses: pausesComptes(), natures: NATURES, types: TYPES_TACHE };
+  const dg = reglageDg();
+  const parCompte = Object.fromEntries(
+    comptesDisponibles().map((c) => {
+      const d = { dg: { compte: c.id, modele: dg.modele, effort: dg.effort } };
+      const modele = modeleDg(d);
+      const effort = effortDg(d);
+      // autre IA : l'effort ramené au plus proche de ce modèle, comme au lancement du DG
+      return [c.id, { modele, effort: fournisseurDuCompte(c) === 'claude' || !effort ? effort : convertirEffort(c, modele, effort) }];
+    }),
+  );
+  return {
+    priorites: chargerPriorites(),
+    prereglages: prereglages().map(({ id, libelle }) => ({ id, libelle })),
+    apercu: apercu(),
+    pauses: pausesComptes(),
+    natures: NATURES,
+    types: TYPES_TACHE,
+    dg: { ...dg, conseille: dgConseille(), sousConseille: dgSousConseille(dg), parCompte },
+  };
 }
 
+// Ajout d'étages en lot (configuration du premier lancement) : [{ dossier, nom }] ou [{ dossiers: [...], nom, type }].
 export function ajouterEtages(liste) {
   const faits = [];
   const erreurs = [];
   for (const p of liste || []) {
     const dossiers = Array.isArray(p.dossiers) && p.dossiers.length ? p.dossiers.map(String) : [String(p.dossier || '')];
     try {
-      faits.push(ajouterEtage(dossiers.length > 1 ? dossiers : dossiers[0], { nom: p.nom, type: p.type || null }));
+      faits.push(ajouterEtage(dossiers.length > 1 ? dossiers : dossiers[0], { nom: p.nom, type: p.type || null, libelleType: p.libelleType || null }));
     } catch (e) {
       erreurs.push(`${dossiers.join(' + ')} : ${e.message}`);
     }

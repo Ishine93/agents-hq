@@ -15,6 +15,7 @@ import { etat as bus } from './bus.js';
 import { donneesConso, enregistrerCalibrage, surLimitesLues } from './conso.js';
 import { trouverCompte, fournisseur as fournisseurDuCompte } from './comptes.js';
 import { niveauDe } from './ia/fournisseurs.js';
+import { reglageDg } from './routeur.js';
 import { t as tr } from './i18n.js';
 
 const FICHIER = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'config', 'defauts', 'estimations.json');
@@ -115,7 +116,7 @@ export function estimerTache(desc, { unite = 'usd', fournisseur = null, echantil
 export function estimerDg(d, { unite, fournisseur, conso = donneesConso(), table: tb = tableEstimations(), dossiers = bus.dossiers, taches = bus.taches } = {}) {
   if (!unite) return null;
   const niveaux = tb.usd?.niveaux || {};
-  const niv = (m) => niveaux[niveauDe(m || REGLAGES.dg?.modele)] ?? 1;
+  const niv = (m) => niveaux[niveauDe(m || reglageDg().modele)] ?? 1;
   const min = tb.historique?.minEchantillons ?? 2;
   const valeurs = [];
   const parDossier = new Map();

@@ -1,6 +1,7 @@
 // Prépare la version publique du QG : copie une LISTE BLANCHE de fichiers dans un dossier de dépôt,
 // vérifie qu'aucune donnée personnelle ni secret n'y figure, puis fabrique le zip et son empreinte.
-// Usage : node outils/preparer-release.mjs <dossier du dépôt> [--zip <dossier de sortie>] [--motifs <fichier>]
+// Usage : node outils/preparer-release.mjs [<dossier du dépôt>] [--zip <dossier de sortie>] [--motifs <fichier>]
+// Sans dossier du dépôt : ../release/depot (rangement QG\dev + QG\release), sinon l'ancien ../_QG-release/depot.
 // Rien n'est publié : la publication (git push, release GitHub) se fait à part, après relecture.
 // --motifs : fichier texte (hors dépôt) de motifs personnels à chercher en plus, un par ligne.
 import fs from 'node:fs';
@@ -15,7 +16,12 @@ const option = (nom) => {
   const i = args.indexOf(`--${nom}`);
   return i >= 0 ? args[i + 1] : null;
 };
-const DEPOT = path.resolve(args.find((a) => !a.startsWith('--') && a !== option('zip') && a !== option('motifs')) || path.join(QG, '..', '_QG-release', 'depot'));
+const depotParDefaut = () => {
+  const range = path.join(QG, '..', 'release', 'depot');
+  const ancien = path.join(QG, '..', '_QG-release', 'depot');
+  return fs.existsSync(range) || !fs.existsSync(ancien) ? range : ancien;
+};
+const DEPOT = path.resolve(args.find((a) => !a.startsWith('--') && a !== option('zip') && a !== option('motifs')) || depotParDefaut());
 const SORTIE_ZIP = option('zip') ? path.resolve(option('zip')) : path.dirname(DEPOT);
 const VERSION = JSON.parse(fs.readFileSync(path.join(QG, 'package.json'), 'utf8')).version;
 
@@ -38,6 +44,8 @@ const DOSSIERS = [
   ['config/defauts', () => true],
   ['config/defauts/fiches', () => true],
   ['outils', (f) => /\.(ps1|mjs|sh)$/.test(f)],
+  // notes de version (1.0.7) : lues par le site (numéro de version en haut à gauche)
+  ['notes', (f) => /^\d+\.\d+\.\d+\.md$/.test(f)],
   ['docs', (f) => /\.md$/.test(f)],
   ['docs/cout', (f) => /\.md$/.test(f)],
   ['docs/cout/outils', (f) => /\.cjs$/.test(f)],

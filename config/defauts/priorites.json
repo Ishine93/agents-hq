@@ -1,12 +1,12 @@
 {
-  "version": 1,
-  "note": "Priorités des comptes IA (docs/multi-ia/conception.md §5). Une entrée vise un « compte » précis ou un « fournisseur » (ses comptes dans l'ordre de la liste), et peut fixer un « modele » ou un « niveau » (jamais plus bas que celui demandé par le DG). Listes vides : tout tourne sur le compte de la demande, comme en 1.0.5. Ton fichier config/priorites.json remplace ces valeurs.",
+  "version": 2,
+  "note": "Priorités des comptes IA (docs/multi-ia/conception.md §5). Une entrée vise un « compte » précis ou un « fournisseur » (ses comptes dans l'ordre de la liste), et peut fixer un « modele » ou un « niveau » (jamais plus bas que celui demandé par le DG). Listes vides : tout tourne sur le compte de la demande. « consigne » (par type) : recopiée dans la mission de chaque tâche de ce type ; « consigneDg » : consigne générale au DG (méthode, style, choix des IA). « dg » : compte du DG (null = celui de la demande), modèle et effort (null = Opus · xhigh, config/defauts/reglages.json). « quota.ordre » : comptes vers lesquels basculer, dans l'ordre ; « seulementListe » : jamais un autre. Ton fichier config/priorites.json remplace ces valeurs.",
   "types": {
-    "code": { "natures": ["impl", "test", "review", "ops"], "ordre": [] },
-    "recherche": { "natures": ["analyse", "bench"], "ordre": [] },
-    "redaction": { "natures": ["doc", "synthese"], "ordre": [] },
-    "image": { "natures": ["asset"], "ordre": [] },
-    "defaut": { "ordre": [] }
+    "code": { "natures": ["impl", "test", "review", "ops"], "ordre": [], "consigne": "" },
+    "recherche": { "natures": ["analyse", "bench"], "ordre": [], "consigne": "" },
+    "redaction": { "natures": ["doc", "synthese"], "ordre": [], "consigne": "" },
+    "image": { "natures": ["asset"], "ordre": [], "consigne": "" },
+    "defaut": { "ordre": [], "consigne": "" }
   },
   "roles": {
     "verif": { "ordre": [] },
@@ -14,7 +14,7 @@
   },
   "dg": { "compte": null, "modele": null, "effort": null },
   "consigneDg": "",
-  "quota": { "pause": "compte", "proposerBascule": true },
+  "quota": { "pause": "compte", "bascule": "demander", "ordre": [], "seulementListe": false },
   "delegation": {
     "images": {
       "actif": false,

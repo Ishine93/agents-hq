@@ -7,7 +7,7 @@ import { REGLAGES, etage as trouverEtage } from './config.js';
 import { etat, majDossier, changerEtatTache, majTache, message, majDg, emettre, alerte, effacerDossier } from './bus.js';
 import { canUseToolPour, refuserPour, demander } from './permissions.js';
 import { validerTaches, compteDg } from './dg.js';
-import { sansPrefixe, prefixeModele, choisirProduction, choisirVerif, chargerPriorites, pauseCompte, leverPauseCompte, pauseDe, surPauses, motifPause, viderPauses, enDemo, multiIa, heureReprise, fournisseurDuModele } from './routeur.js';
+import { reglageDg, consignesActuelles, consigneTache, sansPrefixe, prefixeModele, choisirProduction, choisirVerif, chargerPriorites, pauseCompte, leverPauseCompte, pauseDe, surPauses, motifPause, viderPauses, enDemo, multiIa, heureReprise, fournisseurDuModele, comptesDisponibles } from './routeur.js';
 import { promptProduction, promptRework, compteTache } from './taches.js';
 import { ERREURS_FATALES } from './session.js';
 import { trouverCompte, fournisseur as fournisseurDuCompte, adaptateur as adaptateurDuCompte } from './comptes.js';
@@ -20,7 +20,7 @@ import { skillsAttribuables } from './skills.js';
 import { recruter, reembaucher, occuper, liberer, agent as agentEquipe, tirerPrenom, libererPrenom } from './equipe.js';
 import { t as tr } from './i18n.js';
 import { verdictEffectif, repriseVerif } from './economie.js';
-import { niveauValide, travailReglages, profilEffectif, verificationProfil, missionDirecte, nomNiveau } from './travail.js';
+import { travailDossier, profilEffectif, verificationProfil, missionDirecte, nomProfil } from './travail.js';
 import { verificationsEtage, promptReworkControles, raisonControle } from './controles.js';
 
 const notifierQuestionDg = (d) =>
@@ -47,12 +47,12 @@ const dgOccupe = new Set(); // dossiers dont le DG travaille
 const canaux = new Map(); // tacheId → { injecter(texte) } tant que sa session productrice tourne
 let minuteriePause = null;
 // Plusieurs IA (D4) : une limite d'usage ou une déconnexion met en pause le compte concerné, pas tout le QG.
-// Les tâches de ce compte attendent ; les autres continuent. Tout Claude, démo, ou quota.pause « globale » :
-// pause de tout le QG, comme en 1.0.5.
+// Les tâches de ce compte attendent ; les autres continuent, de la même IA ou non (deux comptes Claude suffisent,
+// 1.0.7). Démo, un seul compte connecté, ou quota.pause « globale » : pause de tout le QG (pauseGlobale).
 const minuteriesComptes = new Map(); // compteId → minuterie de levée à la remise à zéro
 let minuterieAttente = null;
 let pausesVues = new Set();
-const pauseParCompte = () => !enDemo() && chargerPriorites().quota?.pause !== 'globale' && multiIa();
+const pauseParCompte = () => !enDemo() && chargerPriorites().quota?.pause !== 'globale' && (multiIa() || comptesDisponibles().length > 1);
 const motifCompte = (id) => {
   const c = trouverCompte(id);
   return motifPause(c && c.id === id ? c : null, pauseDe(id) || { type: 'quota' }, id);
@@ -86,18 +86,22 @@ function tableau(d) {
 // scenario : grand scénario de la démo (simulation), choisi par la démo elle-même
 export function creerDossier({ texte, etageAffiche, compte, compteAgents = null, compteImpose = null, dg = null, pieces = [], skills = [], skillsExclus = [], scenario = null, travail = null }) {
   const e = trouverEtage(etageAffiche);
+  const reglage = reglageDg();
   const d = {
     id: `D${++compteurDossiers}`,
     texte,
     titre: texte.length > 50 ? texte.slice(0, 49) + '…' : texte,
     compte,
-    // compte qui exécute les tâches (Réglages › Comptes IA › Agents de la demande) ; null = celui du DG
+    // compte qui exécute les tâches (Réglages › Comptes IA › Agents de la demande) ; null = celui de la demande
     compteAgents: compteAgents && compteAgents !== compte ? compteAgents : null,
     // plusieurs IA : compte choisi sur la demande pour toutes ses tâches (jamais remplacé sans ton accord)
     ...(compteImpose ? { compteImpose } : {}),
-    // compte du DG (routeur.choisirDg) ; absent : celui de la demande, comme en 1.0.5
-    dg: { ...(dg?.compte ? { compte: dg.compte } : {}), modele: dg?.modele || REGLAGES.dg.modele, effort: dg?.effort || REGLAGES.dg.effort },
-    travail: { cout: niveauValide(travail?.cout || travailReglages().cout) }, // niveau de coût figé à l'envoi (lot B)
+    // DG : compte (routeur.choisirDg ; absent : celui de la demande), modèle et effort de Réglages › Priorités › DG,
+    // figés à l'envoi
+    dg: { ...(dg?.compte ? { compte: dg.compte } : {}), modele: dg?.modele || reglage.modele, effort: dg?.effort || reglage.effort },
+    // consignes de l'utilisateur au DG (générale et par type de tâche), figées à l'envoi
+    consignes: consignesActuelles(),
+    travail: travailDossier(travail?.cout), // coût figé à l'envoi : niveau, ou Personnalisé avec ses valeurs du moment
     etat: 'planification',
     etages: e?.actif && e.projet && e.id !== 'direction' ? [e.id] : [],
     question: null,
@@ -602,7 +606,8 @@ function rearmer() {
 /**
  * Compte, modèle et effort de la tâche (routeur.choisirProduction), mémorisés dans t.x.route. Faux : la tâche
  * attend (compte en pause, aucun compte apte). Tout Claude sans priorités : le compte de la demande, avec le
- * modèle et l'effort du DG, comme en 1.0.5. Jamais de bascule automatique (D4).
+ * modèle et l'effort du DG. Pas de bascule automatique, sauf si l'utilisateur l'a permise
+ * (quota.bascule « auto », D4).
  */
 function router(t, d) {
   if (enDemo()) return true;
@@ -623,14 +628,14 @@ function router(t, d) {
 function calculerRoute(t, d) {
   const a = choisirProduction(t, d);
   if (a.attente) {
-    // tout Claude : rien ne change par rapport à la 1.0.5 (le compte de la demande, même non connecté)
+    // seulement des comptes Claude : la tâche prend le compte de la demande, même non connecté (l'échec dira de le reconnecter)
     if (a.attente.pause || multiIa() || (a.attente.compteBloque && a.attente.compteBloque !== compteTache(d))) return { attente: a.attente };
     return { route: { compte: compteTache(d), modele: t.modele, effort: t.effort } };
   }
-  // tout Claude : pas de repli vers un autre compte (le compte de la demande, sinon le défaut, comme en 1.0.5)
+  // seulement des comptes Claude : pas de repli vers un autre compte ; le compte de la demande, sinon le compte par défaut
   if (a.repli && !multiIa()) return { route: { compte: compteTache(d), modele: t.modele, effort: t.effort } };
   // Claude avec un modèle Claude : modèle et effort du DG tels quels
-  const tel =(a.fournisseur || 'claude') === 'claude' && (fournisseurDuModele(t.modele) || 'claude') === 'claude';
+  const tel = (a.fournisseur || 'claude') === 'claude' && (fournisseurDuModele(t.modele) || 'claude') === 'claude';
   return { route: {
     compte: a.compte,
     fournisseur: a.fournisseur || null,
@@ -655,13 +660,26 @@ function routePrevue(t, d) {
 }
 
 /**
- * Vérificateur de la tâche (routeur.choisirVerif), mémorisé dans t.x.routeVerif. Tout Claude : le compte de la
- * demande, avec le modèle et l'effort de la fiche, comme en 1.0.5. null : aucun compte ne peut vérifier
+ * Vérificateur de la tâche (routeur.choisirVerif), mémorisé dans t.x.routeVerif. Seulement des comptes Claude
+ * connectés : le premier compte de la liste « verif » qui est connecté, sinon le compte qui a fait la tâche (jamais
+ * de repli vers un autre compte), avec le modèle et l'effort de la fiche. null : aucun compte ne peut vérifier
  * maintenant (compte en pause…) ; la vérification attend dans la file.
  */
 function routerVerif(t, d) {
   const v = t.x.verification;
-  if (enDemo() || !multiIa()) return (t.x.routeVerif = { compte: compteTache(d), modele: v.modele, effort: v.effort });
+  if (enDemo()) return (t.x.routeVerif = { compte: compteTache(d), modele: v.modele, effort: v.effort });
+  if (!multiIa()) {
+    const c = choisirVerif(t, d);
+    const compte = c.compte && !c.repli && !c.attente ? c.compte : t.compte || compteTache(d);
+    // ce compte est en pause (pause d'un seul compte) : la vérification attend sa reprise
+    if (pauseParCompte() && pauseDe(compte)) {
+      libererVerrou(t);
+      t.x.reprise = { phase: 'verification' };
+      attendreRoute(t, d, c.attente?.pause ? c.attente : { motif: motifCompte(compte), compteBloque: compte, pause: pauseDe(compte), proposition: null });
+      return null;
+    }
+    return (t.x.routeVerif = { compte, modele: v.modele, effort: v.effort });
+  }
   const a = choisirVerif(t, d);
   if (a.attente) {
     libererVerrou(t);
@@ -687,16 +705,37 @@ function routerVerif(t, d) {
 
 function attendreRoute(t, d, a) {
   if (t.etat !== 'queued' || t.motifFile !== a.motif) changerEtatTache(t, 'queued', { attend: [], motifFile: a.motif });
-  if (a.pause && a.proposition?.compte && chargerPriorites().quota?.proposerBascule !== false) proposerBascule(t, d, a);
+  const bascule = chargerPriorites().quota?.bascule || 'demander';
+  if (a.pause && a.proposition?.compte && bascule === 'auto') basculerSeul(d, a);
+  else if (a.pause && a.proposition?.compte && bascule === 'demander') proposerBascule(t, d, a);
   rearmer();
   return false;
 }
 
-// D4 : une carte « Attendre / Passer sur {compte} » par dossier et par compte en pause, quand un autre compte peut
-// prendre ses tâches (quota.proposerBascule). Jamais de bascule sans l'accord de l'utilisateur ; l'accord vaut pour
-// ce dossier seulement et tombe quand le compte reprend.
+// D4 : un compte est en pause et un autre compte libre peut prendre ses tâches. Selon quota.bascule (Réglages ›
+// Priorités) : « demander » (défaut), une carte « Attendre / Passer sur {compte} » par dossier et par compte en
+// pause ; « auto », le dossier y passe tout seul ; « jamais », il attend. La bascule vaut pour ce dossier
+// seulement et tombe quand le compte reprend.
 const cartesBascule = new Map(); // `${dossier}:${compte}` → { ctrl, tache }
 const cartesVues = new Set(); // une seule carte par dossier et par pause (pas de nouvelle carte après « Attendre »)
+const basculesSeules = new Set(); // `${compte}|${dossier}|${vers}` : une seule fois par compte de remplacement et par pause
+
+// « auto » : sans carte. Un compte de remplacement qui ne sait pas faire une autre tâche du dossier peut céder la
+// place à un autre, mais chacun n'est pris qu'une fois par pause (pas d'aller-retour entre deux comptes).
+function basculerSeul(d, a) {
+  const cle = `${a.compteBloque}|${d.id}|${a.proposition.compte}`;
+  if (basculesSeules.has(cle) || ['termine', 'annule', 'echec'].includes(d.etat)) return;
+  basculesSeules.add(cle);
+  const nom = nomCompte(a.compteBloque);
+  const autre = a.proposition.nom || nomCompte(a.proposition.compte);
+  const motif = a.motif.charAt(0).toUpperCase() + a.motif.slice(1);
+  d.x = d.x || {};
+  d.x.bascules = { ...(d.x.bascules || {}), [a.compteBloque]: a.proposition.compte };
+  majDossier(d);
+  message(d.id, 'systeme', tr('{motif}. Les tâches de ce dossier prévues sur {nom} passent toutes seules sur {autre} jusqu’à sa reprise (Réglages › Priorités › Autre compte libre).', { motif, nom, autre }));
+  // on est dans le tick : la tâche repart au suivant
+  setImmediate(tick);
+}
 
 function proposerBascule(t, d, a) {
   const cle = `${d.id}:${a.compteBloque}`;
@@ -739,6 +778,7 @@ function fermerCartes(compte, { tache = null } = {}) {
   }
   if (tache) return;
   for (const cle of [...cartesVues]) if (cle.endsWith(`:${compte}`)) cartesVues.delete(cle);
+  for (const cle of [...basculesSeules]) if (cle.startsWith(`${compte}|`)) basculesSeules.delete(cle);
   for (const d of etat.dossiers.values()) {
     if (!d.x?.bascules?.[compte]) continue;
     delete d.x.bascules[compte];
@@ -810,7 +850,7 @@ function lancer(t) {
   const amonts = t.inputsFrom.map((ref) => [ref, tacheRef(d, ref)]).filter(([, u]) => u?.x.sortie);
   changerEtatTache(t, reprise?.phase === 'rework' ? 'rework' : 'briefing', { attend: [], motifFile: null });
   if (amonts.length && !reprise) emettre('passation', { de: amonts.map(([, u]) => u.id), a: t.id }, d.id);
-  let prompt = reprise ? reprise.prompt : promptProduction(t, amonts.map(([r, u]) => [r, u.x.sortie]), d.x.pieces || []);
+  let prompt = reprise ? reprise.prompt : promptProduction(t, amonts.map(([r, u]) => [r, u.x.sortie]), d.x.pieces || [], consigneTache(t, d));
   if (resumeAgent && !reprise) {
     prompt = `NOUVELLE MISSION, confiée par le DG. Tu as déjà travaillé sur ce projet : ton contexte passé reste valable, mais cette mission est indépendante de la précédente.\n\n${prompt}`;
   }
@@ -863,6 +903,13 @@ async function executerProduction(t, d, prompt, resume, { fork = false } = {}) {
         t.x.compactions = (t.x.compactions || 0) + 1;
         emettre('compaction', { tache: t.id, declencheur, avant }, d.id);
         publierMesures(t);
+        // garde-fou (1.0.7) : trop de compactions dans la même tâche, elle s'arrête (suite à la fin de la session)
+        const max = profilEffectif(d).maxCompactions;
+        if (max >= 1 && t.x.compactions >= max && !t.x.arretCompactions) {
+          t.x.arretCompactions = t.x.compactions;
+          message(d.id, 'systeme', tr('{ref} : {n} compactions de contexte dans la même tâche, le garde-fou l’arrête. Le DG va la redécouper.', { ref: t.ref, n: t.x.compactions }), [t.etage]);
+          ctrl.abort();
+        }
       },
       surContexte: (n) => {
         if (t.x.gen !== gen) return;
@@ -880,6 +927,7 @@ async function executerProduction(t, d, prompt, resume, { fork = false } = {}) {
     t.x.compteSession = r.compte || t.compte;
   }
   if (r.contexte != null) t.x.contexte = r.contexte;
+  if (t.x.arretCompactions) return arretCompactions(t, d, r);
   if (r.echec) return gererEchec(t, d, r, t.etat === 'rework' ? 'rework' : 'production');
   t.x.sortie = r.sortie;
   if (await roundComplement(t, d)) return;
@@ -890,6 +938,17 @@ async function executerProduction(t, d, prompt, resume, { fork = false } = {}) {
     return;
   }
   await verification(t, d);
+}
+
+// Garde-fou des compactions (1.0.7, Coût › Compactions max par tâche) : la tâche relisait, résumait et relisait sans
+// avancer, ou elle était trop grosse pour un seul agent. Elle s'arrête et le DG la redécoupe tout seul, sans attendre
+// l'utilisateur (dossiers lancés sans personne devant l'écran).
+function arretCompactions(t, d, r) {
+  libererVerrou(t);
+  const n = t.x.arretCompactions;
+  delete t.x.arretCompactions;
+  terminer(t, 'failed', { ...(r.sortie || {}), status: 'failed', summary: tr('Arrêtée par le garde-fou après {n} compactions de contexte', { n }) });
+  reveilDG(d, `${t.ref} a été arrêtée par le garde-fou : ${n} compactions de contexte dans la même tâche (limite du réglage Coût). Elle tournait en rond (lire, résumer, relire) ou elle était trop grosse pour un seul agent. Ne la relance pas telle quelle : découpe ce qu'il reste à faire en tâches plus petites et plus précises, en t'appuyant sur ce qu'elle a déjà fait (fichiers modifiés, résumé), ou accepte l'état actuel s'il suffit.`);
 }
 
 // Un complément est arrivé alors que la session ne pouvait plus le recevoir (fin de tour, vérification) :
@@ -1546,7 +1605,7 @@ async function accorderCout(d, garde = null) {
       estimation: texteEstimation(est),
       part,
       seuil,
-      profil: nomNiveau(profilEffectif(d).cout, REGLAGES.langueInterface === 'en' ? 'en' : 'fr'),
+      profil: nomProfil(profilEffectif(d), REGLAGES.langueInterface === 'en' ? 'en' : 'fr'),
     }),
     options: [{ libelle: tr('Lancer') }, { libelle: tr('Réduire') }, { libelle: tr('Annuler') }],
     brut: true,

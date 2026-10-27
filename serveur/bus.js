@@ -93,7 +93,7 @@ export function comptesPublics() {
   const { defaut, comptes } = chargerComptes();
   return {
     compteDefaut: defaut,
-    // compte qui exécute les tâches des nouvelles demandes (null = le compte du DG)
+    // compte qui exécute les tâches des nouvelles demandes (null = le compte de la demande)
     compteAgents: REGLAGES.compteAgents && comptes.some((c) => c.id === REGLAGES.compteAgents) ? REGLAGES.compteAgents : null,
     fournisseurs: listeFournisseurs(),
     // Codex installé à la demande (Réglages › Comptes IA) : absent, installation, installe, erreur
@@ -152,7 +152,6 @@ export function reglagesPublics() {
     navigateurApp: appInstallee(),
     miseAJourAuto: REGLAGES.miseAJourAuto !== false,
     dureeBulles: Number(REGLAGES.dureeBulles) || 1,
-    dg: { modele: REGLAGES.dg.modele, effort: REGLAGES.dg.effort },
     dictee: REGLAGES.dictee || {},
     qg: RACINE,
     version: VERSION,
@@ -167,8 +166,8 @@ export function reglagesPublics() {
 // Les étages livrés gardent leur nom traduit tant que tu ne les as pas renommés.
 const NOMS_LIVRES = new Set(['Direction', 'Bac à sable', 'Hall', 'Salle de pause', 'Salle de repos', 'Sous-sol serveurs', "Bureau d'études", 'Atelier 3D', 'Studio vidéo']);
 export const etagesPublics = () =>
-  etages().map(({ id, nom, type, ordre, projet, actif, dossiers }) => ({
-    id, nom: NOMS_LIVRES.has(nom) ? t(nom) : nom, type, ordre, projet, actif: !!actif, dossiers: dossiers || (projet ? [projet] : []),
+  etages().map(({ id, nom, type, libelleType, ordre, projet, actif, dossiers }) => ({
+    id, nom: NOMS_LIVRES.has(nom) ? t(nom) : nom, type, ...(libelleType ? { libelleType } : {}), ordre, projet, actif: !!actif, dossiers: dossiers || (projet ? [projet] : []),
   }));
 
 // Modèles proposables par compte (pour le sélecteur du DG dans le site).
@@ -179,7 +178,7 @@ export function modelesPublics() {
       const d = decouverteEnCache(c.id);
       // un agent ACP peut n'avoir aucun réglage d'effort : ses modèles restent proposés
       const liste = (d?.modeles || []).filter((m) => m.id !== 'default' && (m.efforts?.length || fournisseurDuCompte(c) === 'acp')).map((m) => ({ id: m.id, nom: m.nom, efforts: m.efforts }));
-      // repli par fournisseur : Opus pour Claude (comme avant), la liste des équivalences pour les autres
+      // repli par fournisseur : Opus pour Claude (le modèle conseillé du DG), la liste des équivalences pour les autres
       const repli = fournisseurDuCompte(c) === 'claude' ? [{ id: 'opus', nom: 'Opus 5.5', efforts: ['low', 'medium', 'high', 'xhigh', 'max'] }] : adaptateurDuCompte(c).modeles(c).map(({ id, nom, efforts }) => ({ id, nom, efforts }));
       return [c.id, liste.length ? liste : repli];
     }),
@@ -191,7 +190,16 @@ export function mcpPublic() {
 }
 
 export function instantane() {
-  const dossiers = [...etat.dossiers.values()].slice(-REGLAGES.historiqueDossiers);
+  // Dossiers archivés (1.0.7, à la main) : ni dans la liste, ni dans les fiches, ni dans le fil, ni dans la cloche ;
+  // Réglages › Dossiers archivés les lit à part (dossiersArchives).
+  const archives = new Set([...etat.dossiers.values()].filter((d) => d.archive).map((d) => d.id));
+  const archivee = (x) => archives.has(x.dossier) || (!!x.tache && archives.has(String(x.tache).split('-')[0]));
+  // Les historiqueDossiers plus récents, montrés dans l'ordre de création ; un dossier ressorti des archives compte
+  // comme récent à partir du moment où il est ressorti (sinon un vieux dossier ressorti resterait caché).
+  const visibles = [...etat.dossiers.values()].filter((d) => !d.archive);
+  const recence = (d) => Math.max(d.creeLe || 0, d.ressortiLe || 0);
+  const gardes = new Set([...visibles].sort((a, b) => recence(a) - recence(b)).slice(-REGLAGES.historiqueDossiers).map((d) => d.id));
+  const dossiers = visibles.filter((d) => gardes.has(d.id));
   const ids = new Set(dossiers.map((d) => d.id));
   return {
     seq: ++seq,
@@ -203,7 +211,6 @@ export function instantane() {
     personnalisation: personnalisation(),
     conso: consoPublique(),
     modeles: modelesPublics(),
-    dgDefaut: { modele: REGLAGES.dg.modele, effort: REGLAGES.dg.effort },
     mcp: mcpPublic(),
     dossiers: dossiers.map(publicDossier),
     taches: [...etat.taches.values()].filter((t) => ids.has(t.dossier)).map(publicTache),
@@ -219,7 +226,7 @@ export function instantane() {
     ),
     permissions: [...etat.permissions.values()],
     decisions: [...etat.decisions.values()],
-    notifications: [...etat.notifications.values()],
+    notifications: [...etat.notifications.values()].filter((n) => !archivee(n)),
     equipe: agentsPublics(),
     bonheur: bonheurPublic(),
     services: [...etat.services.values()].map(({ lignes, ...s }) => ({ ...s, dernieresLignes: (lignes || []).slice(-20) })),
@@ -227,7 +234,7 @@ export function instantane() {
     pensees: Object.fromEntries([...etat.pensees].filter(([, p]) => Date.now() - p.t < 120000)),
     reflexions: Object.fromEntries(etat.reflexions),
     dictee: { disponible: etatDictee.disponible, appareil: etatDictee.appareil },
-    messages: etat.messages.slice(-200),
+    messages: etat.messages.filter((m) => !archives.has(m.dossier)).slice(-200),
     dg: etat.dg,
     ordonnanceur: etat.ordonnanceur,
     miniJeu: fournisseurMiniJeu(),
@@ -400,6 +407,46 @@ export function effacerDossier(id) {
     console.error('suppression', id, e.message);
   }
   emettre('dossier_supprime', { dossier: id });
+}
+
+// Archivage à la main (1.0.7) : un dossier clos (terminé, annulé, en échec) quitte la liste, les fiches et le fil
+// de tous les sites ouverts, sans rien effacer ; Réglages › Dossiers archivés le montre et le ressort.
+export function archiverDossier(d) {
+  if (!TERMINAUX_DOSSIER.has(d.etat) || d.archive) return false;
+  d.archive = Date.now();
+  majDossier(d);
+  return true;
+}
+
+export function ressortirDossier(d) {
+  if (!d.archive) return false;
+  delete d.archive;
+  d.ressortiLe = Date.now();
+  majDossier(d);
+  // ses tâches, son plan et ses messages reviennent d'un coup : état complet pour tous les sites ouverts
+  const ev = instantane();
+  for (const envoyer of clients) {
+    try {
+      envoyer(ev);
+    } catch {
+      /* client déconnecté */
+    }
+  }
+  return true;
+}
+
+// Les dossiers archivés avec leurs tâches, du plus récemment archivé au plus ancien.
+export function dossiersArchives() {
+  return [...etat.dossiers.values()]
+    .filter((d) => d.archive)
+    .sort((a, b) => b.archive - a.archive)
+    .map((d) => ({
+      ...publicDossier(d),
+      taches: [...etat.taches.values()]
+        .filter((t) => t.dossier === d.id)
+        .sort((a, b) => Number(a.ref.slice(1)) - Number(b.ref.slice(1)))
+        .map(publicTache),
+    }));
 }
 
 export function sauver(dossierId) {

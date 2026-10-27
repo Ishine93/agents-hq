@@ -41,7 +41,7 @@ Conventions :
 | D1 | Fournisseurs du lot 1 en plus de Codex | **Codex + client ACP générique (Grok, Cursor, Copilot, Mistral…)**, au lieu de ma recommandation « Codex seul ». Question ajoutée : « ça fonctionnera de quelle façon ? » | Le lot 1 est coupé en **1a** (Claude + Codex) et **1b** (ACP), livrables séparément. Le fonctionnement de l'ACP est expliqué au §2.8. La réponse courte lui a été donnée dans la question suivante. |
 | D2 | Délégation d'images : validation | « **Paramétrable dans les réglages, désactivée par défaut, limite réglable par projet de 1 à l'infini. Ajoute aussi une option avec ou sans accord.** » | Réglage `delegation.images` : `actif: false` par défaut ; `accord` (oui/non) ; limite par projet (étage), de 1 à illimitée (§7). |
 | D3 | Images par l'API (clé facturée) si l'abonnement ne suffit pas | **Oui, avec un plafond mensuel en dollars qu'il fixe, et son accord au-delà**, « mais réglable dans les réglages, donc optionnel, et désactivé par défaut » | Réglage `delegation.images.api` : `actif: false` par défaut, `plafondMensuelUsd`, accord au-delà du plafond (§7). |
-| D4 | Quota épuisé ou compte déconnecté | **Jamais de bascule automatique : pause jusqu'à la remise à zéro, comme aujourd'hui**, « et proposer de passer sur un autre compte mais avec un avertissement ; réglable dans les paramètres pour bloquer les workflows ; par défaut, pause jusqu'à la limite » | Défaut : pause, plus une carte de décision « Attendre / Passer sur {compte} » avec avertissement. Réglage `quota.proposerBascule` : à `false`, la pause est stricte et rien n'est proposé (§5.3). |
+| D4 | Quota épuisé ou compte déconnecté | **Jamais de bascule automatique : pause jusqu'à la remise à zéro, comme aujourd'hui**, « et proposer de passer sur un autre compte mais avec un avertissement ; réglable dans les paramètres pour bloquer les workflows ; par défaut, pause jusqu'à la limite » | Défaut : pause, plus une carte de décision « Attendre / Passer sur {compte} » avec avertissement. Réglage `quota.bascule` (1.0.7, avant `quota.proposerBascule`) : `demander` (défaut, la carte), `auto` (le dossier passe tout seul sur le compte libre, choix de l'utilisateur), `jamais` (pause stricte, rien n'est proposé) (§5.3). |
 
 **Mes interprétations, à corriger si besoin :**
 - D2 : la « limite par projet » se compte **par demande (dossier) et par étage**. Exemple : limite 3 sur l'étage « MonJeu » = 3 images au plus par demande qui travaille sur MonJeu.
@@ -560,7 +560,7 @@ enabled = false
   },
   "dg": { "compte": "claude1", "modele": "opus", "effort": "xhigh" },
   "consigneDg": "Crée en priorité les tâches de test sur Codex.",
-  "quota": { "pause": "compte", "proposerBascule": true }
+  "quota": { "pause": "compte", "bascule": "demander" }
 }
 ```
 
@@ -588,12 +588,14 @@ enabled = false
 ### 5.3 Quota épuisé ou compte déconnecté (décision D4)
 
 - **Par défaut** : **pause jusqu'à la remise à zéro**. Les tâches du compte passent `queued` avec le motif « limite d'usage de {compte} jusqu'à {heure} ». Les limites sont relues toutes les 5 minutes, comme aujourd'hui (`demarrerSuiviLimites`), et la pause se lève dès qu'une lecture montre de la marge.
-- **Proposition de bascule** (`quota.proposerBascule: true` par défaut) : une **carte de décision** (`demanderDecision`) propose :
+- **Proposition de bascule** (`quota.bascule: "demander"`, par défaut) : une **carte de décision** (`demanderDecision`) propose :
   - « Attendre la remise à zéro ({heure}) », choix par défaut, retenu aussi sans réponse ;
   - « Passer ces tâches sur {compte éligible suivant} » ;
 
   avec cet **avertissement** : « Changer de compte pour contourner une limite peut être contraire aux conditions d'utilisation du fournisseur (OpenAI le déconseille). Les agents changent de conversation : le contexte de la réserve est perdu. » Une fois acceptée, la bascule vaut **pour ce dossier seulement**.
-- **`quota.proposerBascule: false`** (« bloquer ») : pause stricte, sans proposition.
+- **`quota.bascule: "jamais"`** (« bloquer ») : pause stricte, sans proposition.
+- **`quota.bascule: "auto"`** (1.0.7, à la demande de l'utilisateur) : pas de carte, le dossier passe tout seul sur le compte proposé, avec un message dans son fil et l'avertissement affiché dans Réglages › Priorités quand on choisit ce réglage. Même portée qu'une bascule acceptée : ce dossier seulement, jusqu'à la reprise du compte ; chaque compte de remplacement n'est pris qu'une fois par pause.
+- Avant la 1.0.7, `quota.proposerBascule` (`true` / `false`) : encore lu, `true` vaut `demander` et `false` vaut `jamais`.
 - **`quota.pause: "globale"`** : retour à la pause de tout le QG (`pauseGlobale`, 1.0.5).
 - **Compte déconnecté** (`authentication_failed`) : même logique. Le message remplace l'actuel « lance connexion-compte-{n}.bat » (`ordonnanceur.js`, `echecDg` et `gererEchec`, qui supposent `claude2` ↔ 2) par « Reconnecte {nom} dans Réglages › Comptes IA », avec un bouton.
 
@@ -667,7 +669,7 @@ Avec Codex :
     codex1 (ChatGPT perso, Plus) : eco=gpt-6-luna, standard=gpt-6.1-terra, fort=gpt-6.1-sol, max=gpt-6-astra ; profils : lecture, edition (sans réseau), pas ops ; pas de mode prudent
     ```
   - `{PRIORITES}` : résumé des priorités par type ;
-  - `{CONSIGNE_IA}` : la consigne de l'utilisateur (`consigneDg`).
+  - `{CONSIGNES}` : les consignes de l'utilisateur (générale et par type).
 - **Règle ajoutée** : « Si l'utilisateur demande une IA ou un compte (dans sa demande ou dans la consigne), mets `ia` ou `compte` en conséquence. Sinon, laisse `ia: "auto"` et `compte: ""` : le serveur suit les priorités. Ne mets jamais une tâche `ops` ou en mode prudent sur un compte qui ne garantit pas ce profil. »
 - `MODÈLES DISPONIBLES POUR CE COMPTE : …` dans `planifier()` devient « COMPTES IA DISPONIBLES ». `noteFable()` reste et ne s'applique qu'aux comptes Claude qui ont Fable.
 - **Sur Codex**, il n'y a pas de préréglage `claude_code` : la directive est passée dans les instructions développeur, avec les règles de base utiles (lire avant d'écrire, rester dans le dossier) déjà présentes dans la directive. Le texte reste le même pour les deux fournisseurs.
@@ -897,7 +899,7 @@ Il peut être fait après le lot 1a ou en parallèle du lot 2, car il ne dépend
 | Fichier | Changement |
 |---|---|
 | `serveur/dg.js` | `dossier.dg.compte` ; `modeleDg` par compte ; `schemaDynamique` (`modele`, `ia`, `compte`) ; `SCHEMA_TACHE.ia/compte` ; `SCHEMA_DELTA.ops[].compte` ; `validerTaches` (cohérence, profils garantis) ; `planifier` : « COMPTES IA DISPONIBLES », priorités, consigne ; DG sur n'importe quel adaptateur |
-| `config/defauts/directive-dg.md` | §6.4 : niveaux, `{COMPTES_IA}`, `{PRIORITES}`, `{CONSIGNE_IA}`, règle `ia`/`compte` |
+| `config/defauts/directive-dg.md` | §6.4 : niveaux, `{COMPTES_IA}`, `{PRIORITES}`, `{CONSIGNES}`, règle `ia`/`compte` |
 | `config/defauts/directive-tache.md` | ligne sur `generer_image`, seulement si la délégation est active (marqueur remplacé par `directive()`) |
 | `serveur/config.js` | `directive()` remplace les nouveaux marqueurs |
 | `serveur/ordonnanceur.js` | routeur au lancement (`lancer`) et à la vérification ; pause **par compte** + carte de bascule (§5.3) ; `quota.pause` ; `echecDg` et `gererEchec` génériques ; `creerDossier` accepte `dg.compte` et « auto » |
@@ -907,7 +909,7 @@ Il peut être fait après le lot 1a ou en parallèle du lot 2, car il ne dépend
 | `serveur/bonheur.js`, `serveur/personnages.js` | rôle `utilitaire` par niveau |
 | `serveur/api-reglages.js` | routes `GET/POST /api/priorites`, réglages `delegation` et `quota`, validation des modèles du mini-jeu par niveau (aujourd'hui `['haiku','sonnet','opus']`, ligne 324) |
 | `serveur/bus.js` | `etat.priorites`, événement `priorites` ; `plans` avec `compte`/`fournisseur` |
-| `config/defauts/reglages.json` | `delegation` (`images.actif: false`, `accord: true`, `limites.defaut: 3`, `api.actif: false`), `quota` (`pause: "compte"`, `proposerBascule: true`), `codex.lectureStricte: false` |
+| `config/defauts/reglages.json` | `delegation` (`images.actif: false`, `accord: true`, `limites.defaut: 3`, `api.actif: false`), `quota` (`pause: "compte"`, `bascule: "demander"`), `codex.lectureStricte: false` |
 | `web/parametres.js` | sections **Priorités** et **Délégation** ; DG : compte + modèle + effort |
 | `web/accueil.js` | étapes du §8 (« Comptes IA », « Priorités ») ; textes neutres |
 | `web/ui.js` | menu « IA de cette demande : Automatique / {compte} » ; badges |
@@ -922,7 +924,7 @@ Il peut être fait après le lot 1a ou en parallèle du lot 2, car il ne dépend
 | `tests/routeur.js` | tableau de cas : compte imposé éligible / déconnecté (attente + carte, jamais de remplacement) ; IA imposée ; type de tâche → liste ; profil non garanti écarté (prudent, `ops`) ; plafond de sessions ; réembauche sur le même compte seulement ; conversion opus → gpt-6.1-sol ; aucun éligible → motif clair ; garde-fou Fable inchangé (`tests/garde-fable.js` passe toujours) |
 | `tests/dg-schema-dynamique.js` | énumérations `modele`/`ia`/`compte` = comptes connectés ; `validerTaches` refuse un modèle d'un autre fournisseur que celui demandé, `ops` impossible, compte inconnu |
 | `tests/dg-codex.js` (faux Codex) | le faux Codex rend un plan JSON puis un delta, puis une synthèse ; l'ordonnanceur crée les tâches, les relance et termine le dossier ; `dgSession` reprise par `exec resume` ; le schéma de delta est accepté par `--output-schema` |
-| `tests/quota-compte.js` | limite sur `codex1` : seules ses tâches attendent, celles de `claude1` continuent ; carte « Attendre / Passer sur… » avec avertissement ; sans réponse = attendre ; `proposerBascule: false` = aucune carte ; `pause: "globale"` = comportement 1.0.5 ; levée par une lecture de limites |
+| `tests/quota-compte.js` | limite sur `codex1` : seules ses tâches attendent, celles de `claude1` continuent ; carte « Attendre / Passer sur… » avec avertissement ; sans réponse = attendre ; `bascule: "jamais"` = aucune carte ; `bascule: "auto"` = passage sans carte ; `pause: "globale"` = comportement 1.0.5 ; levée par une lecture de limites |
 | `tests/delegation-images.js` | outil absent si désactivé ; accord demandé si `accord: true` ; limite par étage (1, 3, illimité) ; moteur B avec le faux Codex qui « génère » un fichier dans `CODEX_HOME/generated_images/` → copié vers `chemin` ; moteur A contre un **faux serveur HTTP** (`QG_OPENAI_BASE_URL`) qui rend une image base64 et un usage → coût calculé ; plafond mensuel dépassé → accord demandé ; journal `delegations.jsonl` complet ; `chemin` hors zone refusé ; la clé n'apparaît dans aucun événement |
 | `tests/sans-claude-e2e.js` | serveur lancé avec une configuration temporaire contenant **un seul compte Codex** (faux Codex), aucun binaire Claude (`QG_CLAUDE_BIN` pointe vers un chemin absent) : configuration guidée par l'API (`/api/comptes/ajouter`, `/api/onboarding/terminer`), `POST /api/dossiers`, plan du DG, tâches, vérification, synthèse → dossier `termine` ; question à un agent (repli) ; récolte de Joy en `utilitaire` ; **aucun lancement du binaire Claude** (trace des lancements) |
 | `tests/questions-sans-fork.js` | une question à un agent Codex rend une réponse marquée « d'après son activité visible » |
@@ -934,7 +936,7 @@ Il peut être fait après le lot 1a ou en parallèle du lot 2, car il ne dépend
 3. Avec Claude et Codex connectés et le préréglage « Claude pour le code, Codex pour la rédaction », un plan mixte affiche les bons badges, et chaque tâche tourne sur le compte attendu.
 4. La consigne « crée en priorité des tâches sur Codex » (Réglages ou texte de la demande) donne `ia: "codex"` dans le plan, sur un test réel.
 5. La délégation d'images est désactivée par défaut. Une fois activée, elle produit une image dans le projet avec journal et accord, selon les réglages D2 et D3.
-6. Une limite atteinte met en pause le compte concerné, propose la bascule avec avertissement, et ne bascule jamais seule (D4).
+6. Une limite atteinte met en pause le compte concerné, propose la bascule avec avertissement, et ne bascule seule que si l'utilisateur l'a réglé ainsi (D4).
 
 ### Après le lot 2 (ordre proposé)
 

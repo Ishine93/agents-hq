@@ -42,7 +42,7 @@ export class Moteur {
     this.pret = true;
     this.programmer();
     // Si l'onglet est masqué (ou la page couverte), requestAnimationFrame s'arrête : on garde la scène à jour
-    // à petit pas, sans la dessiner puisque personne ne la voit (sauf en Maximum, qui dessine comme avant).
+    // à petit pas, sans la dessiner puisque personne ne la voit (sauf en Maximum, qui dessine toujours).
     setInterval(() => {
       const t = performance.now();
       if (t - this.derniereImage <= 400) return;

@@ -47,7 +47,6 @@ export class Etat {
     this.transitions = new Map();
     // v1.1
     this.modeles = {};
-    this.dgDefaut = null;
     this.mcp = { comptes: {}, etages: {} };
     // v1.2
     this.decisions = new Map();
@@ -194,7 +193,7 @@ export class Etat {
     return id.charAt(0).toUpperCase() + id.slice(1);
   }
 
-  // Plusieurs IA (1.0.6) : un compte autre que Claude est présent ? Sinon le site reste celui de la 1.0.5.
+  // Plusieurs IA : un compte autre que Claude est présent ? Sinon le site ne parle que de Claude (pas de choix d'IA).
   get multiIa() {
     return (this.comptes || []).some((c) => (c.fournisseur || 'claude') !== 'claude');
   }
@@ -356,7 +355,9 @@ export class Etat {
         this.chargerEtat(ev);
         break;
       case 'dossier':
-        if (ev.dossier && ev.dossier.id) this.dossiers.set(ev.dossier.id, ev.dossier);
+        // archivé (1.0.7) : il quitte l'écran comme un dossier supprimé, mais reste sur le disque
+        if (ev.dossier && ev.dossier.archive) this.oublierDossier(ev.dossier.id);
+        else if (ev.dossier && ev.dossier.id) this.dossiers.set(ev.dossier.id, ev.dossier);
         break;
       case 'dossier_supprime':
         this.oublierDossier(ev.dossier);
@@ -590,7 +591,6 @@ export class Etat {
     if (ev.dg) this.dg = { etat: 'libre', dossier: null, etage: 'direction', action: null, ...ev.dg };
     this.ordonnanceur = ev.ordonnanceur || { pause: null };
     this.modeles = ev.modeles && typeof ev.modeles === 'object' ? ev.modeles : {};
-    this.dgDefaut = ev.dgDefaut || null;
     this.mcp = ev.mcp && typeof ev.mcp === 'object' ? { comptes: {}, etages: {}, ...ev.mcp } : { comptes: {}, etages: {} };
     for (const d of ev.decisions || []) this.decisions.set(d.id, d);
     for (const n of ev.notifications || []) this.notifications.set(n.id, n);
@@ -650,6 +650,7 @@ export class Etat {
       case 'etat':
         return tr('État complet reçu : {taches} tâche(s), {dossiers} dossier(s)', { taches: (ev.taches || []).length, dossiers: (ev.dossiers || []).length });
       case 'dossier':
+        if (ev.dossier.archive) return tr('Dossier {id} archivé', { id: ev.dossier.id });
         return tr('Dossier {id} : {etat}', { id: ev.dossier.id, etat: libelleDossier(ev.dossier.etat) }) + (ev.dossier.titre ? ' — ' + ev.dossier.titre : '');
       case 'dossier_supprime':
         return tr('Dossier {id} supprimé', { id: ev.dossier });

@@ -155,7 +155,7 @@ export function dossiersSystemeIgnores(plat = PLATEFORME) {
   return ['proc', 'sys', 'dev', 'usr', 'bin', 'sbin', 'etc', 'opt', 'var', 'lib', 'lib64', 'boot'];
 }
 
-// Un dossier (parent + nom) est-il un dossier système à sauter ? Windows : par le nom, comme avant.
+// Un dossier (parent + nom) est-il un dossier système à sauter ? Windows : par le nom, à tout niveau.
 // POSIX : seulement directement sous « / » ou sous le dossier personnel (un projet « music » dans ~/Projets
 // reste un projet).
 export function estDossierSysteme(parent, nomDossier, plat = PLATEFORME, home = os.homedir()) {
@@ -392,7 +392,7 @@ export const fichierConnexion = (fournisseur, configDir) => (fournisseur === 'co
 
 // Sur Mac, Claude Code range le jeton dans le trousseau : le fichier .credentials.json n'existe pas
 // (sauf si le trousseau a refusé). On demande alors « claude auth status --json » ({loggedIn}), mis en cache
-// 30 s ; une relecture périmée se fait en arrière-plan. Windows : le fichier seulement (comme avant).
+// 30 s ; une relecture périmée se fait en arrière-plan. Windows : le fichier seulement.
 const DUREE_CACHE = 30 * 1000;
 const cacheConnexion = new Map(); // configDir → { t, connecte, enCours }
 

@@ -1,12 +1,15 @@
-// Réglage « Coût » (1.0.6, lot B) : profil de travail d'un dossier et bloc PROFIL DE TRAVAIL donné au DG.
+// Réglage « Coût » (1.0.6, lot B ; Personnalisé en 1.0.7) : profil de travail d'un dossier et bloc PROFIL DE TRAVAIL donné au DG.
 // Rien ici ne touche au modèle ni à l'effort des tâches de production ni du DG.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { REGLAGES } from './config.js';
+import { chargerEquivalences, niveauDe, modeleParNiveau } from './ia/fournisseurs.js';
 
 const FICHIER = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'config', 'defauts', 'profils-travail.json');
 export const NIVEAUX = ['econome', 'equilibre', 'max'];
+export const PERSONNALISE = 'personnalise'; // 4e choix : les valeurs de l'utilisateur, à partir d'un des trois niveaux (base)
+export const COUTS = [...NIVEAUX, PERSONNALISE];
 export const NIVEAU_DEFAUT = 'equilibre';
 
 let cache = null;
@@ -26,16 +29,14 @@ const ENUMS = {
   exploration: ['interdite', 'permise', 'encouragee'],
   ambiance: [null, false],
 };
-const NOMBRES = ['compactionAgents', 'compactionVerif', 'compactionDg', 'maxTaches', 'verifMaxTurns', 'maxRework', 'seuilAccordFenetre', 'plafondTacheFacteur'];
-const PEUT_ETRE_NUL = new Set(['seuilAccordFenetre', 'plafondTacheFacteur']);
+const NOMBRES = ['compactionAgents', 'compactionVerif', 'compactionDg', 'maxCompactions', 'maxTaches', 'verifMaxTurns', 'maxRework', 'seuilAccordFenetre', 'plafondTacheFacteur'];
+const PEUT_ETRE_NUL = new Set(['seuilAccordFenetre', 'plafondTacheFacteur', 'maxCompactions']);
 
 function valeurValide(cle, v) {
   if (cle in ENUMS) return ENUMS[cle].includes(v);
   if (NOMBRES.includes(cle)) return (v === null && PEUT_ETRE_NUL.has(cle)) || (typeof v === 'number' && Number.isFinite(v) && v >= 0);
   return false;
 }
-
-export const niveauValide = (n) => (NIVEAUX.includes(n) ? n : NIVEAU_DEFAUT);
 
 // Garde seulement les boutons connus aux valeurs permises.
 export function nettoyerPersonnalise(p) {
@@ -44,30 +45,62 @@ export function nettoyerPersonnalise(p) {
   return r;
 }
 
-// Réglages utilisateur : travail absent ou abîmé → défaut (migration).
+/**
+ * Réglages utilisateur : { cout, base, personnalise }. cout : un des trois niveaux ou « personnalise » ;
+ * base : le niveau dont part Personnalisé ; personnalise : ses valeurs, gardées même quand un autre niveau est choisi.
+ * Absent ou abîmé → défaut. Réglages d'avant la 1.0.7 (un niveau + des valeurs changées, sans base) :
+ * Personnalisé à partir de ce niveau, avec ces valeurs.
+ */
 export function travailReglages(reglages = REGLAGES) {
   const t = reglages?.travail || {};
-  return { cout: niveauValide(t.cout), personnalise: nettoyerPersonnalise(t.personnalise) };
+  const personnalise = nettoyerPersonnalise(t.personnalise);
+  let cout = COUTS.includes(t.cout) ? t.cout : NIVEAU_DEFAUT;
+  let base = NIVEAUX.includes(t.base) ? t.base : null;
+  if (!base) {
+    base = NIVEAUX.includes(cout) ? cout : NIVEAU_DEFAUT;
+    if (cout !== PERSONNALISE && Object.keys(personnalise).length) cout = PERSONNALISE;
+  }
+  return { cout, base, personnalise };
 }
 
+/** Ce qu'un dossier garde de son envoi : le niveau, ou Personnalisé avec sa base et ses valeurs du moment. */
+export function travailDossier(cout, reglages = REGLAGES) {
+  const glob = travailReglages(reglages);
+  const c = COUTS.includes(cout) ? cout : glob.cout;
+  return c === PERSONNALISE ? { cout: c, base: glob.base, personnalise: { ...glob.personnalise } } : { cout: c, base: c };
+}
+
+const profilDe = (cout, base, perso) => ({ cout, base, ...profilsTravail().cout[base], ...perso });
+
 /**
- * Profil à plat d'un dossier : niveau (celui du dossier, sinon des réglages) + personnalisation des réglages
- * + personnalisation propre au dossier. Le niveau choisi à l'envoi est figé dans dossier.travail.
+ * Profil à plat d'un dossier, avec les valeurs figées à l'envoi (dossier.travail) ; sans dossier, celui des réglages.
+ * profil.cout : le choix (niveau ou « personnalise ») ; profil.base : le niveau dont viennent les valeurs.
  */
 export function profilEffectif(dossier = null, reglages = REGLAGES) {
   const glob = travailReglages(reglages);
-  const cout = NIVEAUX.includes(dossier?.travail?.cout) ? dossier.travail.cout : glob.cout;
-  const base = profilsTravail().cout[cout];
-  // la personnalisation des réglages ne vaut que pour le niveau des réglages
-  const perso = cout === glob.cout ? glob.personnalise : {};
-  return { cout, ...base, ...perso, ...nettoyerPersonnalise(dossier?.travail?.personnalise) };
+  const d = dossier?.travail;
+  if (!d || !COUTS.includes(d.cout)) {
+    const perso = glob.cout === PERSONNALISE;
+    return profilDe(glob.cout, perso ? glob.base : glob.cout, perso ? glob.personnalise : {});
+  }
+  if (d.cout === PERSONNALISE) {
+    const perso = d.personnalise === undefined ? glob.personnalise : nettoyerPersonnalise(d.personnalise);
+    return profilDe(PERSONNALISE, NIVEAUX.includes(d.base) ? d.base : glob.base, perso);
+  }
+  // dossier d'avant la 1.0.7 (niveau seul, sans base) : les valeurs changées des réglages valaient pour ce niveau-là
+  const ancien = !('base' in d) && glob.cout === PERSONNALISE && glob.base === d.cout ? glob.personnalise : {};
+  return profilDe(d.cout, d.cout, { ...ancien, ...nettoyerPersonnalise(d.personnalise) });
 }
 
 const NOMS = {
-  fr: { econome: 'Économe', equilibre: 'Équilibré', max: 'Max' },
-  en: { econome: 'Thrifty', equilibre: 'Balanced', max: 'Max' },
+  fr: { econome: 'Économe', equilibre: 'Équilibré', max: 'Max', personnalise: 'Personnalisé' },
+  en: { econome: 'Thrifty', equilibre: 'Balanced', max: 'Max', personnalise: 'Custom' },
 };
 export const nomNiveau = (cout, langue = 'fr') => (NOMS[langue] || NOMS.fr)[cout] || cout;
+// Nom d'un profil : « Personnalisé (à partir de Économe) » pour Personnalisé, sinon le nom du niveau.
+export const nomProfil = (profil, langue = 'fr') => (profil?.cout === PERSONNALISE
+  ? (langue === 'en' ? `Custom (based on ${nomNiveau(profil.base, langue)})` : `Personnalisé (à partir de ${nomNiveau(profil.base, langue)})`)
+  : nomNiveau(profil?.cout, langue));
 
 const TEXTES = {
   fr: {
@@ -76,7 +109,7 @@ const TEXTES = {
     decoupage: {
       chantier: (m) => `- ${m} tâches au plus. Une tâche par chantier : l'analyse et la réalisation d'un même code vont toujours dans la même tâche. Pas de tâche de revue ni de synthèse sans demande.`,
       parallele: (m) => `- ${m} tâches au plus. L'analyse et la réalisation d'un même code vont dans la même tâche : l'agent qui explore garde son contexte pour implémenter. Ne sépare que le travail vraiment parallèle et indépendant (projets différents, sources de bench différentes).`,
-      actuel: (m) => `- ${m} tâches au plus. Découpage habituel (production, vérification et mesure, travail dépendant séparés).`,
+      actuel: (m) => `- ${m} tâches au plus. Sépare la production, la vérification ou la mesure, et chaque travail qui dépend d'un autre (par exemple : étude, puis code, puis mesure).`,
     },
     direct: {
       'projet-unique': '- Demande qui touche un seul projet : rends une seule tâche en mode "direct" (la demande de l\'utilisateur, plus le contexte utile), sans vérificateur séparé.',
@@ -86,7 +119,7 @@ const TEXTES = {
     verif: {
       self: '- Vérification : "self" avec des commandes concrètes (tests, build) ; "agent" seulement si risque "high" ou si l\'utilisateur a demandé une relecture (relectureDemandee).',
       risque: '- Vérification : "agent" si la tâche modifie du code partagé ou critique (risque medium ou high) ou si l\'utilisateur a demandé une relecture (relectureDemandee) ; sinon "self" avec des commandes concrètes.',
-      code: '- Vérification : "agent" pour toute tâche qui modifie du code (règle habituelle).',
+      code: '- Vérification : "agent" pour toute tâche qui modifie du code ; "self" avec des commandes concrètes pour les autres.',
     },
     perimetre: {
       strict: '- Périmètre : seulement ce qui est demandé, aucun à-côté (README, captures, revue). Une question (« est-ce possible ? ») appelle une étude, puis une question à l\'utilisateur avant toute implémentation.',
@@ -94,7 +127,7 @@ const TEXTES = {
       bonus: '- Périmètre : tu peux proposer des améliorations, en tâches « bonus » soumises à l\'approbation de l\'utilisateur.',
     },
     passation: '- Passation : une tâche dont le résultat sert à d\'autres l\'écrit en entier dans un fichier livrable ; ses notes de passation disent où le trouver et quoi y regarder.',
-    modele: '- Modèle et effort : ta grille habituelle, inchangée.',
+    modele: '- Modèle et effort : ce profil n\'y touche pas ; choisis-les pour chaque tâche selon sa difficulté.',
     rappel: (n, m) => `Rappel du PROFIL DE TRAVAIL : Coût = ${n} (${m} tâches au plus).`,
   },
   en: {
@@ -103,7 +136,7 @@ const TEXTES = {
     decoupage: {
       chantier: (m) => `- At most ${m} tasks. One task per workstream: analysis and implementation of the same code always go in the same task. No review or summary task unless asked.`,
       parallele: (m) => `- At most ${m} tasks. Analysis and implementation of the same code go in the same task: the agent that explores keeps its context to implement. Only split truly parallel, independent work (different projects, different bench sources).`,
-      actuel: (m) => `- At most ${m} tasks. Usual splitting (production, verification and measurement, dependent work kept separate).`,
+      actuel: (m) => `- At most ${m} tasks. Keep production, verification or measurement, and each piece of work that depends on another separate (for example: study, then code, then measurement).`,
     },
     direct: {
       'projet-unique': '- A request that touches a single project: return a single task in "direct" mode (the user\'s request plus useful context), with no separate verifier.',
@@ -113,7 +146,7 @@ const TEXTES = {
     verif: {
       self: '- Verification: "self" with concrete commands (tests, build); "agent" only for risk "high" or when the user asked for a review (relectureDemandee).',
       risque: '- Verification: "agent" if the task changes shared or critical code (risk medium or high) or when the user asked for a review (relectureDemandee); otherwise "self" with concrete commands.',
-      code: '- Verification: "agent" for every task that changes code (usual rule).',
+      code: '- Verification: "agent" for every task that changes code; "self" with concrete commands for the others.',
     },
     perimetre: {
       strict: '- Scope: only what is asked, no extras (README, screenshots, review). A question ("is it possible?") calls for a study, then a question to the user before any implementation.',
@@ -121,7 +154,7 @@ const TEXTES = {
       bonus: '- Scope: you may propose improvements, as "bonus" tasks subject to the user\'s approval.',
     },
     passation: '- Handoff: a task whose result serves others writes it in full to a deliverable file; its handoff notes say where to find it and what to look at.',
-    modele: '- Model and effort: your usual grid, unchanged.',
+    modele: '- Model and effort: this profile does not touch them; choose them for each task according to its difficulty.',
     rappel: (n, m) => `WORK PROFILE reminder: Cost = ${n} (at most ${m} tasks).`,
   },
 };
@@ -129,7 +162,7 @@ const TEXTES = {
 export function blocDirective(profil, langue = REGLAGES.langueIA || 'fr') {
   const T = TEXTES[langue] || TEXTES.fr;
   return [
-    T.titre(nomNiveau(profil.cout, langue)),
+    T.titre(nomProfil(profil, langue)),
     T.but,
     (T.decoupage[profil.decoupage] || T.decoupage.actuel)(profil.maxTaches),
     T.direct[profil.agentDirect] || T.direct.jamais,
@@ -141,11 +174,34 @@ export function blocDirective(profil, langue = REGLAGES.langueIA || 'fr') {
 }
 
 export function rappelProfil(profil, langue = REGLAGES.langueIA || 'fr') {
-  return (TEXTES[langue] || TEXTES.fr).rappel(nomNiveau(profil.cout, langue), profil.maxTaches);
+  return (TEXTES[langue] || TEXTES.fr).rappel(nomProfil(profil, langue), profil.maxTaches);
 }
 
 const RISQUE_MOYEN = new Set(['medium', 'high']);
-const MODELE_STANDARD = 'sonnet'; // niveau « standard » du fournisseur Claude (le multi-IA passera par l'adaptateur)
+const MODELE_STANDARD = 'sonnet'; // niveau « standard » de Claude, quand le modèle n'est pas connu
+
+// IA d'un modèle d'après config/defauts/equivalences.json (claude, codex…), null pour un modèle inconnu (agent ACP).
+function iaDuModele(modele) {
+  const eq = chargerEquivalences();
+  const m = String(modele || '').toLowerCase();
+  if (!m) return null;
+  for (const [f, table] of Object.entries(eq)) {
+    if (f === 'modeles' || !table || typeof table !== 'object' || Array.isArray(table)) continue;
+    if (table[m] || Object.keys(table).some((id) => m.includes(id))) return f;
+  }
+  return null;
+}
+
+// Vérificateur au niveau standard : un modèle plus fort prend le modèle standard de SA propre IA (Sonnet chez Claude,
+// GPT-6.1 Terra chez Codex), ce qui garde une relecture croisée voulue par le DG ; un modèle eco ou standard est
+// gardé, comme un modèle inconnu.
+export function verificateurStandard(modele) {
+  const ia = iaDuModele(modele);
+  if (!ia) return modele;
+  const niveaux = chargerEquivalences().niveaux || ['eco', 'standard', 'fort', 'max'];
+  if (niveaux.indexOf(niveauDe(modele, ia)) <= niveaux.indexOf('standard')) return modele;
+  return modeleParNiveau(ia, 'standard') || modele;
+}
 
 /**
  * B5 : vérification d'une tâche selon le profil. tache = { risque, approbation, verification }.
@@ -155,7 +211,7 @@ const MODELE_STANDARD = 'sonnet'; // niveau « standard » du fournisseur Claude
 export function verificationProfil(tache, profil, { relecture = false, langue = REGLAGES.langueIA || 'fr' } = {}) {
   const v = { ...(tache.verification || {}) };
   if (!v.mode) return v;
-  const nom = nomNiveau(profil.cout, langue);
+  const nom = nomProfil(profil, langue);
   const changes = [];
   if (v.mode === 'agent') {
     // relecture demandée, approbation ou risque élevé : vérificateur gardé à tous les niveaux
@@ -170,9 +226,13 @@ export function verificationProfil(tache, profil, { relecture = false, langue = 
   }
   if (v.mode === 'agent') {
     if (profil.verifMaxTurns) v.maxTurns = profil.verifMaxTurns;
-    if (profil.verifNiveau === 'standard' && v.modele !== MODELE_STANDARD && v.modele !== 'haiku') {
-      v.modele = MODELE_STANDARD;
-      changes.push(MODELE_STANDARD);
+    if (profil.verifNiveau === 'standard') {
+      // sans modèle de vérification choisi, le vérificateur partirait sur celui de la tâche
+      const cible = verificateurStandard(v.modele || tache.modele || MODELE_STANDARD);
+      if (cible !== v.modele) {
+        v.modele = cible;
+        changes.push(cible);
+      }
     }
     if (profil.verifEffort && v.effort !== profil.verifEffort) {
       v.effort = profil.verifEffort;
@@ -190,7 +250,8 @@ export function missionDirecte(demande, contexteDg, langue = REGLAGES.langueIA |
   return contexteDg?.trim() ? `${demande}\n\n${titre} :\n${contexteDg.trim()}` : demande;
 }
 
-// B8 : profil global (Réglages) en Économe → bavardages du mini-jeu et récolte de Joy sans appel au modèle.
+// B8 : ambiance coupée dans le profil des Réglages (Économe, ou Personnalisé ainsi réglé) → bavardages du mini-jeu
+// et récolte de Joy sans appel au modèle.
 // Les discussions ouvertes par l'utilisateur restent permises.
 export const ambianceCoupee = (reglages = REGLAGES) => profilEffectif(null, reglages).ambiance === false;
 
@@ -216,7 +277,7 @@ const TEXTES_EXPLO = {
 export function optionsExploration(profil, profilOutils, langue = REGLAGES.langueIA || 'fr') {
   if (!profil || profil.exploration === 'interdite' || !['edition', 'edition+tests'].includes(profilOutils)) return null;
   const T = TEXTES_EXPLO[langue] || TEXTES_EXPLO.fr;
-  const model = profil.cout === 'econome' ? 'haiku' : 'sonnet'; // jamais le modèle de la tâche
+  const model = (profil.base || profil.cout) === 'econome' ? 'haiku' : 'sonnet'; // jamais le modèle de la tâche
   const def = { description: T.description, prompt: T.prompt, model, tools: OUTILS_LECTURE, disallowedTools: OUTILS_ECRITURE, maxTurns: 25 };
   return {
     agents: { explorateur: def, Explore: { ...def, description: T.description } },

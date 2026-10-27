@@ -54,7 +54,7 @@ export function envControles(source = process.env) {
 
 /**
  * Lance une commande de la fiche dans le dossier du projet (cmd sur Windows, sh ailleurs), stdin fermé.
- * Résultat : { commande, ok, code, duree, sortie (filtrée comme en A11), delaiDepasse, interrompue }.
+ * Résultat : { commande, ok, code, duree, sortie (filtrée comme les sorties de tests : outils/filtre-tests.mjs), delaiDepasse, interrompue }.
  */
 export function lancerControle(commande, { cwd, delaiMs = DELAI_CONTROLE_MS, signal = null, env = envControles() } = {}) {
   const debut = Date.now();

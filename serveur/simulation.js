@@ -5,7 +5,7 @@ import { t as tr } from './i18n.js';
 import { modification } from './bus.js';
 import { modificationDe } from './session.js';
 import { suiviPensees } from './pensees.js';
-import { profilEffectif, nomNiveau } from './travail.js';
+import { profilEffectif, nomProfil } from './travail.js';
 import { scenario as scenarioParCle, scenarioDe, CODES_DEMO } from './scenarios-demo.js';
 
 // Code « écrit » par les agents simulés : de vrais diffs (lignes + et −) pour l'onglet Code et le vieil écran.
@@ -100,7 +100,7 @@ function bornerAuProfil(sortie, d) {
     t.deps = t.deps.filter((x) => refs.has(x.ref));
     t.inputsFrom = t.inputsFrom.filter((r) => refs.has(r));
   }
-  const niveau = nomNiveau(profil.cout, REGLAGES.langueInterface === 'en' ? 'en' : 'fr');
+  const niveau = nomProfil(profil, REGLAGES.langueInterface === 'en' ? 'en' : 'fr');
   return { ...sortie, taches, message: `${sortie.message} ${tr('Niveau de coût {niveau} : {n} tâches au plus, je garde les premières.', { niveau, n: profil.maxTaches })}` };
 }
 
