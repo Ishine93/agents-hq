@@ -29,6 +29,7 @@ import { COUTS, PERSONNALISE, nomNiveau, nomTravail, phraseNiveau, travailDe, sa
 import { texteEstimation, montant, texteMesures } from './estimation.js';
 import { brancherRedimensionnement } from './redim.js';
 import { modaleOuverte, api } from './modale.js';
+import { bulle, exempleAide } from './aide.js';
 import { t as tr, definirLangue, langueCourante, locale, traduireStatique, LANGUES_INTERFACE, LANGUES_IA } from './i18n.js';
 
 const CONTEXTE_MAX = 150000;
@@ -994,10 +995,126 @@ export class Interface {
     }, nom !== t.ref ? nom + ' · ' + t.ref : t.ref);
   }
 
+  // Recherche dans tout l'historique (1.0.8) : la barre reste en place (le texte tapé et le curseur ne bougent pas
+  // quand la liste se redessine) ; avec au moins 2 lettres, les résultats remplacent la liste.
+  zonesDossiers() {
+    const box = $('#vue-dossiers');
+    if (this.zoneListe && this.zoneListe.parentNode === box) return this.zoneListe;
+    const champ = h('input', { type: 'search', class: 'recherche-dossiers', placeholder: tr('Chercher dans tous les dossiers, archivés compris'), 'aria-label': tr('Chercher dans tous les dossiers') });
+    let minuterie = null;
+    champ.addEventListener('input', () => {
+      clearTimeout(minuterie);
+      minuterie = setTimeout(() => this.chercherDossiers(champ.value), 250);
+    });
+    champ.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && champ.value) {
+        champ.value = '';
+        this.chercherDossiers('');
+      }
+    });
+    const aide = bulle('recherche-dossiers', [
+      tr('Tape quelques mots : le QG cherche dans tous tes dossiers, même archivés ou trop anciens pour la liste. Il regarde la demande, la question et la synthèse du DG, les tâches et tous les messages du fil.'),
+      tr('Tous les mots doivent y être ; accents et majuscules ne comptent pas. Échap efface la recherche.'),
+      exempleAide(tr('« menu pause » retrouve le dossier où le DG a ajouté un menu pause à ton jeu, il y a trois mois.')),
+    ], { titre: tr('Recherche dans les dossiers') });
+    this.champRecherche = champ;
+    this.zoneListe = h('div', { class: 'liste-dossiers' });
+    box.replaceChildren(h('div', { class: 'barre-recherche' }, champ, aide.bouton), aide.panneau, this.zoneListe);
+    return this.zoneListe;
+  }
+
+  async chercherDossiers(texte) {
+    const q = String(texte || '').trim();
+    const n = (this.rechercheNumero = (this.rechercheNumero || 0) + 1);
+    if (q.length < 2) {
+      this.recherche = null;
+      return this.majDossiers();
+    }
+    try {
+      const r = await api('/api/recherche?q=' + encodeURIComponent(q));
+      if (n !== this.rechercheNumero) return; // une frappe plus récente a déjà relancé la recherche
+      this.recherche = { q, ...r };
+    } catch (e) {
+      this.toast('erreur', e.message);
+      return;
+    }
+    this.majDossiers();
+  }
+
+  resultatsRecherche(box) {
+    const S = this.store;
+    const r = this.recherche;
+    const quoi = { demande: tr('Demande'), question: tr('Question du DG'), synthese: tr('Synthèse du DG'), tache: tr('Tâche'), message: tr('Message') };
+    const auteur = (x) => (x.de === 'toi' ? tr('Toi') : x.de === 'dg' ? tr('DG') : x.de === 'systeme' ? tr('QG') : x.de || '');
+    // les mots cherchés en surbrillance (accents et majuscules ignorés, comme côté serveur)
+    const plier = (s) => [...s].map((c) => (c.normalize('NFD')[0] || c).toLowerCase()[0] || c).join('');
+    const surligner = (texte) => {
+      const p = plier(texte);
+      const morceaux = [];
+      let i = 0;
+      while (i < texte.length) {
+        let trouve = null;
+        for (const m of r.mots) if (p.startsWith(m, i) && (!trouve || m.length > trouve.length)) trouve = m;
+        if (trouve) {
+          morceaux.push(h('mark', {}, texte.slice(i, i + trouve.length)));
+          i += trouve.length;
+        } else {
+          const debut = i++;
+          while (i < texte.length && !r.mots.some((m) => p.startsWith(m, i))) i++;
+          morceaux.push(texte.slice(debut, i));
+        }
+      }
+      return morceaux;
+    };
+    if (!r.resultats.length) {
+      remplir(box, h('div', { class: 'vide' }, tr('Rien trouvé pour « {q} » dans tes dossiers.', { q: r.q })));
+      return;
+    }
+    remplir(box,
+      h('div', { class: 'meta' }, r.total > r.resultats.length
+        ? tr('{total} dossiers trouvés ; voici les {n} plus pertinents.', { total: r.total, n: r.resultats.length })
+        : tr('{n} dossier(s) trouvé(s).', { n: r.total })),
+      ...r.resultats.map(({ dossier: d, extraits }) => {
+        const ici = S.dossiers.has(d.id);
+        return h('div', { class: 'dossier resultat etat-' + d.etat + (d.archive ? ' archive' : '') },
+          h('div', { class: 'ligne' },
+            h('span', { class: 'ref' }, d.id),
+            h('span', { class: 'titre' }, ...surligner(d.titre || d.texte || '')),
+            d.archive ? h('span', { class: 'badge' }, tr('archivé')) : !ici ? h('span', { class: 'badge' }, tr('ancien')) : null,
+            h('span', { class: 'badge d-' + d.etat }, libelleDossier(d.etat))),
+          d.creeLe ? h('div', { class: 'meta' }, tr('demandé le {date}', { date: new Date(d.creeLe).toLocaleDateString(locale(), { day: 'numeric', month: 'long', year: 'numeric' }) })) : null,
+          ...extraits.map((x) => h('div', { class: 'extrait' },
+            h('span', { class: 'extrait-quoi' }, quoi[x.quoi] + (x.quoi === 'message' && auteur(x) ? ' · ' + auteur(x) : x.de ? ' · ' + x.de : '')),
+            ' ', ...surligner(x.texte))),
+          h('div', { class: 'boutons' }, ici
+            ? h('button', { class: 'petit', type: 'button', on: { click: () => this.montrerDossier(d.id) } }, tr('Voir le dossier'))
+            : h('button', { class: 'petit ok', type: 'button', title: tr('Remettre ce dossier dans l’onglet Dossiers'), on: { click: async (e) => {
+              e.currentTarget.disabled = true;
+              if (await this.action('/api/dossiers/' + encodeURIComponent(d.id) + '/ressortir')) this.toast('info', tr('Le dossier {dossier} est de retour dans l’onglet Dossiers.', { dossier: d.id }));
+              this.chercherDossiers(this.champRecherche.value);
+            } } }, tr('Ressortir'))));
+      }));
+  }
+
+  // Depuis la recherche : on efface la recherche, on déplie le dossier et on le fait venir à l'écran.
+  montrerDossier(id) {
+    this.champRecherche.value = '';
+    this.recherche = null;
+    this.dossiersOuverts.add(id);
+    this.majDossiers();
+    const el = this.zoneListe.querySelector('[data-dossier="' + id + '"]');
+    if (el) {
+      el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      el.classList.add('trouve');
+      setTimeout(() => el.classList.remove('trouve'), 2000);
+    }
+  }
+
   majDossiers() {
     if (this.onglet !== 'dossiers') return;
     const S = this.store;
-    const box = $('#vue-dossiers');
+    const box = this.zonesDossiers();
+    if (this.recherche) return this.resultatsRecherche(box);
     const liste = [...S.dossiers.values()].sort((a, b) => (b.creeLe || 0) - (a.creeLe || 0));
     if (!liste.length) {
       remplir(box, h('div', { class: 'vide' }, tr('Aucun dossier pour l’instant. Écris au DG en bas de l’écran.')));
@@ -1008,7 +1125,7 @@ export class Interface {
       const faites = taches.filter((t) => TERMINAUX.has(t.etat)).length;
       const ouvert = this.dossiersOuverts.has(d.id) || DOSSIER_ACTIF.has(d.etat);
       const actif = DOSSIER_ACTIF.has(d.etat);
-      return h('div', { class: 'dossier etat-' + d.etat },
+      return h('div', { class: 'dossier etat-' + d.etat, 'data-dossier': d.id },
         h('div', { class: 'ligne', on: { click: () => { if (this.dossiersOuverts.has(d.id)) this.dossiersOuverts.delete(d.id); else this.dossiersOuverts.add(d.id); this.majDossiers(); } } },
           h('span', { class: 'ref' }, d.id),
           h('span', { class: 'titre' }, d.titre || d.texte || ''),
@@ -1034,10 +1151,8 @@ export class Interface {
           actif ? h('button', { class: 'petit danger', on: { click: () => this.action('/api/dossiers/' + encodeURIComponent(d.id) + '/annuler', undefined, tr('Annuler le dossier {dossier} et toutes ses tâches ?', { dossier: d.id })) } }, tr('Annuler le dossier')) : null,
           // dossier clos : rangé dans Réglages › Dossiers archivés, rien n'est effacé (1.0.7, à la main seulement)
           ['termine', 'annule', 'echec'].includes(d.etat) ? h('button', { class: 'petit', title: tr('Ranger ce dossier dans Réglages › Dossiers archivés : il quitte cette liste, rien n’est effacé'), on: { click: () => this.action('/api/dossiers/' + encodeURIComponent(d.id) + '/archiver') } }, tr('Archiver')) : null,
-          // suppression complète (dossier lancé par erreur…) : il ne reste aucune trace
-          h('button', { class: 'petit danger', title: tr('Effacer complètement ce dossier (lancé par erreur…)'), on: { click: () => this.action('/api/dossiers/' + encodeURIComponent(d.id) + '/supprimer', undefined,
-            (actif ? tr('Le dossier {dossier} est en cours : il sera d’abord arrêté.', { dossier: d.id }) + '\n\n' : '')
-            + tr('Supprimer complètement le dossier {dossier} ? Ses tâches, son plan, ses messages, son journal et ses pièces jointes disparaissent pour de bon. Les fichiers déjà modifiés dans tes projets ne sont pas touchés.', { dossier: d.id })) } }, tr('Supprimer'))));
+          // suppression complète (dossier lancé par erreur…) : il ne reste aucune trace, après 30 s pour changer d'avis
+          h('button', { class: 'petit danger', title: tr('Effacer complètement ce dossier (lancé par erreur…)'), on: { click: () => this.supprimerDossier(d.id, actif) } }, tr('Supprimer'))));
     }));
   }
 
@@ -2026,14 +2141,53 @@ export class Interface {
     $('#pause-texte').textContent = txt;
   }
 
-  toast(niveau, texte) {
+  // bouton : [libellé, fonction] (le message se ferme après le clic) ; duree : en ms, à la place de la durée habituelle
+  toast(niveau, texte, { bouton = null, duree = null } = {}) {
     const box = $('#alertes');
     const fermer = h('button', { class: 'fermer', title: tr('Fermer'), 'aria-label': tr('Fermer') }, '×');
-    const el = h('div', { class: 'alerte a-' + niveau, role: niveau === 'erreur' ? 'alert' : 'status' }, h('span', {}, texte), fermer);
+    const action = bouton ? h('button', { class: 'petit alerte-action', type: 'button' }, bouton[0]) : null;
+    const el = h('div', { class: 'alerte a-' + niveau, role: niveau === 'erreur' ? 'alert' : 'status' }, h('span', {}, texte), action, fermer);
     fermer.addEventListener('click', () => el.remove());
+    action?.addEventListener('click', () => {
+      el.remove();
+      bouton[1]();
+    });
     box.appendChild(el);
     while (box.children.length > 4) box.firstChild.remove();
-    if (niveau !== 'erreur') setTimeout(() => el.remove(), niveau === 'warn' ? 10000 : 6000);
+    if (niveau !== 'erreur' || duree) setTimeout(() => el.remove(), duree || (niveau === 'warn' ? 10000 : 6000));
+    return el;
+  }
+
+  // Supprimer un dossier (1.0.8) : il disparaît tout de suite, mais n'est effacé pour de bon que 30 s plus tard ;
+  // d'ici là, « Annuler la suppression » le fait revenir.
+  async supprimerDossier(id, actif) {
+    const question = (actif ? tr('Le dossier {dossier} est en cours : il sera d’abord arrêté.', { dossier: id }) + '\n\n' : '')
+      + tr('Supprimer complètement le dossier {dossier} ? Ses tâches, son plan, ses messages, son journal et ses pièces jointes disparaissent pour de bon. Les fichiers déjà modifiés dans tes projets ne sont pas touchés.', { dossier: id })
+      + '\n\n' + tr('Tu auras 30 secondes pour changer d’avis.');
+    if (!window.confirm(question)) return;
+    let r;
+    try {
+      r = await envoyer('/api/dossiers/' + encodeURIComponent(id) + '/supprimer');
+    } catch (e) {
+      return this.toast('erreur', e.message);
+    }
+    const fin = Date.now() + (Number(r?.delai) || 30000);
+    const texte = () => tr('Dossier {dossier} supprimé. Encore {n} s pour changer d’avis.', { dossier: id, n: Math.max(0, Math.ceil((fin - Date.now()) / 1000)) });
+    const el = this.toast('info', texte(), {
+      duree: fin - Date.now(),
+      bouton: [tr('Annuler la suppression'), async () => {
+        try {
+          await envoyer('/api/dossiers/' + encodeURIComponent(id) + '/retablir');
+          this.toast('info', tr('Le dossier {dossier} est revenu.', { dossier: id }));
+        } catch (e) {
+          this.toast('erreur', e.message);
+        }
+      }],
+    });
+    const decompte = setInterval(() => {
+      if (!el.isConnected) return clearInterval(decompte);
+      el.firstChild.textContent = texte();
+    }, 1000);
   }
 
   // ---------- événements ----------
@@ -2058,7 +2212,7 @@ export class Interface {
       this.conso.maj();
       return;
     }
-    if (ev.type === 'codex-installation') {
+    if (ev.type === 'codex-installation' || ev.type === 'prerequis') {
       this.parametres.maj();
       this.accueil.maj();
       return;

@@ -13,8 +13,9 @@ if [ ! -x "$QG/runtime/node/bin/node" ] || [ ! -f "$QG/node_modules/@anthropic-a
   fi
 fi
 echo "Le QG s'ouvre dans ton navigateur. Laisse cette fenetre ouverte : la fermer arrete le QG."
-# (chemin absolu : mettre-a-jour.sh reconnait ainsi un QG en marche)
-"$QG/runtime/node/bin/node" "$QG/serveur/index.js" "$@"
+# serveur/gardien.js lance le serveur (chemin absolu : mettre-a-jour.sh reconnait ainsi un QG en marche)
+# et le relance tout seul s'il plante.
+"$QG/runtime/node/bin/node" "$QG/serveur/gardien.js" "$@"
 code=$?
 # Code 41 : bouton Fermer du QG. Code 42 : une mise a jour a ete lancee, elle relance le QG dans une autre fenetre.
 # Dans les deux cas, pas d'attente d'une touche.

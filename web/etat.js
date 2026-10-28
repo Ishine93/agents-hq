@@ -355,8 +355,8 @@ export class Etat {
         this.chargerEtat(ev);
         break;
       case 'dossier':
-        // archivé (1.0.7) : il quitte l'écran comme un dossier supprimé, mais reste sur le disque
-        if (ev.dossier && ev.dossier.archive) this.oublierDossier(ev.dossier.id);
+        // archivé (1.0.7) ou supprimé depuis moins de 30 s (1.0.8) : il quitte l'écran, mais reste sur le disque
+        if (ev.dossier && (ev.dossier.archive || ev.dossier.supprimeLe)) this.oublierDossier(ev.dossier.id);
         else if (ev.dossier && ev.dossier.id) this.dossiers.set(ev.dossier.id, ev.dossier);
         break;
       case 'dossier_supprime':
@@ -651,6 +651,7 @@ export class Etat {
         return tr('État complet reçu : {taches} tâche(s), {dossiers} dossier(s)', { taches: (ev.taches || []).length, dossiers: (ev.dossiers || []).length });
       case 'dossier':
         if (ev.dossier.archive) return tr('Dossier {id} archivé', { id: ev.dossier.id });
+        if (ev.dossier.supprimeLe) return tr('Dossier {id} supprimé (30 s pour annuler)', { id: ev.dossier.id });
         return tr('Dossier {id} : {etat}', { id: ev.dossier.id, etat: libelleDossier(ev.dossier.etat) }) + (ev.dossier.titre ? ' — ' + ev.dossier.titre : '');
       case 'dossier_supprime':
         return tr('Dossier {id} supprimé', { id: ev.dossier });

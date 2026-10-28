@@ -16,6 +16,7 @@ import { agentsPublics, personnalisation } from './equipe.js';
 import { bonheurPublic } from './bonheur.js';
 import { consoPublique } from './conso.js';
 import { t } from './i18n.js';
+import { reglagesTelephone } from './telephone.js';
 import { appInstallee } from './navigateur.js';
 import { listeSkills } from './skills.js';
 import { noterReflexion } from './pensees.js';
@@ -152,6 +153,7 @@ export function reglagesPublics() {
     navigateurApp: appInstallee(),
     miseAJourAuto: REGLAGES.miseAJourAuto !== false,
     dureeBulles: Number(REGLAGES.dureeBulles) || 1,
+    telephone: reglagesTelephone(),
     dictee: REGLAGES.dictee || {},
     qg: RACINE,
     version: VERSION,
@@ -189,17 +191,23 @@ export function mcpPublic() {
   return vueMcp(chargerComptes().comptes.map((c) => c.id));
 }
 
+// Dossiers montrés dans l'onglet Dossiers : ni archivés, ni en cours de suppression, et parmi les historiqueDossiers
+// plus récents ; un dossier ressorti (des archives ou de la recherche) compte comme récent depuis qu'il est ressorti.
+function idsDansLaListe() {
+  const visibles = [...etat.dossiers.values()].filter((d) => !d.archive && !d.supprimeLe);
+  const recence = (d) => Math.max(d.creeLe || 0, d.ressortiLe || 0);
+  return new Set(visibles.sort((a, b) => recence(a) - recence(b)).slice(-REGLAGES.historiqueDossiers).map((d) => d.id));
+}
+export const dansLaListe = (id) => idsDansLaListe().has(id);
+
 export function instantane() {
   // Dossiers archivés (1.0.7, à la main) : ni dans la liste, ni dans les fiches, ni dans le fil, ni dans la cloche ;
-  // Réglages › Dossiers archivés les lit à part (dossiersArchives).
-  const archives = new Set([...etat.dossiers.values()].filter((d) => d.archive).map((d) => d.id));
+  // Réglages › Dossiers archivés les lit à part (dossiersArchives). Un dossier qui vient d'être supprimé (1.0.8,
+  // encore annulable) est caché de la même façon.
+  const archives = new Set([...etat.dossiers.values()].filter((d) => d.archive || d.supprimeLe).map((d) => d.id));
   const archivee = (x) => archives.has(x.dossier) || (!!x.tache && archives.has(String(x.tache).split('-')[0]));
-  // Les historiqueDossiers plus récents, montrés dans l'ordre de création ; un dossier ressorti des archives compte
-  // comme récent à partir du moment où il est ressorti (sinon un vieux dossier ressorti resterait caché).
-  const visibles = [...etat.dossiers.values()].filter((d) => !d.archive);
-  const recence = (d) => Math.max(d.creeLe || 0, d.ressortiLe || 0);
-  const gardes = new Set([...visibles].sort((a, b) => recence(a) - recence(b)).slice(-REGLAGES.historiqueDossiers).map((d) => d.id));
-  const dossiers = visibles.filter((d) => gardes.has(d.id));
+  const gardes = idsDansLaListe();
+  const dossiers = [...etat.dossiers.values()].filter((d) => gardes.has(d.id));
   const ids = new Set(dossiers.map((d) => d.id));
   return {
     seq: ++seq,
@@ -418,12 +426,34 @@ export function archiverDossier(d) {
   return true;
 }
 
+// Ressortir (1.0.7) : un dossier archivé revient dans l'onglet Dossiers. Depuis la recherche (1.0.8), aussi un vieux
+// dossier jamais archivé, sorti de la liste parce qu'il y en a plus que le réglage « Dossiers gardés à l'écran ».
 export function ressortirDossier(d) {
-  if (!d.archive) return false;
+  if (d.supprimeLe || (!d.archive && dansLaListe(d.id))) return false;
   delete d.archive;
   d.ressortiLe = Date.now();
   majDossier(d);
-  // ses tâches, son plan et ses messages reviennent d'un coup : état complet pour tous les sites ouverts
+  diffuserEtat();
+  return true;
+}
+
+// Suppression annulable (1.0.8) : le dossier quitte tous les sites ouverts comme un dossier archivé, mais reste sur
+// le disque jusqu'à ce que l'ordonnanceur l'efface pour de bon ; « Annuler la suppression » le fait revenir.
+export function cacherDossier(d) {
+  d.supprimeLe = Date.now();
+  majDossier(d);
+}
+
+export function montrerDossier(d) {
+  if (!d.supprimeLe) return false;
+  delete d.supprimeLe;
+  majDossier(d);
+  diffuserEtat();
+  return true;
+}
+
+// Ses tâches, son plan et ses messages reviennent d'un coup : état complet pour tous les sites ouverts.
+function diffuserEtat() {
   const ev = instantane();
   for (const envoyer of clients) {
     try {
@@ -432,13 +462,12 @@ export function ressortirDossier(d) {
       /* client déconnecté */
     }
   }
-  return true;
 }
 
 // Les dossiers archivés avec leurs tâches, du plus récemment archivé au plus ancien.
 export function dossiersArchives() {
   return [...etat.dossiers.values()]
-    .filter((d) => d.archive)
+    .filter((d) => d.archive && !d.supprimeLe)
     .sort((a, b) => b.archive - a.archive)
     .map((d) => ({
       ...publicDossier(d),

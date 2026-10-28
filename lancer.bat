@@ -22,8 +22,9 @@ rem Le bloc ci-dessous est lu en entier avant de lancer le QG : si une mise a jo
 rem pendant que le QG tourne, cette fenetre ne relit pas la suite a une position decalee.
 rem Code 41 : bouton Fermer du QG. Code 42 : une mise a jour a ete lancee, elle relance le QG dans une autre fenetre.
 rem Dans les deux cas, cette fenetre se ferme sans attendre.
+rem serveur\gardien.js lance le serveur et le relance tout seul s'il plante (voir ce fichier).
 (
-  "%~dp0runtime\node\node.exe" serveur\index.js %*
+  "%~dp0runtime\node\node.exe" serveur\gardien.js %*
   if errorlevel 41 if not errorlevel 43 exit /b 0
   echo.
   echo Le QG est arrete. Tu peux fermer cette fenetre.

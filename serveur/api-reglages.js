@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { RACINE, modifierReglages, racines, sous, etage as trouverEtage, fiche } from './config.js';
+import { patchTelephone, envoyerEssai } from './telephone.js';
 import * as plateforme from './plateforme.js';
 import { emettre, comptesPublics, reglagesPublics, etagesPublics, modelesPublics, mcpPublic } from './bus.js';
 import { ajouterCompte, modifierCompte, supprimerCompte, ouvrirConnexion, deconnecter, trouverCompte, compteConnecte, verifierConnexion, fichierConnexion, fournisseur as fournisseurDuCompte, adaptateur as adaptateurDuCompte } from './comptes.js';
@@ -22,6 +23,7 @@ import { travailReglages } from './travail.js';
 import { chargerPriorites, modifierPriorites, prereglages, apercu, pausesComptes, pauseDe, leverPauseCompte, reglageDg, dgConseille, dgSousConseille, comptesDisponibles, NATURES, TYPES as TYPES_TACHE } from './routeur.js';
 import { modeleDg, effortDg } from './dg.js';
 import { convertirEffort } from './ia/fournisseurs.js';
+import { prerequis, reverifier, agir } from './prerequis.js';
 
 const publierComptes = () => emettre('comptes', comptesPublics());
 const publierReglages = () => emettre('reglages', { reglages: reglagesPublics() });
@@ -283,6 +285,10 @@ export async function routesReglages(req, res, chemin, ctx) {
     return json(res, 200, { reglages: reglagesPublics(), ...comptesPublics(), etages: etagesPublics(), personnalisation: personnalisation(), typesProjet: Object.fromEntries(Object.entries(TYPES_PROJET).map(([k, v]) => [k, t(v)])) }), true;
   }
   if (GET && chemin === '/api/priorites') return json(res, 200, prioritesPubliques()), true;
+  // prérequis d'un compte IA avant son ajout (1.0.8)
+  if (GET && chemin === '/api/prerequis') {
+    return json(res, 200, prerequis({ fournisseur: String(url.searchParams.get('fournisseur') || 'claude'), agent: url.searchParams.get('agent') || null })), true;
+  }
   if (GET && chemin === '/api/projets') return json(res, 200, { projets: listerProjets({ racines: true }), racines: racines() }), true;
   if (GET && chemin === '/api/personnalisation') return json(res, 200, personnalisation()), true;
   if (GET && chemin === '/api/conso') return json(res, 200, consoPublique()), true;
@@ -320,7 +326,7 @@ export async function routesReglages(req, res, chemin, ctx) {
     }
   }
 
-  const routes = /^\/api\/(reglages|priorites|racines|choisir-dossier|comptes|personnalisation|equipe\/renommer|bonheur\/stock|conso\/limites|dictee\/installer|codex\/installer|onboarding\/terminer|etages\/[^/]+\/(modifier|retirer))/;
+  const routes = /^\/api\/(reglages|priorites|racines|choisir-dossier|comptes|personnalisation|equipe\/renommer|bonheur\/stock|conso\/limites|dictee\/installer|codex\/installer|prerequis\/(verifier|agir)|telephone\/essai|onboarding\/terminer|etages\/[^/]+\/(modifier|retirer))/;
   if (!routes.test(chemin)) return false;
   const corps = await ctx.lireCorps(req, chemin === '/api/bonheur/stock' ? 30 * 1024 * 1024 : 256 * 1024);
   try {
@@ -352,6 +358,7 @@ export async function routesReglages(req, res, chemin, ctx) {
         patch.miniJeu = p;
       }
       if (typeof corps.dureeBulles === 'number' && corps.dureeBulles >= 0.5 && corps.dureeBulles <= 5) patch.dureeBulles = corps.dureeBulles;
+      if (corps.telephone && typeof corps.telephone === 'object') patch.telephone = patchTelephone(corps.telephone);
       // compte qui exécute les tâches des nouvelles demandes : un compte existant, ou null (celui de la demande)
       if (corps.compteAgents === null || corps.compteAgents === '') patch.compteAgents = null;
       else if (typeof corps.compteAgents === 'string') {
@@ -459,6 +466,9 @@ export async function routesReglages(req, res, chemin, ctx) {
       return json(res, 200, consoPublique()), true;
     }
 
+    // --- alertes sur le téléphone : un essai, même alerte coupée
+    if (chemin === '/api/telephone/essai') return json(res, 200, { telephone: await envoyerEssai() }), true;
+
     // --- dictée : installation dans une fenêtre à part (téléchargements visibles)
     if (chemin === '/api/dictee/installer') {
       // Windows seulement (Whisper avec CUDA ou CPU) ; sur Mac, la dictée du système prend le relais.
@@ -476,6 +486,22 @@ export async function routesReglages(req, res, chemin, ctx) {
         installerCodex({ surEtat: (e) => emettre('codex-installation', e) }).then(publierComptes, publierComptes);
       }
       return json(res, 200, etatInstallationCodex()), true;
+    }
+
+    // --- prérequis d'un compte IA : « Vérifier à nouveau », et les installations (toujours après un clic)
+    if (chemin === '/api/prerequis/verifier') {
+      return json(res, 200, reverifier({ fournisseur: String(corps.fournisseur || 'claude'), agent: corps.agent || null })), true;
+    }
+    if (chemin === '/api/prerequis/agir') {
+      if (ctx.demo) return json(res, 200, { ok: true, message: t('Mode démo : rien n’est installé.') }), true;
+      const r = agir({ type: String(corps.type || ''), valeur: String(corps.valeur || '') }, {
+        installerCodex: () => installerCodex({ surEtat: (e) => emettre('codex-installation', e) }).then(publierComptes, publierComptes),
+        surEtat: (e) => {
+          emettre('prerequis', e);
+          if (e.etat !== 'installation') publierComptes();
+        },
+      });
+      return json(res, 200, r), true;
     }
 
     // --- fin de la configuration du premier lancement

@@ -1,5 +1,5 @@
 {
-  "note": "Agents pilotés par le client ACP générique du QG (serveur/ia/acp.js). Faits relevés le 26/10/2026 (docs/multi-ia/bench-autres.md). « aVerifier » liste ce qui n'a pas été confirmé par une doc officielle : à valider avant d'annoncer l'agent comme pris en charge (qualification, lot 2). Aucun jeton n'est jamais lu : la connexion se constate par la présence d'un fichier ou d'un dossier (stat, readdir).",
+  "note": "Agents pilotés par le client ACP générique du QG (serveur/ia/acp.js). Faits relevés le 26/10/2026 (docs/multi-ia/bench-autres.md), installations et commandes ACP revues le 28/10/2026 sur les sources officielles (docs des éditeurs, registre npm, registre ACP github.com/agentclientprotocol/registry). « aVerifier » liste ce qui n'a pas été confirmé par une doc officielle : à valider avant d'annoncer l'agent comme pris en charge (qualification, lot 2). Aucun jeton n'est jamais lu : la connexion se constate par la présence d'un fichier ou d'un dossier (stat, readdir).",
   "champs": {
     "commande": "binaire puis arguments du mode ACP (JSON-RPC 2.0 sur stdin/stdout)",
     "acces": "cle : clé API posée dans varCle ; abonnement : connexion faite dans l'agent (commande connexion)",
@@ -10,7 +10,9 @@
     "authMethod": "méthode ACP « authenticate » à demander si l'agent la propose",
     "modes": "mode ACP de l'agent pour la lecture seule et pour l'écriture (sinon : choix par le nom du mode)",
     "niveaux": "niveau (eco, standard, fort, max) des modèles de l'agent ; vide = inconnu (le modèle par défaut de l'agent est gardé)",
-    "retirerEnv": "variables retirées de l'environnement de l'agent en plus des clés des autres agents"
+    "retirerEnv": "variables retirées de l'environnement de l'agent en plus des clés des autres agents",
+    "installation": "texte affiché pour installer l'agent, par système (windows, mac)",
+    "installer": "installation guidée (Réglages › Comptes IA › prérequis) : npm { paquet, version, bin } = le QG l'installe lui-même dans runtime/acp/<agent> avec son Node (version épinglée) ; windows / mac { commande, lien, auto } = installateur officiel (commande lancée dans une fenêtre de terminal après un clic, sauf auto: false : à copier seulement) ; dossiers { windows, mac } = où l'installateur officiel range l'agent (~ et %VARIABLE% acceptés), cherchés en plus du PATH ; systemes = systèmes où l'agent existe (sinon grisé) ; git = systèmes où l'agent a besoin de Git ; pwsh = systèmes où il a besoin de PowerShell 6 ou plus (Windows)"
   },
   "agents": {
     "grok": {
@@ -21,20 +23,37 @@
       "varCle": "XAI_API_KEY",
       "dossierAgent": ".grok",
       "connexion": { "args": ["login"], "consigne": "Connecte-toi avec ton abonnement SuperGrok ou X Premium+ dans la fenêtre qui s'ouvre." },
-      "installation": "Installeur officiel de Grok Build : PowerShell sous Windows, script bash sous macOS (voir la page de Grok Build chez xAI).",
+      "installation": {
+        "windows": "Grok Build, de xAI. Connexion avec un abonnement SuperGrok ou X Premium+, ou une clé API xAI.",
+        "mac": "Grok Build, de xAI. Connexion avec un abonnement SuperGrok ou X Premium+, ou une clé API xAI."
+      },
+      "installer": {
+        "npm": { "paquet": "@xai-official/grok", "version": "1.0.70", "bin": "grok" },
+        "windows": { "commande": "irm https://x.ai/cli/install.ps1 | iex", "lien": "https://docs.x.ai/build/overview" },
+        "mac": { "commande": "curl -fsSL https://x.ai/cli/install.sh | bash", "lien": "https://docs.x.ai/build/overview" },
+        "dossiers": { "windows": ["%USERPROFILE%\\.grok\\bin"], "mac": ["~/.grok/bin", "~/.local/bin"] }
+      },
       "niveaux": {},
       "aVerifier": ["variable de dossier de configuration (un seul compte abonnement par PC tant qu'elle manque)", "fichier de connexion dans ~/.grok", "automatisation permise avec l'abonnement (la clé API est la voie sûre)"]
     },
     "cursor": {
       "nom": "Cursor (agent CLI)",
       "nomCourt": "Cursor",
-      "commande": ["agent", "acp"],
+      "commande": ["cursor-agent", "acp"],
       "acces": ["cle", "abonnement"],
       "varCle": "CURSOR_API_KEY",
       "dossierAgent": ".cursor",
       "authMethod": "cursor_login",
       "connexion": { "args": ["login"], "consigne": "Connecte-toi à ton compte Cursor dans le navigateur qui s'ouvre." },
-      "installation": "Installeur officiel du CLI Cursor : PowerShell sous Windows, script shell sous macOS (cursor.com/docs/cli/overview).",
+      "installation": {
+        "windows": "Cursor Agent CLI, de Cursor : pas de paquet npm officiel, c’est l’installateur de Cursor qui l’installe. Connexion avec ton compte Cursor ou une clé API Cursor.",
+        "mac": "Cursor Agent CLI, de Cursor : pas de paquet npm officiel, c’est l’installateur de Cursor qui l’installe. Connexion avec ton compte Cursor ou une clé API Cursor."
+      },
+      "installer": {
+        "windows": { "commande": "irm 'https://cursor.com/install?win32=true' | iex", "lien": "https://cursor.com/docs/cli/installation" },
+        "mac": { "commande": "curl https://cursor.com/install -fsS | bash", "lien": "https://cursor.com/docs/cli/installation" },
+        "dossiers": { "windows": ["%LOCALAPPDATA%\\cursor-agent"], "mac": ["~/.local/bin"] }
+      },
       "modes": { "lecture": "ask", "ecriture": "agent" },
       "niveaux": {},
       "aVerifier": ["variable de dossier de configuration (non documentée)", "fichier de connexion dans ~/.cursor", "usage par un produit tiers (fil du forum, secondaire)"]
@@ -49,20 +68,45 @@
       "dossierAgent": ".copilot",
       "retirerEnv": ["GH_TOKEN", "GITHUB_TOKEN"],
       "connexion": { "args": [], "consigne": "Tape /login dans Copilot, connecte-toi avec ton compte GitHub (abonnement Copilot), puis quitte avec /exit." },
-      "installation": "winget install GitHub.Copilot (PowerShell 6+) sous Windows, Homebrew sous macOS, ou npm avec Node 22+.",
+      "installation": {
+        "windows": "GitHub Copilot CLI, de GitHub. Il faut un abonnement Copilot actif, et PowerShell 6 ou plus sous Windows.",
+        "mac": "GitHub Copilot CLI, de GitHub. Il faut un abonnement Copilot actif."
+      },
+      "installer": {
+        "npm": { "paquet": "@github/copilot", "version": "1.0.105", "bin": "copilot" },
+        "windows": {
+          "commande": "winget install GitHub.Copilot",
+          "lien": "https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli"
+        },
+        "mac": {
+          "commande": "curl -fsSL https://gh.io/copilot-install | bash",
+          "lien": "https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli"
+        },
+        "dossiers": { "windows": ["%LOCALAPPDATA%\\Microsoft\\WinGet\\Links"], "mac": ["~/.local/bin", "/opt/homebrew/bin", "/usr/local/bin"] },
+        "pwsh": ["windows"]
+      },
       "niveaux": {},
       "aVerifier": ["mode ACP en préversion publique (peut changer)", "fichier de connexion dans COPILOT_HOME", "conditions de pilotage par un tiers"]
     },
     "gemini": {
       "nom": "Google Gemini CLI (clé API)",
       "nomCourt": "Gemini",
-      "commande": ["gemini", "--experimental-acp"],
+      "commande": ["gemini", "--acp"],
       "acces": ["cle"],
       "varCle": "GEMINI_API_KEY",
       "dossierAgent": ".gemini",
-      "installation": "Gemini CLI (npm). Clé API Gemini ou Gemini Enterprise seulement : un abonnement Google AI Pro/Ultra ne doit jamais passer par le QG (conditions de Google).",
+      "installation": {
+        "windows": "Gemini CLI, de Google. Clé API Gemini payante ou Gemini Enterprise seulement : depuis juin 2026, Gemini CLI ne sert plus les comptes gratuits ni Google AI Pro/Ultra. Windows 11 24H2 ou plus.",
+        "mac": "Gemini CLI, de Google. Clé API Gemini payante ou Gemini Enterprise seulement : depuis juin 2026, Gemini CLI ne sert plus les comptes gratuits ni Google AI Pro/Ultra. macOS 15 ou plus."
+      },
+      "installer": {
+        "npm": { "paquet": "@google/gemini-cli", "version": "0.66.0", "bin": "gemini" },
+        "windows": { "commande": "npm install -g @google/gemini-cli", "lien": "https://www.geminicli.com/docs/get-started/installation", "auto": false },
+        "mac": { "commande": "npm install -g @google/gemini-cli", "lien": "https://www.geminicli.com/docs/get-started/installation", "auto": false },
+        "dossiers": { "windows": ["%APPDATA%\\npm"], "mac": ["/opt/homebrew/bin", "/usr/local/bin"] }
+      },
       "niveaux": {},
-      "aVerifier": ["argument du mode ACP (gemini est au registre ACP, commande non relue)"]
+      "aVerifier": ["abandon de --experimental-acp au profit de --acp (doc officielle à jour : --acp)"]
     },
     "mistral-vibe": {
       "nom": "Mistral Vibe",
@@ -71,19 +115,39 @@
       "acces": ["cle"],
       "varCle": "MISTRAL_API_KEY",
       "dossierAgent": ".vibe",
-      "installation": "Mistral Vibe CLI (voir docs.mistral.ai/vibe).",
+      "installation": {
+        "windows": "Mistral Vibe : pas de paquet npm. Installe d’abord uv (gestionnaire Python, docs.astral.sh/uv), puis tape « uv tool install mistral-vibe » dans un nouveau terminal. Mistral vise d’abord macOS et Linux. Clé API Mistral.",
+        "mac": "Mistral Vibe : l’installateur officiel installe uv (gestionnaire Python), puis Vibe. Clé API Mistral."
+      },
+      "installer": {
+        "windows": { "commande": "uv tool install mistral-vibe", "lien": "https://github.com/mistralai/mistral-vibe", "auto": false },
+        "mac": { "commande": "curl -LsSf https://mistral.ai/vibe/install.sh | bash", "lien": "https://github.com/mistralai/mistral-vibe" },
+        "dossiers": { "windows": ["%USERPROFILE%\\.local\\bin"], "mac": ["~/.local/bin"] }
+      },
       "niveaux": {},
       "aVerifier": ["commande du mode ACP (mistral-vibe 3.0.1 au registre)", "variable VIBE_HOME", "abonnement Le Chat Pro dans Vibe"]
     },
     "qwen": {
       "nom": "Qwen Code",
       "nomCourt": "Qwen",
-      "commande": ["qwen", "serve"],
+      "commande": ["qwen", "--acp"],
       "acces": ["cle"],
       "dossierAgent": ".qwen",
-      "installation": "Qwen Code (PowerShell sous Windows). L'OAuth gratuit est fermé depuis le 15/04/2026 : clé API ou Coding Plan.",
+      "installation": {
+        "windows": "Qwen Code. L’OAuth gratuit est fermé depuis le 15/04/2026 : clé API ou Coding Plan.",
+        "mac": "Qwen Code. L’OAuth gratuit est fermé depuis le 15/04/2026 : clé API ou Coding Plan."
+      },
+      "installer": {
+        "npm": { "paquet": "@qwen-code/qwen-code", "version": "0.26.2", "bin": "qwen" },
+        "windows": { "lien": "https://github.com/QwenLM/qwen-code" },
+        "mac": {
+          "commande": "curl -fsSL https://qwen-code-assets.oss-cn-hangzhou.aliyuncs.com/installation/install-qwen-standalone.sh | bash",
+          "lien": "https://github.com/QwenLM/qwen-code"
+        },
+        "dossiers": { "windows": ["%LOCALAPPDATA%\\qwen-code\\bin"], "mac": ["~/.local/bin"] }
+      },
       "niveaux": {},
-      "aVerifier": ["mode ACP expérimental (qwen serve) : transport stdio non confirmé", "variable de la clé (selon le fournisseur choisi dans Qwen Code)", "variable QWEN_HOME"]
+      "aVerifier": ["variable de la clé (selon le fournisseur choisi dans Qwen Code)", "variable QWEN_HOME"]
     },
     "kimi": {
       "nom": "Kimi Code (Moonshot)",
@@ -93,9 +157,19 @@
       "varDossier": "KIMI_CODE_HOME",
       "dossierAgent": ".kimi-code",
       "connexion": { "args": [], "consigne": "Connecte-toi à ton compte Kimi dans la fenêtre (commande /login), puis quitte." },
-      "installation": "Kimi Code CLI (PowerShell sous Windows). Ne jamais modifier l'identification du client (User-Agent).",
+      "installation": {
+        "windows": "Kimi Code, de Moonshot. Il a besoin de Git pour Windows. Ne jamais modifier l’identification du client (User-Agent).",
+        "mac": "Kimi Code, de Moonshot. Ne jamais modifier l’identification du client (User-Agent)."
+      },
+      "installer": {
+        "npm": { "paquet": "@moonshot-ai/kimi-code", "version": "2.3.3", "bin": "kimi" },
+        "windows": { "commande": "irm https://code.kimi.com/kimi-code/install.ps1 | iex", "lien": "https://github.com/MoonshotAI/kimi-code" },
+        "mac": { "commande": "curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash", "lien": "https://github.com/MoonshotAI/kimi-code" },
+        "dossiers": { "windows": ["%USERPROFILE%\\.kimi-code\\bin"], "mac": ["~/.kimi-code/bin"] },
+        "git": ["windows"]
+      },
       "niveaux": {},
-      "aVerifier": ["commande de connexion", "fichier de connexion dans KIMI_CODE_HOME"]
+      "aVerifier": ["fichier de connexion dans KIMI_CODE_HOME"]
     },
     "opencode": {
       "nom": "OpenCode",
@@ -105,7 +179,16 @@
       "dossierAgent": ".local/share/opencode",
       "fichierConnexion": "auth.json",
       "connexion": { "args": ["auth", "login"], "consigne": "Choisis ton fournisseur et connecte-toi (les clés restent chez OpenCode)." },
-      "installation": "OpenCode (opencode.ai). Sous Windows : Git Bash ou WSL.",
+      "installation": {
+        "windows": "OpenCode (programme natif). Sa documentation conseille WSL sous Windows.",
+        "mac": "OpenCode. Les clés de tes fournisseurs de modèles restent chez OpenCode."
+      },
+      "installer": {
+        "npm": { "paquet": "opencode-ai", "version": "1.19.5", "bin": "opencode" },
+        "windows": { "lien": "https://opencode.ai/docs/" },
+        "mac": { "commande": "curl -fsSL https://opencode.ai/install | bash", "lien": "https://opencode.ai/docs/" },
+        "dossiers": { "windows": [], "mac": ["~/.opencode/bin"] }
+      },
       "niveaux": {},
       "aVerifier": ["chemin de auth.json sous Windows"]
     },
@@ -117,7 +200,18 @@
       "dossierAgent": ".config/goose",
       "fichierConnexion": "config.yaml",
       "connexion": { "args": ["configure"], "consigne": "Configure ton fournisseur dans Goose." },
-      "installation": "Goose (installeur officiel du projet).",
+      "installation": {
+        "windows": "Goose : installe-le depuis sa page officielle (installateur PowerShell ; Git Bash conseillé), puis clique sur « Vérifier à nouveau ».",
+        "mac": "Goose. Tu configureras ton fournisseur de modèles à la connexion."
+      },
+      "installer": {
+        "windows": { "lien": "https://goose-docs.ai/docs/getting-started/installation" },
+        "mac": {
+          "commande": "curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | CONFIGURE=false bash",
+          "lien": "https://goose-docs.ai/docs/getting-started/installation"
+        },
+        "dossiers": { "windows": ["%USERPROFILE%\\.local\\bin"], "mac": ["~/.local/bin"] }
+      },
       "niveaux": {},
       "aVerifier": ["agent non évalué (doc de pilotage non lue)", "commande du mode ACP", "commande de configuration"]
     }

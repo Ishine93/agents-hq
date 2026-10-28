@@ -4,13 +4,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { REGLAGES, etage as trouverEtage } from './config.js';
-import { etat, majDossier, changerEtatTache, majTache, message, majDg, emettre, alerte, effacerDossier } from './bus.js';
+import { etat, majDossier, changerEtatTache, majTache, message, majDg, emettre, alerte, effacerDossier, cacherDossier, montrerDossier } from './bus.js';
 import { canUseToolPour, refuserPour, demander } from './permissions.js';
 import { validerTaches, compteDg } from './dg.js';
 import { reglageDg, consignesActuelles, consigneTache, sansPrefixe, prefixeModele, choisirProduction, choisirVerif, chargerPriorites, pauseCompte, leverPauseCompte, pauseDe, surPauses, motifPause, viderPauses, enDemo, multiIa, heureReprise, fournisseurDuModele, comptesDisponibles } from './routeur.js';
 import { promptProduction, promptRework, compteTache } from './taches.js';
 import { ERREURS_FATALES } from './session.js';
-import { trouverCompte, fournisseur as fournisseurDuCompte, adaptateur as adaptateurDuCompte } from './comptes.js';
+import { trouverCompte, chargerComptes, dossierConfig, fournisseur as fournisseurDuCompte, adaptateur as adaptateurDuCompte } from './comptes.js';
+import { transfererConversation } from './transfert-conversation.js';
 import { sauverPiecesUtilisateur, piecePublique } from './pieces.js';
 import { notifier, notificationResolue } from './notifications.js';
 import { enregistrerReemploi, surLimitesLues, oublierDossier as oublierDossierConso, quotaFable, lireLimites, limitesDe, annoterConso, donneesConso } from './conso.js';
@@ -429,9 +430,15 @@ export function annulerDossier(d) {
   majDg({ etat: 'libre', dossier: d.id, action: null });
 }
 
-// Suppression complète (dossier lancé par erreur…) : on l'arrête s'il tourne encore, puis on efface tout,
-// à l'écran comme sur le disque. Contrairement à l'annulation, il ne reste aucune trace.
-export function supprimerDossier(d) {
+// Suppression complète (dossier lancé par erreur…) : on l'arrête s'il tourne encore et il disparaît de l'écran tout
+// de suite. Il n'est effacé pour de bon (tâches, plan, messages, journal, pièces jointes) que 30 s plus tard (1.0.8) :
+// « Annuler la suppression » le fait revenir d'ici là. Contrairement à l'annulation, il ne reste ensuite aucune trace.
+export const DELAI_SUPPRESSION_MS = Number(process.env.QG_DELAI_SUPPRESSION_MS) || 30000; // variable : pour les tests
+const suppressions = new Map(); // dossier → minuterie de l'effacement pour de bon
+
+export function supprimerDossier(d, delai = DELAI_SUPPRESSION_MS) {
+  if (suppressions.has(d.id)) return { delai: Math.max(0, d.supprimeLe + delai - Date.now()) };
+  if (!['termine', 'annule', 'echec'].includes(d.etat)) d.x.arreteParSuppression = true;
   annulerDossier(d);
   const r = reveils.get(d.id);
   if (r) {
@@ -446,9 +453,33 @@ export function supprimerDossier(d) {
   }
   notificationResolue(`QD-${d.id}`);
   if (etat.dg.dossier === d.id) majDg({ etat: 'libre', dossier: null, action: null });
-  effacerDossier(d.id);
-  oublierDossierConso(d.id);
+  cacherDossier(d);
+  const minuterie = setTimeout(() => effacerPourDeBon(d.id), delai);
+  minuterie.unref?.(); // serveur arrêté avant la fin du délai : reprendreDossiers() finit le travail au prochain lancement
+  suppressions.set(d.id, minuterie);
   tick();
+  return { delai };
+}
+
+/** « Annuler la suppression » : le dossier revient tel qu'il était (arrêté s'il tournait). Faux s'il est déjà effacé. */
+export function annulerSuppression(d) {
+  const minuterie = suppressions.get(d.id);
+  if (!minuterie) return false;
+  clearTimeout(minuterie);
+  suppressions.delete(d.id);
+  montrerDossier(d);
+  message(d.id, 'systeme', d.x.arreteParSuppression
+    ? tr('Suppression annulée : le dossier est revenu. Il était en cours et a été arrêté : pour reprendre ce travail, envoie une nouvelle demande.')
+    : tr('Suppression annulée : le dossier est revenu.'));
+  delete d.x.arreteParSuppression;
+  return true;
+}
+
+function effacerPourDeBon(id) {
+  suppressions.delete(id);
+  if (!etat.dossiers.get(id)?.supprimeLe) return;
+  effacerDossier(id);
+  oublierDossierConso(id);
 }
 
 // ---------------------------------------------------------------- planification des lancements
@@ -816,15 +847,24 @@ function lancer(t) {
     verification(t, d);
     return;
   }
-  // la tâche change de compte (compte retiré, bascule acceptée) : sa conversation ne la suit pas
+  // la tâche change de compte (compte retiré, bascule acceptée) : entre deux comptes Claude, sa conversation la
+  // suit (copiée dans le dossier du nouveau compte) ; sinon, nouvelle conversation
   const route = t.x.route;
   const idRoute = route?.compte ? trouverCompte(route.compte)?.id || route.compte : null;
+  let conversationSuivie = false;
   if (idRoute && t.x.compteSession && idRoute !== t.x.compteSession && (reprise?.resume || t.x.session)) {
-    message(d.id, 'systeme', tr('{ref} passe sur {compte} : nouvelle conversation (le contexte de la précédente est perdu).', { ref: t.ref, compte: nomCompte(route.compte) }), [t.etage]);
-    reprise = null; // mission reprise depuis le début, dans une conversation neuve
-    t.x.session = null;
-    t.x.compteSession = null;
-    t.x.agentDemande = '';
+    const sessionId = reprise?.resume || t.x.session;
+    if (suivreConversation(sessionId, t.x.compteSession, idRoute)) {
+      conversationSuivie = true;
+      t.x.compteSession = idRoute;
+      message(d.id, 'systeme', tr('{ref} passe sur {compte} avec sa conversation : il reprend là où il s’était arrêté.', { ref: t.ref, compte: nomCompte(route.compte) }), [t.etage]);
+    } else {
+      message(d.id, 'systeme', tr('{ref} passe sur {compte} : nouvelle conversation (le contexte de la précédente est perdu).', { ref: t.ref, compte: nomCompte(route.compte) }), [t.etage]);
+      reprise = null; // mission reprise depuis le début, dans une conversation neuve
+      t.x.session = null;
+      t.x.compteSession = null;
+      t.x.agentDemande = '';
+    }
   }
   // Qui fait la tâche : un agent de la réserve réembauché (ou cloné), sinon une nouvelle recrue.
   let resumeAgent = null;
@@ -842,9 +882,9 @@ function lancer(t) {
       t.agent = recruter(t, d).id;
     }
   } else {
-    // l'agent suit sa tâche sur son nouveau compte, sans sa conversation
+    // l'agent suit sa tâche sur son nouveau compte (avec sa conversation si elle a été copiée)
     const ag = agentEquipe(t.agent);
-    if (ag && t.x.route?.compte && ag.compte !== t.x.route.compte) Object.assign(ag, { compte: t.x.route.compte, session: null });
+    if (ag && t.x.route?.compte && ag.compte !== t.x.route.compte) Object.assign(ag, { compte: t.x.route.compte, session: conversationSuivie ? ag.session : null });
     occuper(t.agent, t);
   }
   const amonts = t.inputsFrom.map((ref) => [ref, tacheRef(d, ref)]).filter(([, u]) => u?.x.sortie);
@@ -855,6 +895,20 @@ function lancer(t) {
     prompt = `NOUVELLE MISSION, confiée par le DG. Tu as déjà travaillé sur ce projet : ton contexte passé reste valable, mais cette mission est indépendante de la précédente.\n\n${prompt}`;
   }
   executerProduction(t, d, prompt, reprise?.resume || resumeAgent, { fork: fork && !reprise });
+}
+
+/**
+ * Copie la conversation `sessionId` du compte `de` vers le compte `vers` : seulement entre deux comptes Claude
+ * encore présents dans la liste (un compte retiré n'a plus de dossier connu). Vrai si elle est prête sur `vers`.
+ */
+export function suivreConversation(sessionId, de, vers) {
+  const { comptes } = chargerComptes();
+  const source = comptes.find((c) => c.id === de);
+  const cible = comptes.find((c) => c.id === vers);
+  if (!source || !cible || fournisseurDuCompte(source) !== 'claude' || fournisseurDuCompte(cible) !== 'claude') return false;
+  const r = transfererConversation({ sessionId, de: dossierConfig(source), vers: dossierConfig(cible) });
+  if (!r.ok) console.warn(`[QG] conversation ${sessionId} non copiée de ${de} vers ${vers} : ${r.raison}`);
+  return r.ok;
 }
 
 async function executerProduction(t, d, prompt, resume, { fork = false } = {}) {
@@ -927,6 +981,7 @@ async function executerProduction(t, d, prompt, resume, { fork = false } = {}) {
     t.x.compteSession = r.compte || t.compte;
   }
   if (r.contexte != null) t.x.contexte = r.contexte;
+  if (t.x.arretSilence) return relancerApresSilence(t, d);
   if (t.x.arretCompactions) return arretCompactions(t, d, r);
   if (r.echec) return gererEchec(t, d, r, t.etat === 'rework' ? 'rework' : 'production');
   t.x.sortie = r.sortie;
@@ -949,6 +1004,58 @@ function arretCompactions(t, d, r) {
   delete t.x.arretCompactions;
   terminer(t, 'failed', { ...(r.sortie || {}), status: 'failed', summary: tr('Arrêtée par le garde-fou après {n} compactions de contexte', { n }) });
   reveilDG(d, `${t.ref} a été arrêtée par le garde-fou : ${n} compactions de contexte dans la même tâche (limite du réglage Coût). Elle tournait en rond (lire, résumer, relire) ou elle était trop grosse pour un seul agent. Ne la relance pas telle quelle : découpe ce qu'il reste à faire en tâches plus petites et plus précises, en t'appuyant sur ce qu'elle a déjà fait (fichiers modifiés, résumé), ou accepte l'état actuel s'il suffit.`);
+}
+
+// ---------------------------------------------------------------- agent sans signe de vie (1.0.8)
+// Une session qui ne donne plus aucun signe (ni message, ni outil) depuis longtemps est bloquée : commande qui
+// attend une saisie, serveur qui ne rend pas la main, réseau coupé. Le chien de garde l'arrête et la reprend dans
+// la même conversation, deux fois au plus ; la troisième, la tâche échoue et le DG décide de la suite.
+// Une commande de Claude Code dure au plus 10 minutes : 30 minutes de silence ne sont jamais du travail normal.
+const silenceMaxMs = () => (Number(REGLAGES.silenceMaxMinutes) > 0 ? Number(REGLAGES.silenceMaxMinutes) : 30) * 60000;
+const MAX_SILENCES = 2;
+// session → dernier moment où elle n'avait pas à parler : vue pour la première fois, ou en attente de ta réponse
+const reperesSilence = new WeakMap();
+
+/** Appelé chaque minute (index.js) : arrête les sessions de production muettes depuis trop longtemps. */
+export function surveillerSilences(maintenant = Date.now()) {
+  if (enDemo()) return 0;
+  let n = 0;
+  for (const [id, ctrl] of controleurs) {
+    const t = etat.taches.get(id);
+    if (!t || ctrl.signal.aborted) continue;
+    // une autorisation qui attend ta réponse n'est pas un silence : le compte repart quand tu as répondu
+    if (!reperesSilence.has(ctrl) || !['running', 'rework'].includes(t.etat)) {
+      reperesSilence.set(ctrl, maintenant);
+      continue;
+    }
+    if (t.x.arretSilence) continue;
+    const depuis = Math.max(t.derniereActivite || 0, reperesSilence.get(ctrl));
+    if (maintenant - depuis < silenceMaxMs()) continue;
+    t.x.arretSilence = Math.round((maintenant - depuis) / 60000);
+    message(t.dossier, 'systeme', tr('{ref} ne donne plus signe de vie depuis {n} min : le chien de garde arrête sa session et la reprend.', { ref: t.ref, n: t.x.arretSilence }), [t.etage]);
+    ctrl.abort();
+    n++;
+  }
+  return n;
+}
+
+function relancerApresSilence(t, d) {
+  libererVerrou(t);
+  const minutes = t.x.arretSilence;
+  delete t.x.arretSilence;
+  t.x.silences = (t.x.silences || 0) + 1;
+  if (t.x.silences > MAX_SILENCES || !t.x.session) {
+    terminer(t, 'failed', { status: 'failed', summary: tr('Arrêtée par le chien de garde : plus de signe de vie ({n} fois)', { n: t.x.silences }) });
+    reveilDG(d, `${t.ref} a été arrêtée par le chien de garde : sa session ne donnait plus aucun signe de vie (${t.x.silences} fois, plus de ${minutes} min chaque fois). Une commande bloquait sans doute (serveur qui ne rend pas la main, attente d'une saisie, réseau). Regarde ce qu'elle a déjà fait, puis relance-la avec une consigne qui évite ce blocage (délai maximum, commande en arrière-plan), découpe-la, ou accepte l'état actuel.`);
+    return;
+  }
+  t.x.reprise = {
+    phase: t.etat === 'rework' ? 'rework' : 'production',
+    resume: t.x.session,
+    prompt: `Ta session ne donnait plus aucun signe de vie depuis ${minutes} minutes : le QG l'a arrêtée, puis la reprend ici. Vérifie où tu en étais (fichiers modifiés, commandes lancées). Si une commande bloquait (serveur qui ne rend pas la main, attente d'une saisie au clavier, réseau), ne la relance pas telle quelle : mets-lui un délai maximum, ou lance-la en arrière-plan. Termine la mission, puis rends ta sortie structurée complète.`,
+  };
+  changerEtatTache(t, 'ready', { motifFile: null });
+  tick();
 }
 
 // Un complément est arrivé alors que la session ne pouvait plus le recevoir (fin de tour, vérification) :
@@ -1480,7 +1587,7 @@ async function verifierFinDossier(d) {
   message(d.id, 'dg', d.synthese, d.etages);
   const faites = taches.filter((t) => t.etat === 'done').length;
   d.etat = faites ? 'termine' : 'echec';
-  notifier({ type: 'info', titre: tr(faites ? 'Dossier {id} terminé' : 'Dossier {id} en échec', { id: d.id }), texte: d.titre, dossier: d.id });
+  notifier({ type: 'info', titre: tr(faites ? 'Dossier {id} terminé' : 'Dossier {id} en échec', { id: d.id }), texte: d.titre, dossier: d.id, telephone: 'fin' });
   majDossier(d);
 }
 
@@ -1670,6 +1777,8 @@ function mesuresDeFin(t) {
 
 // Appelé une fois au démarrage : les dossiers non terminés repartent (voir chargerHistorique).
 export function reprendreDossiers() {
+  // supprimés juste avant l'arrêt du serveur, pendant les 30 s où on pouvait encore changer d'avis : effacés maintenant
+  for (const d of [...etat.dossiers.values()]) if (d.supprimeLe) effacerPourDeBon(d.id);
   for (const d of etat.dossiers.values()) {
     if (!d.x?.repriseApresRedemarrage) continue;
     d.x.repriseApresRedemarrage = false;
@@ -1781,7 +1890,7 @@ function mettreCompteEnPause(id, { type, jusqua = null, raison = '' }) {
     m.unref?.();
     minuteriesComptes.set(id, m);
   }
-  if (nouveau) notifier({ type: 'info', titre: tr('{nom} en pause', { nom: nomCompte(id) }), texte: motifCompte(id) });
+  if (nouveau) notifier({ type: 'info', titre: tr('{nom} en pause', { nom: nomCompte(id) }), texte: motifCompte(id), telephone: 'pause' });
 }
 
 // Un compte reprend : le DG qui l'attendait repart ; ses tâches repartent au prochain passage.
@@ -1810,7 +1919,7 @@ export const reprendreCompte = (id) => leverPauseCompte(id);
 
 /** extra : { limite: true, compte } pour une pause due à une limite d'usage (levée dès que le compte a de la marge). */
 export function pauseGlobale(raison, jusqua, extra = {}) {
-  if (raison !== tr("Arrêt d'urgence")) notifier({ type: 'info', titre: tr('QG en pause'), texte: jusqua ? tr('{raison} — reprise vers {heure}', { raison, heure: quandReprise(jusqua) }) : raison });
+  if (raison !== tr("Arrêt d'urgence")) notifier({ type: 'info', titre: tr('QG en pause'), texte: jusqua ? tr('{raison} — reprise vers {heure}', { raison, heure: quandReprise(jusqua) }) : raison, telephone: 'pause' });
   etat.ordonnanceur = { ...etat.ordonnanceur, pause: { raison, jusqua, ...extra } };
   emettre('ordonnanceur', { ordonnanceur: etat.ordonnanceur });
   clearTimeout(minuteriePause);
@@ -1836,7 +1945,7 @@ function limitesRelues(compteId, l) {
   if (marge && pauseDe(compteId)?.type === 'quota') leverPauseCompte(compteId);
   const p = etat.ordonnanceur.pause;
   if (!p?.limite || (p.compte && p.compte !== compteId) || !marge) return;
-  notifier({ type: 'info', titre: tr('QG relancé'), texte: tr('Le forfait a de nouveau de la marge : le travail reprend sans attendre.') });
+  notifier({ type: 'info', titre: tr('QG relancé'), texte: tr('Le forfait a de nouveau de la marge : le travail reprend sans attendre.'), telephone: 'pause' });
   reprendre({ comptes: false });
 }
 surLimitesLues(limitesRelues);

@@ -145,6 +145,8 @@ button:focus-visible, textarea:focus-visible { outline: 2px solid var(--jaune); 
 .alerte.a-warn { border-left-color: var(--orange); }
 .alerte.a-erreur { border-left-color: var(--rouge); background: rgba(70, 12, 16, 0.95); }
 .alerte .fermer { background: none; border: 0; font-size: 18px; line-height: 1; color: var(--dim); }
+.alerte > span { flex: 1; }
+.alerte .alerte-action { flex: none; white-space: nowrap; }
 @keyframes glisse { from { transform: translateY(-8px); opacity: 0; } }
 
 /* ---------- pause ---------- */

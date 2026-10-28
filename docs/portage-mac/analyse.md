@@ -325,6 +325,8 @@ Pas de signature ni de notarisation au départ : il faudrait un compte Apple Dev
 
 Option plus simple, à décider (§6, point ouvert) : une commande d'installation en une ligne (`curl -fsSL …/installer-mac.sh | bash`), qui télécharge par curl, donc sans quarantaine.
 
+**Fait en 1.0.8** : le premier essai sur un vrai Mac (macOS 15) a montré l'alerte « Élément « installer.command » non ouvert » après un double-clic : les instructions par `bash` ne sont pas lues. La méthode principale du README est donc la ligne `curl -fsSL https://raw.githubusercontent.com/Ishine93/agents-hq/main/outils/installer-en-ligne.sh | bash` (`outils/installer-en-ligne.sh`) : dernière version par l'API GitHub (ou la redirection de releases/latest), zip et `.sha256` par curl, empreinte vérifiée, `ditto`, dossier `~/QG-des-agents`, puis `outils/installer.sh` avec le clavier (`< /dev/tty`). Si le dossier contient déjà le QG (zip extrait à la main), la quarantaine est retirée et l'installation reprend. Le fichier doit être sur la branche `main` du dépôt public pour que la ligne marche.
+
 ---
 
 ## 4. Plan de réalisation en lots

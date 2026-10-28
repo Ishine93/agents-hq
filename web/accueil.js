@@ -203,7 +203,9 @@ export class Accueil {
         dic.disponible
           ? h('p', {}, '✓ ' + t('Dictée locale prête : bouton 🎤 ou {raccourci}.', { raccourci: infosPlateforme(this.store).raccourciDictee }))
           : !infosPlateforme(this.store).dicteeLocale
-            ? h('p', { class: 'meta' }, t('La dictée locale (Whisper) n’est pas encore disponible sur Mac. Utilise {systeme} dans la zone de saisie : ça marche partout.', { systeme: dicteeSysteme() }))
+            ? h('div', {},
+              h('p', { class: 'meta' }, t('La dictée locale (Whisper) n’est pas encore disponible sur Mac. Utilise {systeme} dans la zone de saisie : ça marche partout.', { systeme: dicteeSysteme() })),
+              h('button', { class: 'petit', type: 'button', disabled: true, title: t('Pas encore disponible sur Mac') }, t('Installer la dictée locale')))
             : h('div', {},
               h('p', { class: 'meta' }, t('Tu dictes souvent ? La dictée locale (Whisper, gratuite, sur ton PC) s’installe en un clic : environ 4 Go avec une carte NVIDIA, 1,5 Go sans. Sinon, Win+H (dictée de Windows) marche partout.')),
               h('button', { class: 'petit', type: 'button', on: { click: () => this.poster('/api/dictee/installer', {}, t('L’installation s’ouvre dans une fenêtre à part.')) } }, t('Installer la dictée locale'))),

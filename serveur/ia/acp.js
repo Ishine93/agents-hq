@@ -26,6 +26,7 @@ export { ROLES_LECTURE, PROFILS_LECTURE, profilDemande } from './commun.js';
 import { niveauDe, chargerEquivalences } from './fournisseurs.js';
 import { lireStructure, consigneRelance, outilSoumission, RELANCES_STRUCTURE } from './schema.js';
 import { t } from '../i18n.js';
+import { lanceurInstalle, scriptNode } from './installation-acp.js';
 
 export const id = 'acp';
 export const nom = 'Autres agents (ACP)';
@@ -95,25 +96,56 @@ export function agentPourAjout({ agent, commande = null, varCle = null } = {}, c
 export const prefixeId = ({ agent } = {}) => (agent && agent !== AGENT_PERSONNALISE && catalogue()[agent] ? agent : 'acp');
 export const nomParDefaut = ({ agent } = {}) => catalogue()[agent]?.nomCourt || nomCourt;
 
-// Recherche dans le PATH gardée 30 s (le site redemande la liste des comptes souvent).
+// Où est l'agent ? 1. installé par le QG (runtime/acp/<agent>, lancé par le Node du QG) ; 2. dans le PATH ;
+// 3. dans les dossiers où son installateur officiel le range (installer.dossiers) : le PATH du QG date de
+// son lancement, une installation faite depuis ne s'y voit qu'au prochain lancement.
+export function trouverCommande(agent, { env = process.env, plat = plateforme.PLATEFORME } = {}) {
+  const inst = agent.installer || {};
+  if (!env.QG_ACP_BIN && inst.npm && agent.id) {
+    const f = lanceurInstalle(agent.id, inst.npm);
+    const reste = agent.commande.slice(1).map(String);
+    if (f && scriptNode(f)) return { exe: plateforme.nodeOuCourant(plat), args: [f, ...reste], present: true, parQg: true };
+    if (f) {
+      let reel = f;
+      try {
+        reel = fs.realpathSync(f);
+      } catch {
+        /* lien cassé : le chemin tel quel */
+      }
+      return { exe: reel, args: reste, present: true, parQg: true };
+    }
+  }
+  const c = plateforme.acpCommande(agent.commande, plat, { env });
+  if (c.present || env.QG_ACP_BIN) return c;
+  const extra = (inst.dossiers?.[plateforme.nom(plat)] || []).map((d) => plateforme.developperChemin(d, { env })).filter(Boolean);
+  if (!extra.length) return c;
+  const cle = Object.keys(env).find((k) => k.toLowerCase() === 'path') || 'PATH';
+  const sep = plateforme.estWindows(plat) ? ';' : ':';
+  return plateforme.acpCommande(agent.commande, plat, { env: { ...env, [cle]: [env[cle] || '', ...extra].filter(Boolean).join(sep) } });
+}
+
+// Recherche gardée 30 s (le site redemande la liste des comptes souvent) ; oublierCommandes() la refait
+// (bouton « Vérifier à nouveau », fin d'une installation).
 const commandesVues = new Map();
 export function commandeAgent(agent) {
   if (!agent?.commande?.length) return { exe: '', args: [], present: false };
-  const cle = JSON.stringify([agent.commande, process.env.QG_ACP_BIN || '', process.env.PATH || process.env.Path || '']);
+  const cle = JSON.stringify([agent.id || '', agent.commande, process.env.QG_ACP_BIN || '', process.env.PATH || process.env.Path || '']);
   const vu = commandesVues.get(cle);
   if (vu && Date.now() - vu.t < 30000) return vu.c;
-  const c = plateforme.acpCommande(agent.commande);
+  const c = trouverCommande(agent);
   if (commandesVues.size > 200) commandesVues.clear();
   commandesVues.set(cle, { t: Date.now(), c });
   return c;
 }
+export const oublierCommandes = () => commandesVues.clear();
 export const commande = (compte) => commandeAgent(agentDe(compte));
 export function binairePresent(compte = null) {
   if (compte) return commande(compte).present;
   return Object.entries(catalogue()).some(([cle, a]) => commandeAgent({ id: cle, ...a }).present);
 }
 
-// Pour le site : agents connus, présents ou non sur ce PC.
+// Pour le site : agents connus, présents ou non sur ce PC ; disponible = il existe pour ce système.
+const SYSTEME = plateforme.nom();
 export const cataloguePublic = () =>
   Object.entries(catalogue()).map(([cle, a]) => ({
     id: cle,
@@ -121,7 +153,8 @@ export const cataloguePublic = () =>
     nomCourt: a.nomCourt,
     acces: a.acces,
     present: commandeAgent({ id: cle, ...a }).present,
-    installation: a.installation || '',
+    disponible: !a.installer?.systemes || a.installer.systemes.includes(SYSTEME),
+    installation: typeof a.installation === 'string' ? a.installation : a.installation?.[SYSTEME] || '',
     connexion: a.connexion?.consigne || '',
     aVerifier: (a.aVerifier || []).length,
   }));

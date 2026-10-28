@@ -12,6 +12,7 @@ import { sectionPriorites, badgeQualification } from './priorites.js';
 import { script as scriptPlateforme, infos as infosPlateforme, dicteeSysteme } from './plateforme.js';
 import { NIVEAUX, COUTS, PERSONNALISE, NIVEAU_DEFAUT, nomNiveau, nomTravail, phraseNiveau, travailDe, sansCapacite, CAPACITES_COUT, boutonsCout, texteValeur } from './cout.js';
 import { bulle, ligneI, titreI, choixAide, valeurAide, exempleAide } from './aide.js';
+import { ouvrirRapport } from './rapport.js';
 import { blocGraphismes } from './graphismes.js';
 
 const SECTIONS = [
@@ -217,7 +218,7 @@ export class Parametres {
           h('button', { class: 'petit', type: 'button', on: { click: () => this.poster('/api/navigateur/app/installer', {}, t('Installation lancée (≈ 100 Mo).')) } }, t('Installer le navigateur complet'))),
       h('h4', {}, t('Autorisations')),
       ligneI('gen-hors-projet', t('Hors des projets'), [
-        t('Décoché (conseillé) : chaque écriture hors projet te demande ton accord, avec « Toujours pour cet agent » pour ne plus être dérangé jusqu’à la fin de sa tâche. Le dossier temporaire de Windows est toujours libre (brouillons des agents).'),
+        t('Décoché (conseillé) : chaque écriture hors projet te demande ton accord, avec « Toujours pour cet agent » pour ne plus être dérangé jusqu’à la fin de sa tâche. Le dossier temporaire du système est toujours libre (brouillons des agents).'),
         exempleAide(t('un agent veut ranger un fichier dans tes Documents, hors du dossier du projet : coché, il le fait ; décoché, il te demande d’abord.')),
       ],
         h('label', { class: 'param-case' },
@@ -496,37 +497,14 @@ export class Parametres {
     // ---- ajout : fournisseur → accès → nom (ou clé)
     const selF = h('select', { class: 'champ', 'aria-label': t('Fournisseur') }, fournisseurs.map((f) => h('option', { value: f.id, selected: f.id === this.ajoutFournisseur ? true : null }, f.nom + (f.present ? '' : ' — ' + t('non installé')))));
     const selAcces = h('select', { class: 'champ', 'aria-label': t('Type d’accès') });
-    // Codex absent : installation à la demande (version épinglée, dans le dossier du QG), suivie ici
-    const zoneInstall = h('div', { class: 'param-install' });
-    const majInstall = (f) => {
-      const inst = S.installationCodex || { etat: f.present ? 'installe' : 'absent', lignes: [] };
-      if (f.id !== 'codex' || (f.present && inst.etat !== 'erreur' && inst.etat !== 'installation')) {
-        zoneInstall.replaceChildren();
-        return;
-      }
-      const enCours = inst.etat === 'installation';
-      const derniere = (inst.lignes || []).slice(-1)[0] || '';
-      zoneInstall.replaceChildren(...[
-        h('div', { class: 'boutons' },
-          h('button', {
-            class: 'petit ok', type: 'button', disabled: enCours ? true : null,
-            title: t('Installe Codex {version} dans le dossier runtime/codex du QG, avec le npm du QG', { version: inst.version || '' }),
-            on: { click: async () => {
-              const r = await this.poster('/api/codex/installer', {}, null);
-              if (r) {
-                S.installationCodex = r;
-                this.rendre();
-                if (apres) apres();
-              }
-            } },
-          }, enCours ? t('Installation de Codex…') : inst.etat === 'erreur' ? t('Réessayer l’installation de Codex') : t('Installer Codex'))),
-        enCours ? h('small', { class: 'meta' }, t('Téléchargement et installation en cours (une à deux minutes).') + (derniere ? ' ' + derniere : '')) : null,
-        inst.etat === 'erreur' ? h('small', { class: 'meta st-ko' }, t('L’installation de Codex a échoué : {erreur}', { erreur: inst.erreur || '' })) : null,
-      ].filter(Boolean)); // replaceChildren écrirait « null » en texte
-    };
-    // agent ACP : un agent connu (Grok, Cursor…) ou une commande personnalisée
+    // agent ACP : un agent connu (Grok, Cursor…) ou une commande personnalisée ; un agent qui n'existe pas pour
+    // ce système est grisé
     const selAgent = h('select', { class: 'champ', 'aria-label': t('Agent') },
-      ...agentsAcp.map((a) => h('option', { value: a.id, selected: a.id === this.ajoutAgent ? true : null }, a.nom + (a.present ? '' : ' — ' + t('non installé')))),
+      ...agentsAcp.map((a) => h('option', {
+        value: a.id,
+        selected: a.id === this.ajoutAgent && a.disponible !== false ? true : null,
+        disabled: a.disponible === false ? true : null,
+      }, a.nom + (a.disponible === false ? ' — ' + t('pas sur ce système') : a.present ? '' : ' — ' + t('non installé')))),
       h('option', { value: 'personnalise', selected: this.ajoutAgent === 'personnalise' ? true : null }, t('autre agent ACP (commande)')));
     const commandeAcp = champ({ placeholder: t('commande ACP, ex. mon-agent --acp'), maxlength: '400', 'aria-label': t('Commande de l’agent') });
     const varCleAcp = champ({ placeholder: t('variable de la clé, ex. MON_AGENT_API_KEY'), maxlength: '64', 'aria-label': t('Variable de la clé') });
@@ -534,6 +512,106 @@ export class Parametres {
     const cle = champ({ type: 'password', placeholder: 'sk-…', autocomplete: 'off', 'aria-label': t('Clé API') });
     const aide = h('div', { class: 'param-ajout-aide' });
     const boutons = h('div', { class: 'param-ajout' });
+    // ---- prérequis (1.0.8) : ce qu'il faut sur ce PC avant d'ajouter le compte, et comment l'obtenir.
+    // « Ajouter » reste grisé tant qu'une étape bloquante manque ; après une installation, le QG revérifie
+    // tout seul toutes les 4 s pendant 10 min.
+    const zonePrerequis = h('div', { class: 'param-prerequis' });
+    const blocage = h('small', { class: 'meta st-ko', hidden: true }, t('Termine d’abord les étapes marquées ✗ ci-dessus : le bouton « Ajouter » se débloque tout seul.'));
+    let pret = true;
+    const cleChoix = () => selF.value + ':' + (selF.value === 'acp' ? selAgent.value : '');
+    const majBoutonsAjout = () => {
+      for (const b of boutons.querySelectorAll('button')) {
+        b.disabled = !pret;
+        b.title = pret ? '' : t('Il manque encore quelque chose sur ce PC : voir « Avant d’ajouter ce compte »');
+      }
+      blocage.hidden = pret;
+    };
+    const boutonAction = (a) => h('button', {
+      class: 'petit' + (a.type === 'installer' || a.type === 'terminal' ? ' ok' : ''), type: 'button',
+      title: a.type === 'copier' ? a.valeur : a.type === 'lien' ? a.valeur : null,
+      on: { click: async (ev) => {
+        if (a.type === 'copier') {
+          try {
+            await navigator.clipboard.writeText(a.valeur);
+            this.ui.toast('info', t('Commande copiée : colle-la dans un terminal, puis Entrée.'));
+          } catch {
+            window.prompt(t('Copie cette commande :'), a.valeur);
+          }
+          return;
+        }
+        if (a.type === 'lien') {
+          window.open(a.valeur, '_blank', 'noopener');
+          return;
+        }
+        const r = await occuper(ev.currentTarget, () => this.poster('/api/prerequis/agir', { type: a.type, valeur: a.valeur }));
+        if (!r) return;
+        if (r.message) this.ui.toast('info', r.message);
+        this.finSurveillance = Date.now() + 10 * 60 * 1000;
+        surveiller();
+        chargerPrerequis(true);
+      } },
+    }, a.libelle);
+    const ligneEtape = (e) => h('div', { class: 'param-prerequis-etape ' + (e.ok ? 'ok' : e.enCours ? 'encours' : e.bloquant ? 'ko' : 'conseil') },
+      h('div', {},
+        h('span', { class: 'param-prerequis-etat', 'aria-hidden': 'true' }, e.ok ? '✓' : e.enCours ? '⏳' : e.bloquant ? '✗' : '!'), ' ',
+        h('b', {}, e.titre),
+        !e.ok && !e.bloquant ? h('small', { class: 'meta' }, ' — ' + t('conseillé, pas obligatoire')) : null),
+      h('small', { class: 'meta' }, e.detail),
+      e.note ? h('small', { class: 'meta' }, e.note) : null,
+      e.enCours && e.lignes && e.lignes.length ? h('small', { class: 'meta' }, e.lignes[e.lignes.length - 1]) : null,
+      e.actions && e.actions.length ? h('div', { class: 'boutons' }, ...e.actions.map(boutonAction)) : null);
+    const dessinerPrerequis = (r) => {
+      if (!r || r.cle !== cleChoix()) return;
+      // rien de changé depuis la dernière vérification : la liste reste telle quelle (pas de clignotement)
+      if (zonePrerequis.childNodes.length && this.prerequis && JSON.stringify(this.prerequis) === JSON.stringify(r)) return;
+      this.prerequis = r; // gardé pour le prochain dessin
+      const avant = pret;
+      pret = !!r.pret;
+      majBoutonsAjout();
+      if (pret && !avant && r.agent) {
+        const a = agentsAcp.find((x) => x.id === r.agent);
+        if (a) a.present = true;
+      }
+      if (!r.etapes || !r.etapes.length) {
+        zonePrerequis.replaceChildren();
+        return;
+      }
+      const b = bulle('comptes-prerequis', [
+        t('Ce qu’il faut sur ce PC pour que cette IA travaille. ✓ : prêt. ✗ : il manque quelque chose, et le bouton à côté l’installe ou t’explique comment faire. ! : conseillé, mais pas obligatoire.'),
+        t('Rien ne s’installe sans ton clic. Quand c’est possible, le QG installe lui-même, dans son propre dossier : rien ne change ailleurs sur ce PC. Sinon, une fenêtre s’ouvre avec l’installateur officiel : suis ses étapes, puis reviens ici ; le QG vérifie tout seul.'),
+        t('« Copier la commande » : pour l’installer toi-même dans un terminal. « Page officielle » : le site de l’éditeur. « Vérifier à nouveau » : refait la vérification tout de suite.'),
+        exempleAide(t('Gemini n’est pas installé : « Installer Gemini » l’installe dans le dossier du QG, la ligne passe à ✓, puis « Ajouter » se débloque.')),
+      ], { titre: t('Avant d’ajouter ce compte') });
+      zonePrerequis.replaceChildren(...[
+        h('div', { class: 'param-prerequis-tete' }, h('b', {}, pret ? '✓ ' + t('Tout ce qu’il faut est sur ce PC') : t('Avant d’ajouter ce compte')), b.bouton),
+        b.panneau,
+        ...r.etapes.map(ligneEtape),
+        pret ? null : h('div', { class: 'boutons' }, h('button', { class: 'petit', type: 'button', on: { click: (ev) => occuper(ev.currentTarget, () => chargerPrerequis(true)) } }, t('Vérifier à nouveau'))),
+      ].filter(Boolean)); // replaceChildren écrirait « null » en texte
+    };
+    const chargerPrerequis = async (reverifier = false) => {
+      const cle = cleChoix();
+      const f = selF.value;
+      const ag = f === 'acp' ? selAgent.value : '';
+      try {
+        const r = reverifier
+          ? await api('/api/prerequis/verifier', { fournisseur: f, agent: ag || null })
+          : await api('/api/prerequis?fournisseur=' + encodeURIComponent(f) + (ag ? '&agent=' + encodeURIComponent(ag) : ''));
+        dessinerPrerequis({ ...r, cle });
+      } catch {
+        /* hors ligne ou maquette : la liste reste telle quelle */
+      }
+    };
+    const surveiller = () => {
+      clearInterval(this.minuteriePrerequis);
+      this.minuteriePrerequis = setInterval(() => {
+        if (!zonePrerequis.isConnected || pret || Date.now() > (this.finSurveillance || 0)) {
+          clearInterval(this.minuteriePrerequis);
+          return;
+        }
+        chargerPrerequis(true);
+      }, 4000);
+    };
     const manque = (champVide, message) => {
       this.ui.toast('erreur', message);
       champVide.focus();
@@ -566,7 +644,6 @@ export class Parametres {
       const f = fournisseurs.find((x) => x.id === selF.value) || fournisseurs[0];
       this.ajoutFournisseur = f.id;
       const accesActuel = selAcces.value || this.ajoutAcces;
-      majInstall(f);
       const acp = f.id === 'acp';
       const agent = acp ? agentsAcp.find((a) => a.id === selAgent.value) || null : null;
       if (acp) this.ajoutAgent = selAgent.value;
@@ -585,12 +662,22 @@ export class Parametres {
         !parCle && f.connexions && f.connexions.includes('code') ? h('button', { class: 'petit', type: 'button', on: { click: (e) => ajouter(e.currentTarget, { mode: 'code' }) } }, t('Ajouter et se connecter par code')) : null,
         !parCle && f.id === 'claude' && R.claudeCodeLocal && !dejaPartage ? h('button', { class: 'petit', type: 'button', on: { click: (e) => ajouter(e.currentTarget, { partage: true }) } }, t('Utiliser le compte Claude Code déjà connecté sur ce PC')) : null,
       ].filter(Boolean));
+      // liste des prérequis : la dernière connue tout de suite (même choix), puis la vraie
+      const connue = this.prerequis && this.prerequis.cle === cleChoix() ? this.prerequis : null;
+      if (connue) dessinerPrerequis(connue);
+      else {
+        pret = true;
+        zonePrerequis.replaceChildren();
+        majBoutonsAjout();
+      }
+      chargerPrerequis();
+      if ((this.finSurveillance || 0) > Date.now()) surveiller();
       const texteAide = (avertissement, texte) => aide.replaceChildren(...[
         avertissement ? h('small', { class: 'meta st-ko' }, avertissement) : null,
         h('small', { class: 'meta' }, texte),
       ].filter(Boolean)); // replaceChildren écrirait « null » en texte
       if (acp) {
-        texteAide(agent && !agent.present ? t('{nom} n’est pas installé sur ce PC : {installation}', { nom: agent.nomCourt, installation: t(agent.installation) }) : null,
+        texteAide(null,
           (perso ? t('Agent qui parle le protocole ACP (agentclientprotocol.com) : donne la commande qui le lance en mode ACP.') + ' '
             : agent && !parCle && agent.connexion ? t(agent.connexion) + ' ' : '')
           + (parCle ? t('La clé reste sur ce PC, dans config\\comptes.json ; seul cet agent la reçoit, les autres agents ne peuvent pas la lire.') : t('La connexion se fait dans l’agent lui-même ; le QG ne voit jamais ton jeton.')) + ' '
@@ -598,7 +685,7 @@ export class Parametres {
       } else if (f.id === 'codex') {
         texteAide(null, parCle
           ? t('Clé API OpenAI (platform.openai.com), facturée à l’usage. La clé reste sur ce PC, dans config\\comptes.json ; les agents ne peuvent pas la lire.')
-          : t('Abonnement ChatGPT (Plus, Pro, Business…). Un compte = une personne, sur son propre PC : pas de partage ni de rotation de comptes. La connexion se fait dans une fenêtre puis sur la page ChatGPT ; le jeton reste dans le dossier du compte, jamais lu par le QG.') + (f.present ? '' : ' ' + t('Codex n’est pas encore installé sur ce PC : le bouton « Installer Codex » l’installe dans le dossier du QG (ou installe le Codex CLI officiel).')));
+          : t('Abonnement ChatGPT (Plus, Pro, Business…). Un compte = une personne, sur son propre PC : pas de partage ni de rotation de comptes. La connexion se fait dans une fenêtre puis sur la page ChatGPT ; le jeton reste dans le dossier du compte, jamais lu par le QG.'));
       } else {
         texteAide(null, parCle
           ? t('Facturée au token par Anthropic (console.anthropic.com). La clé reste sur ce PC, dans config\\comptes.json ; les agents ne peuvent pas la lire.')
@@ -619,6 +706,7 @@ export class Parametres {
     const ajout = [
       ...titreI('comptes-ajout', t('Ajouter un compte'), [
         t('Choisis le fournisseur, le type d’accès, puis donne un nom au compte. Avec un abonnement, la connexion s’ouvre ensuite : une page de ton navigateur pour Claude et ChatGPT · Codex, une fenêtre de terminal pour les autres agents. Tu t’y connectes avec ton compte chez ce fournisseur.'),
+        t('S’il manque quelque chose sur ce PC (le programme de l’IA, git…), la liste « Avant d’ajouter ce compte » te le montre et te propose de l’installer.'),
         exempleAide(t('Claude, abonnement, « perso » : ton compte Claude personnel, connecté une fois pour toutes.')),
       ]),
       ligneI('comptes-ajout-fournisseur', t('1. Fournisseur'), [
@@ -630,8 +718,9 @@ export class Parametres {
         choixAide(t('clé API (facturée à l’usage)'), t('chaque token est facturé par le fournisseur, en plus de tout abonnement. La clé reste sur ce PC.')),
       ], selAcces, cle, varCleAcp),
       ligneI('comptes-ajout-nom', t('3. Nom du compte'), [t('Un nom pour t’y retrouver, comme « perso » ou « pro ». Il apparaît en bas de l’écran et dans Réglages › Priorités. Laissé vide, le QG en choisit un.')], nouveau),
+      zonePrerequis,
       boutons,
-      zoneInstall,
+      blocage,
       aide,
     ];
     if (accueil) return [...intro, ...groupes, ...ajout];
@@ -1301,14 +1390,63 @@ export class Parametres {
         ? h('p', {}, t('Transcription locale disponible ({appareil}). Bouton 🎤 en bas de l’écran, ou {raccourci}.', { appareil: dic.appareil || t('chargement du modèle…'), raccourci: infosPlateforme(this.store).raccourciDictee }))
         : !infosPlateforme(this.store).dicteeLocale
           // Mac : pas encore d'installation de Whisper ; la dictée du système fait le travail
-          ? h('p', { class: 'meta' }, t('La dictée locale (Whisper) n’est pas encore disponible sur Mac. Utilise {systeme} dans la zone de saisie : ça marche partout.', { systeme: dicteeSysteme() }))
+          ? h('div', {},
+            h('p', { class: 'meta' }, t('La dictée locale (Whisper) n’est pas encore disponible sur Mac. Utilise {systeme} dans la zone de saisie : ça marche partout.', { systeme: dicteeSysteme() })),
+            h('div', { class: 'boutons' }, h('button', { class: 'petit', type: 'button', disabled: true, title: t('Pas encore disponible sur Mac') }, t('Installer la dictée locale'))))
           : h('div', {},
             h('p', {}, t('La dictée locale (Whisper, sur ton PC, gratuite et privée) n’est pas installée.')),
             h('p', { class: 'meta' }, t('Installation : environ 4 Go avec une carte NVIDIA (rapide), 1,5 Go sans (plus lent). En attendant, la dictée de Windows marche partout : Win+H.')),
             h('div', { class: 'boutons' }, h('button', { class: 'petit ok', type: 'button', on: { click: () => this.poster('/api/dictee/installer', {}, t('L’installation s’ouvre dans une fenêtre à part. Relance le QG quand elle est finie.')) } }, t('Installer la dictée locale')))),
       ...titreI('notifications', t('Notifications'), [t('Pour être prévenu quand un agent lève la main ou pose une question, même si le QG est en arrière-plan.')]),
       h('p', { class: 'meta' }, t('Navigateur : {etat}. Quand le QG est au premier plan, la cloche suffit.', { etat: libPerm })),
+      // Mac : la notification système passe par osascript (limite connue de macOS pour un script)
+      infosPlateforme(this.store).nom === 'mac' ? h('p', { class: 'meta' }, t('Sur Mac, quand aucune page du QG n’est ouverte, la notification du système apparaît au nom de « Éditeur de scripts », et un clic dessus n’ouvre pas le QG. Autorise les notifications de l’Éditeur de scripts dans Réglages Système › Notifications.')) : null,
       perm === 'default' ? h('button', { class: 'petit', type: 'button', on: { click: () => this.ui.notifs.activer() } }, t('Activer les notifications')) : null,
+      ...this.blocTelephone(),
+    ];
+  }
+
+  // Alertes sur le téléphone (1.0.8) : ntfy, un sujet au nom tiré au hasard, rien du travail ne part.
+  blocTelephone() {
+    const tel = this.store.reglages.telephone || { actif: false, serveur: 'https://ntfy.sh', sujet: '', attente: true, fin: true, pause: true, relance: true };
+    const changer = async (patch, ok = t('Enregistré.')) => {
+      if (await this.reglage({ telephone: patch }, ok)) this.rendre();
+    };
+    const lien = tel.sujet ? `${tel.serveur}/${tel.sujet}` : '';
+    const caseCat = (cle, texte) => h('label', { class: 'param-case' },
+      h('input', { type: 'checkbox', checked: tel[cle] !== false, disabled: tel.actif ? null : true, on: { change: (e) => changer({ [cle]: e.target.checked }) } }), ' ', texte);
+    const serveur = champ({ value: tel.serveur, placeholder: 'https://ntfy.sh', 'aria-label': t('Serveur ntfy') });
+    return [
+      ...titreI('telephone', t('Alertes sur ton téléphone'), [
+        t('Pour laisser le QG travailler sans le surveiller : ton téléphone sonne quand un agent a besoin de toi, quand un dossier est fini, quand une limite d’usage met le travail en pause, ou quand le QG a redémarré après un plantage.'),
+        t('Ça passe par ntfy, une application gratuite (Android et iPhone), sans compte. Le QG envoie un message sur un « sujet » : un nom long tiré au hasard. Ton téléphone, abonné à ce sujet, reçoit l’alerte.'),
+        [t('Ce qui part :'), t('seulement un titre court, par exemple « T3 a besoin de ton avis » ou « Dossier D12 terminé ». Jamais le contenu de ton travail, ni tes fichiers, ni tes questions.')],
+        t('Sur le serveur public ntfy.sh, quiconque connaît le nom du sujet peut lire ces titres : c’est pour ça que le nom est long et impossible à deviner. Garde-le pour toi. Si tu as ton propre serveur ntfy, mets son adresse.'),
+        exempleAide(t('tu lances un gros dossier et tu pars faire les courses : ton téléphone vibre quand le DG a une question, tu réponds en rentrant.')),
+      ]),
+      h('label', { class: 'param-case' },
+        h('input', { type: 'checkbox', checked: tel.actif, on: { change: (e) => changer({ actif: e.target.checked }, e.target.checked ? t('Alertes activées : abonne ton téléphone au sujet ci-dessous.') : t('Alertes coupées.')) } }),
+        ' ', t('Prévenir mon téléphone')),
+      tel.sujet ? h('div', { class: 'param-telephone' },
+        h('p', {}, t('1. Installe l’application ntfy sur ton téléphone. 2. Touche « + » (s’abonner). 3. Recopie ce nom de sujet :')),
+        h('p', {}, h('code', { class: 'sujet-ntfy' }, tel.sujet), ' ', h('a', { href: lien, target: '_blank', rel: 'noopener noreferrer', class: 'meta' }, t('ou ouvre ce lien sur le téléphone'))),
+        h('div', { class: 'boutons' },
+          h('button', { class: 'petit ok', type: 'button', on: { click: async (e) => {
+            const b = e.currentTarget;
+            b.disabled = true;
+            if (await this.poster('/api/telephone/essai', {}, t('Essai envoyé : ton téléphone doit sonner dans quelques secondes.'))) this.rendre();
+            b.disabled = false;
+          } } }, t('Envoyer un essai')),
+          h('button', { class: 'petit', type: 'button', on: { click: () => {
+            if (window.confirm(t('Tirer un nouveau nom de sujet ? Il faudra réabonner ton téléphone au nouveau nom.'))) changer({ sujet: 'nouveau' }, t('Nouveau sujet : réabonne ton téléphone.'));
+          } } }, t('Nouveau nom de sujet'))),
+        h('div', { class: 'param-cases' },
+          caseCat('attente', t('Un agent ou le DG a besoin de toi')),
+          caseCat('fin', t('Un dossier est terminé (ou en échec)')),
+          caseCat('pause', t('Une limite d’usage met en pause, puis le travail reprend')),
+          caseCat('relance', t('Le QG a redémarré tout seul après un plantage'))),
+        ligne(t('Serveur ntfy'), serveur, h('button', { class: 'petit', type: 'button', on: { click: () => changer({ serveur: serveur.value }) } }, t('Enregistrer'))))
+        : h('div', { class: 'boutons' }, h('button', { class: 'petit', type: 'button', on: { click: () => changer({ sujet: 'nouveau' }, t('Sujet créé : abonne ton téléphone, puis coche « Prévenir mon téléphone ».')) } }, t('Préparer mon téléphone'))),
     ];
   }
 
@@ -1334,6 +1472,11 @@ export class Parametres {
         h('input', { type: 'checkbox', checked: R.miseAJourAuto !== false, on: { change: (e) => this.reglage({ miseAJourAuto: e.target.checked }, t('Enregistré.')) } }),
         ' ', t('Mettre à jour automatiquement au lancement du QG (si une nouvelle version est publiée, elle s’installe avant que le QG démarre).')),
       this.blocMaj(),
+      ...titreI('rapport', t('Un problème ? Une idée ?'), [
+        t('Décris ce qui ne marche pas, ou ce qui te manquerait. Le QG prépare un texte avec les informations utiles pour corriger (version, système, dernières lignes du serveur), après avoir retiré tout ce qui est personnel.'),
+        t('Tu relis le texte complet avant tout envoi. Ensuite, deux choix : l’ouvrir sur GitHub (page déjà remplie, compte GitHub gratuit), ou le copier pour l’envoyer à la personne qui t’a donné le QG.'),
+      ]),
+      h('div', { class: 'boutons' }, h('button', { class: 'petit', type: 'button', on: { click: () => ouvrirRapport(this.ui) } }, t('Signaler un problème'))),
       h('p', { class: 'meta' }, t('Tout reste sur ce PC : tes réglages (dossier config), l’historique des dossiers (dossier dossiers) et les données de travail (dossier runtime). Le QG n’écoute que ton ordinateur (127.0.0.1) et ne partage rien.')),
       h('div', { class: 'boutons' }, h('button', { class: 'petit', type: 'button', on: { click: () => this.ui.lecteur.ouvrir(R.qg + '\\README.md') } }, t('Lire le mode d’emploi'))),
     ];

@@ -103,6 +103,24 @@ export function acpCommande(argv, plat = PLATEFORME, { env = process.env, existe
   return { exe: bin, args: reste, present: false };
 }
 
+/**
+ * Chemin écrit dans un fichier de réglages : « ~ » (dossier personnel) et %VARIABLE% (Windows) ou $VARIABLE
+ * remplacés. Une variable absente rend null (le dossier est ignoré).
+ */
+export function developperChemin(p, { env = process.env, home = os.homedir() } = {}) {
+  let manque = false;
+  const val = (nom) => {
+    const cle = Object.keys(env).find((k) => k.toLowerCase() === nom.toLowerCase());
+    if (!cle || !env[cle]) manque = true;
+    return cle ? env[cle] || '' : '';
+  };
+  const r = String(p || '')
+    .replace(/^~(?=$|[\/])/, home)
+    .replace(/%([A-Za-z_][A-Za-z0-9_]*)%/g, (_, n) => val(n))
+    .replace(/\$([A-Za-z_][A-Za-z0-9_]*)/g, (_, n) => val(n));
+  return manque || !r ? null : r;
+}
+
 export const pythonVenv = (venv, plat = PLATEFORME) => (estWindows(plat) ? path.join(venv, 'Scripts', 'python.exe') : path.join(venv, 'bin', 'python'));
 
 // Electron installé par npm dans runtime/navigateur : electron.exe sur Windows ; sur Mac, le paquet note

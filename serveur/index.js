@@ -4,7 +4,8 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { RACINE, REGLAGES, utiliserImmeubleDemo } from './config.js';
+import os from 'node:os';
+import { RACINE, REGLAGES, utiliserImmeubleDemo, etagesActifs, racines } from './config.js';
 import * as plateforme from './plateforme.js';
 import { etat, abonner, instantane, chargerHistorique, appliquerEvenement, DOSSIERS_DIR, sauver, utiliserDossiers, emettre, modelesPublics, mcpPublic, alerte, comptesPublics, modificationsDe, archiverDossier, ressortirDossier, dossiersArchives } from './bus.js';
 import { decouvrir, decouverteEnCache } from './decouverte.js';
@@ -38,6 +39,12 @@ import { t as tr } from './i18n.js';
 import { questionTache, questionDg } from './questions.js';
 import { verifierMaj, lancerMaj, majAuLancement, CODE_MISE_A_JOUR, installationDev } from './maj.js';
 import { preparerNotes, notesPubliques, marquerVues } from './notes.js';
+import { installerJournalRecent, lignesRecentes, construireRapport, personnelConnu, dernierPlantage } from './rapport.js';
+import { rechercher } from './recherche-historique.js';
+import { alerter } from './telephone.js';
+
+// dernières lignes affichées par le serveur, gardées en mémoire pour « Signaler un problème »
+installerJournalRecent();
 
 const decouverteEnCours = new Set();
 const alerteQuestion = (dossierId, e) => alerte('erreur', tr('Question sans réponse : {raison}', { raison: e.message }), dossierId);
@@ -183,10 +190,39 @@ function flux(req, res) {
   });
 }
 
+// Informations techniques jointes à un rapport (rien de personnel : le rapport est nettoyé ensuite).
+function diagnostic() {
+  const { comptes } = chargerComptes();
+  const parFournisseur = {};
+  for (const c of comptes) {
+    const f = (parFournisseur[c.fournisseur || 'claude'] = parFournisseur[c.fournisseur || 'claude'] || { n: 0, connectes: 0 });
+    f.n++;
+    try {
+      if (compteConnecte(c)) f.connectes++;
+    } catch {
+      /* état inconnu */
+    }
+  }
+  const mac = plateforme.estMac();
+  return {
+    version: notesPubliques().actuelle,
+    demo: DEMO,
+    systeme: `${mac ? 'macOS (Darwin ' + os.release() + ')' : os.version?.() || os.type()} ${mac ? '' : os.release() + ' '}${process.arch}`.replace(/\s+/g, ' ').trim(),
+    node: process.version,
+    langue: REGLAGES.langue || 'fr',
+    comptes: Object.entries(parFournisseur).map(([f, x]) => `${f} ${x.n} (${x.connectes} connecté${x.connectes > 1 ? 's' : ''})`).join(', '),
+    etages: etagesActifs().length,
+    enCours: [...etat.dossiers.values()].filter((d) => d.etat === 'en_cours').length,
+    lignes: lignesRecentes(60),
+    plantage: dernierPlantage(RACINE),
+  };
+}
+
 async function api(req, res, chemin) {
   if (req.method === 'GET' && chemin === '/api/flux') return flux(req, res);
   if (req.method === 'GET' && chemin === '/api/etat') return json(res, 200, instantane());
   if (req.method === 'GET' && chemin === '/api/dossiers/archives') return json(res, 200, { dossiers: dossiersArchives() });
+  if (req.method === 'GET' && chemin === '/api/recherche') return json(res, 200, rechercher(new URL(req.url, 'http://127.0.0.1').searchParams.get('q')));
   if (req.method === 'GET' && chemin === '/api/notes') return json(res, 200, notesPubliques());
   if (req.method === 'GET' && chemin === '/api/mcp') return json(res, 200, mcpPublic());
   if (req.method === 'GET' && chemin === '/api/dictee') return json(res, 200, etatDictee);
@@ -243,6 +279,13 @@ async function api(req, res, chemin) {
   if (chemin === '/api/notes/vu') {
     marquerVues();
     return json(res, 200, { ok: true });
+  }
+  // « Signaler un problème » (1.0.8) : le texte prêt à publier, nettoyé ; c'est la page qui ouvre GitHub
+  if (chemin === '/api/rapport') {
+    const saisie = await lireCorps(req, 64 * 1024);
+    return json(res, 200, construireRapport(saisie, diagnostic(), personnelConnu({
+      racine: RACINE, jeton: JETON, etages: etagesActifs(), racines: racines(), prenom: REGLAGES.utilisateur || '', comptes: chargerComptes().comptes,
+    })));
   }
   if (REPLAY) return json(res, 403, { erreur: tr('mode replay : lecture seule') });
 
@@ -368,15 +411,18 @@ async function api(req, res, chemin) {
     const r = await bavarder({ force: true });
     return r ? json(res, 200, r) : json(res, 409, { erreur: tr('Personne à faire bavarder : il faut au moins deux collègues au même étage.') });
   }
-  if ((m = chemin.match(/^\/api\/dossiers\/(D\d+)\/(repondre|completer|annuler|supprimer|archiver|ressortir)$/))) {
+  if ((m = chemin.match(/^\/api\/dossiers\/(D\d+)\/(repondre|completer|annuler|supprimer|retablir|archiver|ressortir)$/))) {
     const d = etat.dossiers.get(m[1]);
+    if (!d && m[2] === 'retablir') return json(res, 409, { erreur: tr('Trop tard : le dossier {id} est déjà effacé.', { id: m[1] }) });
     if (!d) return json(res, 404, { erreur: tr('dossier inconnu') });
     if (m[2] === 'annuler') ordo.annulerDossier(d);
-    else if (m[2] === 'supprimer') ordo.supprimerDossier(d);
-    else if (m[2] === 'archiver') {
+    else if (m[2] === 'supprimer') return json(res, 200, { ok: true, ...ordo.supprimerDossier(d) });
+    else if (m[2] === 'retablir') {
+      if (!ordo.annulerSuppression(d)) return json(res, 409, { erreur: tr('Trop tard : le dossier {id} est déjà effacé.', { id: d.id }) });
+    } else if (m[2] === 'archiver') {
       if (!archiverDossier(d)) return json(res, 409, { erreur: tr('Seul un dossier terminé, annulé ou en échec peut être archivé.') });
     } else if (m[2] === 'ressortir') {
-      if (!ressortirDossier(d)) return json(res, 409, { erreur: tr('Ce dossier n’est pas archivé.') });
+      if (!ressortirDossier(d)) return json(res, 409, { erreur: tr('Ce dossier est déjà dans l’onglet Dossiers.') });
     } else {
       const texte = String(corps.texte || '').trim();
       if (!texte) return json(res, 400, { erreur: tr('message vide') });
@@ -505,6 +551,14 @@ serveur.listen(PORT, HOTE, () => {
   if (OUVRIR && !(REGLAGES.ouvrirEnApp !== false && ouvrirApp(lien))) plateforme.ouvrirUrl(lien);
   if (REPLAY) lancerReplay();
   else ordo.reprendreDossiers(); // dossiers interrompus par un arrêt : ils repartent
+  // chien de garde (1.0.8) : sessions muettes depuis trop longtemps ; serveur relancé par serveur/gardien.js
+  if (!DEMO && !REPLAY) setInterval(() => ordo.surveillerSilences(), 60000).unref();
+  const relance = Number(process.env.QG_RELANCE_APRES_PLANTAGE) || 0;
+  if (relance) {
+    const texte = tr('Le QG a planté et s’est relancé tout seul : les dossiers en cours reprennent. Si ça se répète, Réglages › À propos › « Signaler un problème ».');
+    alerte('info', texte);
+    alerter('relance', tr('QG relancé après un plantage'), tr('Les dossiers en cours reprennent.'));
+  }
   if (!REPLAY) prechargerDictee();
   // mini-jeu : en démo, des répliques toutes prêtes (aucun token)
   // démo lancée depuis le QG : le grand scénario démarre tout seul
