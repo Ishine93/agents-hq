@@ -34,6 +34,8 @@ export const TYPES_PROJET = {
 };
 // Types qu'on peut choisir pour un nouvel étage (TYPES de serveur/detection.js).
 const TYPES_CHOIX = ['projet', 'web', 'python', 'roblox', 'unreal', 'unity', 'godot', 'comfyui'];
+// Décors au choix d'un étage de projet (1.0.9) ; vide = celui de son type.
+const DECORS = { etudes: 'Bureau d’études', atelier3d: 'Atelier 3D', unreal: 'Studio de rendu', roblox: 'Blocs Roblox', bac: 'Chantier' };
 const COIFFURES = 6;
 export const DEPOT_GITHUB = 'https://github.com/Ishine93/agents-hq';
 // Liens entre personnages (mini-jeu) : de quoi suivre les histoires d’un coup d’œil.
@@ -461,6 +463,7 @@ export class Parametres {
             : acp ? t('Se connecter : ouvre la connexion de l’agent dans une fenêtre de terminal ; suis ses étapes.')
               : t('Se connecter, Reconnecter : ouvre la connexion officielle dans ton navigateur. Le QG ne voit jamais ton mot de passe ni ton jeton.'),
         codex && !cle ? t('Par code d’appareil : si la page de connexion ne s’ouvre pas, tu saisis un code sur la page ChatGPT (à activer dans les paramètres de sécurité ChatGPT).') : null,
+        codex && c.bacASable ? t('Préparer le bac à sable : Codex lance les commandes de ses agents dans un espace isolé. Sur Windows, pour qu’il ne puisse jamais lire tes fichiers de connexion ni tes réglages, cet espace se prépare une fois, en administrateur : Windows te demande ton accord, une fenêtre travaille quelques secondes puis se ferme. Sans cette préparation, les tâches Codex ne démarrent pas.') : null,
         c.connecte && !cle && !acp ? t('Déconnecter : ferme la connexion de ce compte sur ce PC. Une tâche qui en a encore besoin attend que tu le reconnectes : ce compte se met en pause, ou tout le QG (selon Réglages › Priorités › Limite d’usage).') : null,
         c.id !== S.compteDefaut ? t('Par défaut : ce compte est choisi d’avance en bas de l’écran pour tes nouvelles demandes.') : t('Ce compte est celui par défaut : il est choisi d’avance en bas de l’écran pour tes nouvelles demandes.'),
         c.connecte && !acp ? t('Lire les limites : relit ce qu’il reste de ton forfait, sans dépenser de tokens.') : null,
@@ -480,9 +483,12 @@ export class Parametres {
         h('div', { class: 'meta' }, [cle ? t('clé API') : t('abonnement'), c.abonnement, c.email, c.partage ? t('partagé avec Claude Code sur ce PC') : null].filter(Boolean).join(' · ')),
         h('div', { class: 'meta' }, h('code', {}, c.dossier || '')),
         codex && refuses.length ? h('div', { class: 'meta' }, t('Profils refusés sur ce compte : {profils} (Codex ne peut pas demander ton accord action par action).', { profils: refuses.join(', ') })) : null,
+        codex && c.bacASable === 'a-preparer' ? h('div', { class: 'meta st-ko' }, t('Bac à sable à préparer : sans lui, les tâches Codex ne démarrent pas sur ce PC (bouton « Préparer le bac à sable »).')) : null,
+        codex && c.bacASable === 'pret' ? h('div', { class: 'meta' }, t('Bac à sable de Codex prêt.')) : null,
         acp ? h('div', { class: 'meta' }, t('Agent ACP : le QG répond à chacune de ses demandes (fichiers, commandes, permissions) ; profil ops et mode prudent refusés. Pas encore qualifié par le QG : à essayer d’abord sur un petit projet.')) : null,
         h('div', { class: 'boutons' },
           cle || (acp && !agentAcp) ? null : action(c.connecte ? t('Reconnecter') : t('Se connecter'), 'connecter', { ok: acp ? t('Une fenêtre de connexion s’est ouverte : suis les étapes de l’agent.') : t('Une fenêtre de connexion s’est ouverte : suis les étapes dans ton navigateur.'), titre: acp ? t('Ouvre la connexion de l’agent dans une fenêtre de terminal') : codex ? t('Ouvre la connexion officielle de Codex (navigateur)') : t('Ouvre la connexion officielle de Claude Code (navigateur)'), ok1: !c.connecte }),
+          codex && c.bacASable === 'a-preparer' ? action(t('Préparer le bac à sable'), 'bac-a-sable', { ok: t('Windows te demande ton accord : clique sur « Oui ». Une fenêtre fait la préparation, puis se ferme.'), titre: t('Préparation unique du bac à sable de Codex, en administrateur'), ok1: true }) : null,
           codex && !cle ? action(t('Par code d’appareil'), 'connecter', { corps: { mode: 'code' }, ok: t('Une fenêtre s’est ouverte : saisis le code affiché sur la page ChatGPT.'), titre: t('Si la page de connexion ne s’ouvre pas : connexion par code (à activer dans les paramètres de sécurité ChatGPT)') }) : null,
           c.connecte && !cle && !acp ? action(t('Déconnecter'), 'deconnecter', { confirmer: t('Déconnecter {nom} ? Les tâches qui en ont encore besoin attendront que tu le reconnectes.', { nom: c.nom }) }) : null,
           c.id !== S.compteDefaut ? action(t('Par défaut'), 'modifier', { corps: { defaut: true }, titre: t('Compte choisi par défaut pour les nouvelles demandes') }) : null,
@@ -794,6 +800,7 @@ export class Parametres {
       ...titreI('dossiers-etages', t('Étages'), [
         t('Un étage = un projet de l’immeuble, avec ses agents. « en service » décoché : le DG ne s’en sert plus, mais rien n’est effacé.'),
         t('Fiche du projet : ce que le DG sait du projet avant de planifier. Documents .md : les fichiers .md écrits par les agents. Dossiers… : les dossiers ouverts aux agents de cet étage ; le premier est leur dossier de travail.'),
+        t('Décor : l’apparence de l’étage dans l’immeuble, au choix. Il change tout de suite et ne touche ni au type du projet ni aux outils des agents.'),
         exempleAide(t('un jeu dont le code est dans D:\\Dev\\Jeu et les images dans D:\\Art\\Jeu : un seul étage, avec ces deux dossiers.')),
       ]),
       h('div', { class: 'param-ajout' },
@@ -822,10 +829,14 @@ export class Parametres {
     // Étages qui font partie de l'immeuble : ni désactivables ni retirables.
     const fixe = ['direction', 'salle-pause', 'salle-repos'].includes(e.id);
     const actif = h('input', { type: 'checkbox', checked: e.actif, disabled: fixe ? true : null, on: { change: (ev) => this.poster('/api/etages/' + encodeURIComponent(e.id) + '/modifier', { actif: ev.target.checked }) } });
+    const decor = e.projet && !fixe ? h('select', { class: 'champ', 'aria-label': t('Décor'), title: t('Apparence de l’étage, sans changer son type'), on: { change: (ev) => this.poster('/api/etages/' + encodeURIComponent(e.id) + '/modifier', { decor: ev.target.value }, t('Décor changé.')) } },
+      h('option', { value: '', selected: e.decor ? null : true }, t('Décor : celui du type')),
+      ...Object.entries(DECORS).map(([k, lib]) => h('option', { value: k, selected: e.decor === k ? true : null }, t('Décor : {decor}', { decor: t(lib) })))) : null;
     return h('div', { class: 'param-etage' + (e.actif ? '' : ' inactif') },
       h('div', { class: 'param-etage-tete' },
         nom,
         h('span', { class: 'badge' }, e.libelleType || t(TYPES_PROJET[e.type] || e.type)),
+        decor,
         h('label', { class: 'param-case', title: t('Un étage inactif n’existe plus pour le DG') }, actif, ' ', t('en service'))),
       h('div', { class: 'meta' }, h('code', {}, (e.dossiers || [e.projet]).filter(Boolean).join(' + ') || '—')),
       h('div', { class: 'boutons' },

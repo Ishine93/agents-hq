@@ -417,7 +417,7 @@ export class Interface {
     const e = this.store.etage(this.etageId);
     $('#etage-nom').textContent = e ? e.nom : '—';
     $('#etage-ordre').textContent = e ? libOrdre(e.ordre) : '';
-    $('#etage-ordre').style.background = e ? COUL_TYPE[e.type] || '#888' : '#888';
+    $('#etage-ordre').style.background = e ? COUL_TYPE[e.decor || e.type] || '#888' : '#888';
     const liste = this.etagesTries();
     const i = liste.findIndex((x) => x.id === this.etageId);
     $('#etage-haut').disabled = i <= 0;
@@ -470,7 +470,7 @@ export class Interface {
         title: tr('Aller à {etage}', { etage: e.nom }),
         on: { click: () => this.allerEtage(e.id) },
       },
-      h('span', { class: 'ordre', style: { background: COUL_TYPE[e.type] || '#888' } }, libOrdre(e.ordre)),
+      h('span', { class: 'ordre', style: { background: COUL_TYPE[e.decor || e.type] || '#888' } }, libOrdre(e.ordre)),
       h('span', { class: 'nom' }, e.nom),
       m.dg ? h('span', { class: 'dg', title: nomDg ? tr('{nom}, le DG, est ici', { nom: nomDg }) : tr('le DG est ici') }, S.nomDg()) : null,
       etageJoy(S, now) === e.id ? h('span', { class: 'joy', title: tr('{nom}, le happiness manager, est ici', { nom: S.nomJoy() }) }, '😊') : null,
@@ -537,15 +537,34 @@ export class Interface {
   }
 
   // Une fois par chargement : une version plus récente est-elle publiée ? (rien en maquette)
+  // À l'ouverture du site, puis quand le serveur trouve une version (il regarde toutes les 3 h) : un message
+  // avec « Installer », une fois par version dans cette page.
   async verifierMaj() {
     if (MAQUETTE) return;
     try {
       const m = await api('/api/maj');
       this.parametres.majInfo = m;
-      if (m.disponible && !m.dev) this.toast('info', tr('Mise à jour {version} disponible : Réglages › À propos.', { version: m.derniere }));
+      if (m.disponible && !m.dev) this.proposerMaj(m.derniere);
     } catch {
       /* hors ligne : on ne dit rien */
     }
+  }
+
+  proposerMaj(version) {
+    if (this.majProposee === version) return;
+    this.majProposee = version;
+    this.toast('info', tr('Mise à jour {version} disponible.', { version }), {
+      duree: 60000,
+      bouton: [tr('Installer'), async () => {
+        if (!window.confirm(tr('Mettre à jour en version {version} ? Le QG va se fermer, se mettre à jour et se relancer tout seul (environ une minute). Les dossiers en cours sont enregistrés et reprendront.', { version }))) return;
+        try {
+          await api('/api/maj/lancer', {});
+          this.toast('info', tr('Mise à jour vers la version {version} en cours : le QG se ferme, se met à jour et se relance. Cette page se rechargera toute seule.', { version }), { duree: 60000 });
+        } catch (e) {
+          this.toast('erreur', e.message);
+        }
+      }],
+    });
   }
 
   // ---------- documents ----------
@@ -2271,6 +2290,7 @@ export class Interface {
     if (ev.type === 'alerte') {
       this.toast(ev.niveau || 'info', ev.texte || '');
     }
+    if (ev.type === 'maj' && ev.version) this.proposerMaj(ev.version);
     if (ev.type !== 'outil' && ev.type !== 'activite' && ev.type !== 'message') {
       for (const id of S.etagesDe(ev)) {
         if (id === this.etageId) continue;
@@ -2356,7 +2376,7 @@ export class Interface {
       if (id) this.allerEtage(id, { force: true });
     } else {
       const avant = this.dir.etage || {};
-      if (avant.nom !== cour.nom || avant.type !== cour.type || avant.ordre !== cour.ordre) {
+      if (avant.nom !== cour.nom || avant.type !== cour.type || avant.decor !== cour.decor || avant.ordre !== cour.ordre) {
         this.moteur.changerEtage(() => this.dir.setEtage(this.etageId), 0);
       }
     }

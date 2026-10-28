@@ -7,9 +7,10 @@ import path from 'node:path';
 import { RACINE, modifierReglages, racines, sous, etage as trouverEtage, fiche } from './config.js';
 import { patchTelephone, envoyerEssai } from './telephone.js';
 import * as plateforme from './plateforme.js';
-import { emettre, comptesPublics, reglagesPublics, etagesPublics, modelesPublics, mcpPublic } from './bus.js';
-import { ajouterCompte, modifierCompte, supprimerCompte, ouvrirConnexion, deconnecter, trouverCompte, compteConnecte, verifierConnexion, fichierConnexion, fournisseur as fournisseurDuCompte, adaptateur as adaptateurDuCompte } from './comptes.js';
+import { emettre, comptesPublics, reglagesPublics, etagesPublics, modelesPublics, mcpPublic, alerte } from './bus.js';
+import { ajouterCompte, modifierCompte, supprimerCompte, ouvrirConnexion, deconnecter, trouverCompte, compteConnecte, verifierConnexion, fichierConnexion, fournisseur as fournisseurDuCompte, adaptateur as adaptateurDuCompte, chargerComptes, dossierConfig } from './comptes.js';
 import { installerCodex, etatInstallation as etatInstallationCodex } from './ia/codex-installation.js';
+import { preparer as preparerCodex, etat as etatBacASable } from './ia/codex-bac-a-sable.js';
 import { listerProjets, ajouterEtage, modifierEtage, retirerEtage, ignorerProjet, marquerSignales, TYPES as TYPES_PROJET } from './detection.js';
 import { personnalisation, modifierPersonnalisation, renommerPersonnage } from './equipe.js';
 import { stockComplet, remplacerStock, importerStock, analyserImport, exporter, langueChangee } from './bonheur.js';
@@ -26,6 +27,33 @@ import { convertirEffort } from './ia/fournisseurs.js';
 import { prerequis, reverifier, agir } from './prerequis.js';
 
 const publierComptes = () => emettre('comptes', comptesPublics());
+
+// Codex sous Windows (1.0.9) : bac à sable élevé, préparé en administrateur. Une seule demande de Windows pour ce
+// compte et tous les autres comptes Codex encore à préparer.
+let preparationBacASable = null;
+function preparerBacASable(id) {
+  if (preparationBacASable) return;
+  const homes = [...new Set(chargerComptes().comptes
+    .filter((c) => fournisseurDuCompte(c) === 'codex' && (c.id === id || etatBacASable(dossierConfig(c)) === 'a-preparer'))
+    .map((c) => dossierConfig(c)))];
+  if (!homes.length) return;
+  const messages = {
+    compte: t('Préparation du bac à sable de Codex pour {dossier}…'),
+    echec: t('La préparation a échoué : lis le message ci-dessus, puis réessaie depuis Réglages › Comptes IA.'),
+    fermer: t('Entrée pour fermer'),
+    absent: t('Codex introuvable sur ce PC (Réglages › Comptes IA › Installer Codex).'),
+  };
+  preparationBacASable = preparerCodex(homes, { messages })
+    .then((r) => {
+      if (r.ok) alerte('info', t('Bac à sable de Codex prêt : ses tâches peuvent démarrer.'));
+      else alerte('erreur', r.refuse ? t('Préparation annulée : Windows n’a pas reçu ton accord.') : t('Le bac à sable de Codex n’est pas prêt : la fenêtre d’administration a affiché la raison.'));
+    })
+    .catch((e) => alerte('erreur', e.message))
+    .finally(() => {
+      preparationBacASable = null;
+      publierComptes();
+    });
+}
 const publierReglages = () => emettre('reglages', { reglages: reglagesPublics() });
 const publierEtages = () => emettre('etages', { etages: etagesPublics() });
 
@@ -419,8 +447,12 @@ export async function routesReglages(req, res, chemin, ctx) {
       publierComptes();
       return json(res, 200, { compte: c, connexion }), true;
     }
-    if ((m = chemin.match(/^\/api\/comptes\/([a-z0-9_-]+)\/(connecter|deconnecter|modifier|supprimer|limites)$/))) {
+    if ((m = chemin.match(/^\/api\/comptes\/([a-z0-9_-]+)\/(connecter|deconnecter|modifier|supprimer|limites|bac-a-sable)$/))) {
       const id = m[1];
+      if (m[2] === 'bac-a-sable') {
+        if (!ctx.demo) preparerBacASable(id);
+        return json(res, 200, comptesPublics()), true;
+      }
       if (m[2] === 'connecter') {
         ouvrirConnexion(id, { mode: corps.mode === 'code' ? 'code' : 'navigateur' });
         surveillerConnexion(id);
@@ -436,7 +468,7 @@ export async function routesReglages(req, res, chemin, ctx) {
     // --- étages
     if ((m = chemin.match(/^\/api\/etages\/([^/]+)\/(modifier|retirer)$/))) {
       const id = decodeURIComponent(m[1]);
-      const e = m[2] === 'retirer' ? retirerEtage(id) : modifierEtage(id, { nom: corps.nom, actif: corps.actif, fiche: corps.fiche, dossiers: corps.dossiers });
+      const e = m[2] === 'retirer' ? retirerEtage(id) : modifierEtage(id, { nom: corps.nom, actif: corps.actif, fiche: corps.fiche, dossiers: corps.dossiers, decor: corps.decor });
       return json(res, 200, { etage: e, etages: etagesPublics() }), true;
     }
 

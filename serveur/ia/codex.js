@@ -19,6 +19,7 @@ export { ROLES_LECTURE, PROFILS_LECTURE, profilDemande } from './commun.js';
 import { chargerEquivalences, convertirModele, convertirEffort } from './fournisseurs.js';
 import { lireStructure, consigneRelance, RELANCES_STRUCTURE } from './schema.js';
 import { t } from '../i18n.js';
+import * as bacASable from './codex-bac-a-sable.js';
 
 export const id = 'codex';
 export const nom = 'ChatGPT · Codex';
@@ -173,6 +174,7 @@ function mcpCodex(def) {
 let compteurSessions = 0;
 const classerErreur = (message) => {
   const m = String(message || '');
+  if (bacASable.ERREUR_BAC_A_SABLE.test(m)) return 'bac_a_sable'; // Windows : préparation en administrateur à faire
   if (/not logged in|unauthori[sz]ed|\b401\b|invalid api key|incorrect api key|authentication|login required|please log ?in/i.test(m)) return 'authentication_failed';
   if (/usage[_ ]limit|rate[_ ]?limit|\b429\b|too many requests|quota exceeded/i.test(m)) return 'rate_limit';
   if (/billing|insufficient[_ ]quota|payment required|\b402\b/i.test(m)) return 'billing_error';
@@ -262,6 +264,8 @@ export async function lancer({ prompt, images = [], options = {}, compte, compte
     ['default_permissions', 'qg'],
     ['permissions.qg', table],
     ['shell_environment_policy', { inherit: 'all', exclude: EXCLUSIONS_ENV }],
+    // Windows : bac à sable élevé une fois préparé (il ferme les secrets en lecture ; l'ordinaire ne sait pas)
+    ...(bacASable.etat(env.CODEX_HOME) === 'pret' ? [['windows.sandbox', 'elevated']] : []),
     ...(jeton ? [['mcp_servers.qg', { url: adresse, bearer_token_env_var: 'QG_MCP_JETON', required: true, tool_timeout_sec: 86400 }]] : []),
     ...(lectureSeule ? [] : Object.entries(demande.mcp || {}).filter(([n]) => n !== 'qg' && /^[A-Za-z0-9_-]+$/.test(n)).map(([n, d]) => [`mcp_servers.${n}`, mcpCodex(d)]).filter(([, v]) => v)),
   ];
@@ -287,6 +291,7 @@ export async function lancer({ prompt, images = [], options = {}, compte, compte
     sortie.exception = String(message).slice(0, 2000);
     const e = classerErreur(message);
     if (e) sortie.erreur = e;
+    if (e === 'bac_a_sable') sortie.exception = t('Codex ne peut pas démarrer sur ce PC : son bac à sable Windows se prépare une fois, en administrateur (Réglages › Comptes IA › « Préparer le bac à sable »). Détail : {detail}', { detail: String(message).slice(-200) }); // la fin dit ce que le bac à sable refuse
     if (e === 'rate_limit') sortie.limite = { resetsAt: reinitDe(message), type: 'codex' };
   };
   const modifPour = (change) => {

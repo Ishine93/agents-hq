@@ -100,7 +100,6 @@
   "{ref} annulée.": "{ref} cancelled.",
   "Cette tâche n'attend pas ta validation.": "This task isn't waiting for your approval.",
   "Refusée par toi.": "Rejected by you.",
-  "Le DG n'a pas pu décider ({raison}) : les tâches en échec restent en échec.": "The CEO couldn't decide ({raison}): failed tasks stay failed.",
   "{resume} (accepté par le DG)": "{resume} (accepted by the CEO)",
   "Nouvelles tâches du DG refusées : {erreurs}": "The CEO's new tasks were rejected: {erreurs}",
   "Sautée : {taches} en échec.": "Skipped: {taches} failed.",
@@ -708,5 +707,19 @@
   "Ouvre le QG pour répondre.": "Open the HQ to answer.",
   "Dossier {id}": "Case {id}",
   "Essai réussi : ton téléphone recevra les alertes du QG.": "Test sent: your phone will receive the HQ alerts.",
-  "Envoi impossible : vérifie ta connexion Internet et l’adresse du serveur.": "Could not send: check your Internet connection and the server address."
+  "Envoi impossible : vérifie ta connexion Internet et l’adresse du serveur.": "Could not send: check your Internet connection and the server address.",
+  "Le DG n'a pas pu décider ({raison}) : nouvel essai dans {min} min.": "The CEO couldn't decide ({raison}): trying again in {min} min.",
+  "Le DG n'a pas pu décider ({raison}) : les tâches en échec restent en échec. Écris-lui (par exemple « reprends ») pour qu'il réessaie.": "The CEO couldn't decide ({raison}): failed tasks stay failed. Write to the CEO (for example “resume”) so it tries again.",
+  "Le DG est bloqué sur le dossier {id}": "The CEO is stuck on case {id}",
+  "Écris-lui pour qu’il reprenne.": "Write to the CEO so it resumes.",
+  "Préparation du bac à sable de Codex pour {dossier}…": "Setting up the Codex sandbox for {dossier}…",
+  "La préparation a échoué : lis le message ci-dessus, puis réessaie depuis Réglages › Comptes IA.": "The setup failed: read the message above, then try again from Settings › AI accounts.",
+  "Entrée pour fermer": "Enter to close",
+  "Codex introuvable sur ce PC (Réglages › Comptes IA › Installer Codex).": "Codex not found on this PC (Settings › AI accounts › Install Codex).",
+  "Bac à sable de Codex prêt : ses tâches peuvent démarrer.": "Codex sandbox ready: its tasks can start.",
+  "Préparation annulée : Windows n’a pas reçu ton accord.": "Setup cancelled: Windows did not get your permission.",
+  "Le bac à sable de Codex n’est pas prêt : la fenêtre d’administration a affiché la raison.": "The Codex sandbox is not ready: the administrator window showed why.",
+  "décor inconnu": "unknown decor",
+  "La dictée locale ne trouve plus son Python (QG déplacé ou copié depuis un autre PC) : relance {script} pour la réparer.": "Local dictation can no longer find its Python (HQ moved or copied from another PC): run {script} again to repair it.",
+  "Codex ne peut pas démarrer sur ce PC : son bac à sable Windows se prépare une fois, en administrateur (Réglages › Comptes IA › « Préparer le bac à sable »). Détail : {detail}": "Codex cannot start on this PC: its Windows sandbox needs a one-time setup, as administrator (Settings › AI accounts › “Set up the sandbox”). Details: {detail}"
 }

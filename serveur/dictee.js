@@ -7,6 +7,7 @@ import path from 'node:path';
 import readline from 'node:readline';
 import { RACINE, REGLAGES, etages } from './config.js';
 import * as plateforme from './plateforme.js';
+import { t } from './i18n.js';
 
 // venv\Scripts\python.exe sur Windows, venv/bin/python ailleurs (l'installation Mac n'existe pas encore)
 const PYTHON = plateforme.pythonVenv(path.join(RACINE, 'runtime', 'dictee', 'venv'));
@@ -54,9 +55,18 @@ function demarrer() {
       if (r.erreur) a.reject(new Error(r.erreur));
       else a.resolve(r);
     });
-    processus.stderr.on('data', (d) => process.stderr.write(String(d)));
+    let sortieErreur = '';
+    processus.stderr.on('data', (d) => {
+      sortieErreur = (sortieErreur + String(d)).slice(-2000);
+      if (!/trampoline/i.test(sortieErreur)) process.stderr.write(String(d));
+    });
     processus.on('exit', (code) => {
       etatDictee.erreur = `processus de dictée arrêté (code ${code})`;
+      // QG déplacé ou copié depuis un autre PC : le Python de la dictée pointe vers l'ancien emplacement
+      if (/trampoline/i.test(sortieErreur)) {
+        etatDictee.erreur = t('La dictée locale ne trouve plus son Python (QG déplacé ou copié depuis un autre PC) : relance {script} pour la réparer.', { script: plateforme.script('installer-dictee') });
+        console.warn(etatDictee.erreur);
+      }
       for (const a of attentes.values()) a.reject(new Error(etatDictee.erreur));
       attentes.clear();
       processus = null;

@@ -195,7 +195,7 @@ async function appeler(prompt, schema, modele, role) {
   const q = query({
     prompt,
     options: {
-      model: modele, effort: 'low', maxTurns: 2, tools: [], allowedTools: [], settingSources: [], permissionMode: 'dontAsk',
+      model: modele, effort: 'low', maxTurns: 3, tools: [], allowedTools: [], settingSources: [], permissionMode: 'dontAsk',
       strictMcpConfig: true, mcpServers: {}, persistSession: false, cwd: path.join(RACINE, 'runtime'), env: envPour(compte),
       outputFormat: { type: 'json_schema', schema },
     },
@@ -217,7 +217,7 @@ async function appelerAutreIa(amb, prompt, schema, role) {
     compte: amb.compte,
     conso: { role, etage: 'hall' },
     options: {
-      ...(amb.modele ? { model: amb.modele } : {}), effort: 'low', maxTurns: 2, tools: [], settingSources: [], permissionMode: 'dontAsk',
+      ...(amb.modele ? { model: amb.modele } : {}), effort: 'low', maxTurns: 3, tools: [], settingSources: [], permissionMode: 'dontAsk',
       strictMcpConfig: true, mcpServers: {}, persistSession: false, cwd, outputFormat: { type: 'json_schema', schema },
     },
     demande: { role: 'utilitaire', profil: 'lecture', cwd, consignes: '', schema, titre: 'QG mini-jeu' },

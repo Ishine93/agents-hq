@@ -55,6 +55,7 @@ export function profilCodex(profil, { cwd, dossiersSup = [], pieces = null, comp
   const ecrit = PROFILS_ECRITURE.has(profil) && profil !== 'ops';
   const fs = {};
   fs[':root'] = 'read';
+  const ecrivables = ecrit ? [cwd, ...dossiersSup, pieces].filter(Boolean).map(cheminToml) : [];
   if (ecrit) {
     fs[':tmpdir'] = 'write';
     for (const d of [cwd, ...dossiersSup].filter(Boolean)) {
@@ -65,7 +66,11 @@ export function profilCodex(profil, { cwd, dossiersSup = [], pieces = null, comp
     if (pieces) fs[cheminToml(pieces)] = 'write';
   }
   const qg = cheminToml(racine);
-  fs[qg] = 'read'; // I3 : le code du QG n'est jamais modifiable, même sous une racine
+  // I3 : le code du QG n'est jamais modifiable, même sous une racine. Hors d'un dossier écrivable, « :root » le
+  // couvre déjà : une règle « read » de plus au-dessus d'un dossier écrivable (les pièces jointes sont dans le QG)
+  // empêche le bac à sable Windows de Codex de démarrer.
+  const bas = qg.toLowerCase(); // Windows et Mac : chemins sans casse (au pire, une règle de plus)
+  if (ecrivables.some((d) => bas === d.toLowerCase() || bas.startsWith(d.toLowerCase() + '/'))) fs[qg] = 'read';
   fs[`${qg}/config`] = 'deny'; // I2 : réglages, comptes, clés
   fs[`${qg}/runtime/jeton.txt`] = 'deny';
   const liste = comptes || chargerComptes().comptes;

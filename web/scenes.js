@@ -880,7 +880,7 @@ export class Directeur {
     const etage = S.etage(id) || { id, nom: id, type: 'hall', ordre: 0 };
     this.etageId = id;
     this.etage = etage;
-    this.carte = construireCarte(etage.type);
+    this.carte = construireCarte(etage.decor || etage.type); // décor choisi (Réglages › Étages), sinon celui du type
     this.couche = construireCouche(this.carte, etage);
     // cases des places connues : les places « debout » improvisées les évitent si possible
     const sp = this.carte.spots;

@@ -8,7 +8,7 @@ import { tronquer } from './ia/commun.js';
 export { cibleOutil, modificationDe } from './ia/commun.js';
 
 // Erreurs qui doivent tout arrêter plutôt que réessayer.
-export const ERREURS_FATALES = new Set(['authentication_failed', 'billing_error', 'profil_refuse', 'role_non_pris_en_charge', 'binaire_absent']);
+export const ERREURS_FATALES = new Set(['authentication_failed', 'billing_error', 'profil_refuse', 'role_non_pris_en_charge', 'binaire_absent', 'bac_a_sable']);
 
 /**
  * @param compte identifiant du compte (sinon le compte par défaut)
@@ -26,7 +26,7 @@ export async function executerSession(args) {
 // Raison lisible d'un échec de session.
 export function raisonEchec(s) {
   // refus d'un fournisseur (profil, rôle, binaire) : la raison lisible est dans l'exception
-  if (s.erreur && s.exception && ['profil_refuse', 'role_non_pris_en_charge', 'binaire_absent'].includes(s.erreur)) return tronquer(s.exception, 200);
+  if (s.erreur && s.exception && ['profil_refuse', 'role_non_pris_en_charge', 'binaire_absent', 'bac_a_sable'].includes(s.erreur)) return tronquer(s.exception, 400);
   if (s.erreur) return s.erreur;
   if (s.exception) return tronquer(s.exception, 200);
   if (!s.result) return 'session sans résultat';

@@ -57,6 +57,13 @@ $env:UV_CACHE_DIR = Join-Path $Dictee 'cache'
 
 # ------------------------------------------------------------------ Python et bibliothèques
 Etape 'Python 3.12 et faster-whisper'
+# QG déplacé ou copié depuis un autre PC : le Python de l'environnement pointe vers l'ancien chemin et ne démarre
+# plus. On le refait (les bibliothèques déjà téléchargées restent dans le cache).
+$ancien = Join-Path $Venv 'Scripts\python.exe'
+if (Test-Path $ancien) {
+  & $ancien -c 'print(1)' *> $null
+  if ($LASTEXITCODE -ne 0) { Write-Host '  environnement Python d''un autre emplacement : on le refait'; Remove-Item -Recurse -Force $Venv }
+}
 if (-not (Test-Path (Join-Path $Venv 'Scripts\python.exe'))) {
   & $uv venv $Venv --python 3.12
   if ($LASTEXITCODE -ne 0) { Echec 'création de l''environnement Python impossible.' }

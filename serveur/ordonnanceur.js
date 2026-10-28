@@ -44,6 +44,10 @@ const controleurs = new Map(); // tacheId → AbortController
 // garantit qu'elles ne touchent pas les mêmes fichiers) ; un autre dossier attend que le projet se libère.
 const verrous = new Map();
 const reveils = new Map(); // dossierId → { evenements, minuterie }
+// Réveil du DG en échec (réseau pas encore revenu après une veille du PC, session coupée…) : nouvel essai après
+// ces délais, puis une notification te demande de lui écrire. (QG_DELAIS_REVEIL_DG : délais d'essai, en ms)
+const DELAIS_REVEIL_DG = (process.env.QG_DELAIS_REVEIL_DG || '60000,300000,900000').split(',').map(Number);
+const essaisReveil = new Map(); // dossierId → réveils ratés d'affilée
 const dgOccupe = new Set(); // dossiers dont le DG travaille
 const canaux = new Map(); // tacheId → { injecter(texte) } tant que sa session productrice tourne
 let minuteriePause = null;
@@ -1463,8 +1467,24 @@ async function lancerReveil(d) {
     return;
   }
   if (res.echec) {
-    message(d.id, 'systeme', tr("Le DG n'a pas pu décider ({raison}) : les tâches en échec restent en échec.", { raison: res.echec }));
+    const essais = (essaisReveil.get(d.id) || 0) + 1;
+    if (essais <= DELAIS_REVEIL_DG.length) {
+      // les événements sont gardés (avec ceux arrivés entre-temps) : le DG les recevra au prochain essai
+      essaisReveil.set(d.id, essais);
+      const delai = DELAIS_REVEIL_DG[essais - 1];
+      message(d.id, 'systeme', tr("Le DG n'a pas pu décider ({raison}) : nouvel essai dans {min} min.", { raison: res.echec, min: Math.max(1, Math.round(delai / 60000)) }));
+      const suite = reveils.get(d.id);
+      clearTimeout(suite?.minuterie);
+      const prochain = { evenements: [...r.evenements, ...(suite?.evenements || [])], minuterie: null };
+      reveils.set(d.id, prochain);
+      prochain.minuterie = setTimeout(() => lancerReveil(d), delai);
+      return;
+    }
+    essaisReveil.delete(d.id);
+    message(d.id, 'systeme', tr("Le DG n'a pas pu décider ({raison}) : les tâches en échec restent en échec. Écris-lui (par exemple « reprends ») pour qu'il réessaie.", { raison: res.echec }));
+    notifier({ id: `RD-${d.id}`, type: 'question', titre: tr('Le DG est bloqué sur le dossier {id}', { id: d.id }), texte: tr('Écris-lui pour qu’il reprenne.'), dossier: d.id, etage: etageDg(d) || 'direction' });
   } else {
+    essaisReveil.delete(d.id);
     appliquerDelta(d, res.sortie);
   }
   for (const t of tachesDe(d)) {

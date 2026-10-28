@@ -3,6 +3,7 @@
 // (prompt, dépendances détaillées, sessions…) qui n'est jamais envoyé au site.
 import fs from 'node:fs';
 import { etatInstallation as etatInstallationCodex } from './ia/codex-installation.js';
+import { etat as etatBacASable } from './ia/codex-bac-a-sable.js';
 import path from 'node:path';
 import os from 'node:os';
 import { RACINE, REGLAGES, etages, racines } from './config.js';
@@ -119,6 +120,8 @@ export function comptesPublics() {
         partage: f === 'claude' && plateforme.memeChemin(dossierConfig(c), path.join(os.homedir(), '.claude')),
         // agent ACP du compte (grok, cursor… ou personnalise)
         ...(f === 'acp' ? { agent: cap.agent, qualification: cap.qualification } : {}),
+        // Codex sous Windows : bac à sable élevé préparé ('pret') ou non ('a-preparer') ; null ailleurs
+        ...(f === 'codex' ? { bacASable: etatBacASable(dossierConfig(c)) } : {}),
         // ce que le fournisseur garantit (profils, mode prudent…), résumé pour le site
         capacites: { profils: cap.profils, modePrudent: cap.modePrudent, fork: cap.fork, sessionsParCompte: cap.sessionsParCompte, compaction: cap.compaction !== false, plafondBudget: cap.plafondBudget !== false, sousAgents: cap.sousAgents !== false, filtreTests: cap.filtreTests !== false, modeles: cap.modeles !== false, effort: cap.effort !== false },
       };
@@ -168,8 +171,8 @@ export function reglagesPublics() {
 // Les étages livrés gardent leur nom traduit tant que tu ne les as pas renommés.
 const NOMS_LIVRES = new Set(['Direction', 'Bac à sable', 'Hall', 'Salle de pause', 'Salle de repos', 'Sous-sol serveurs', "Bureau d'études", 'Atelier 3D', 'Studio vidéo']);
 export const etagesPublics = () =>
-  etages().map(({ id, nom, type, libelleType, ordre, projet, actif, dossiers }) => ({
-    id, nom: NOMS_LIVRES.has(nom) ? t(nom) : nom, type, ...(libelleType ? { libelleType } : {}), ordre, projet, actif: !!actif, dossiers: dossiers || (projet ? [projet] : []),
+  etages().map(({ id, nom, type, libelleType, decor, ordre, projet, actif, dossiers }) => ({
+    id, nom: NOMS_LIVRES.has(nom) ? t(nom) : nom, type, ...(libelleType ? { libelleType } : {}), ...(decor ? { decor } : {}), ordre, projet, actif: !!actif, dossiers: dossiers || (projet ? [projet] : []),
   }));
 
 // Modèles proposables par compte (pour le sélecteur du DG dans le site).

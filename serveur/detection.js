@@ -38,6 +38,9 @@ export const TYPES = {
   web: 'Projet web / Node', python: 'Projet Python', projet: 'Projet',
 };
 
+// Décors qu'un étage de projet peut prendre à la place de celui de son type (Réglages › Étages, 1.0.9).
+export const DECORS = ['etudes', 'atelier3d', 'unreal', 'roblox', 'bac'];
+
 export function typeDe(dir) {
   const a = (f) => fs.existsSync(path.join(dir, f));
   let fichiers = [];
@@ -218,7 +221,7 @@ export function ajouterEtage(dir, { nom = null, type: typeVoulu = null, libelleT
 }
 
 // Renommer, activer ou désactiver un étage, modifier sa fiche ou ses dossiers (Réglages › Étages).
-export function modifierEtage(id, { nom, actif, fiche, dossiers } = {}) {
+export function modifierEtage(id, { nom, actif, fiche, dossiers, decor } = {}) {
   const brut = lireEtages();
   const e = brut.etages.find((x) => x.id === id);
   if (!e) throw new Error(t('étage inconnu'));
@@ -237,6 +240,12 @@ export function modifierEtage(id, { nom, actif, fiche, dossiers } = {}) {
   }
   if (nom !== undefined) e.nom = String(nom).trim().slice(0, 40) || e.nom;
   if (actif !== undefined && !['direction', 'hall', 'salle-pause', 'salle-repos'].includes(id)) e.actif = !!actif;
+  if (decor !== undefined) {
+    if (!e.projet) throw new Error(t("cet étage fait partie de l'immeuble"));
+    if (decor && !DECORS.includes(decor)) throw new Error(t('décor inconnu'));
+    if (decor) e.decor = decor;
+    else delete e.decor; // décor du type
+  }
   if (fiche !== undefined) {
     if (!e.fiche) e.fiche = `${id}.md`;
     fs.writeFileSync(path.join(RACINE, 'config', 'fiches', e.fiche), String(fiche).slice(0, 20000));

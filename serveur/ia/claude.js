@@ -2,6 +2,7 @@
 // et comptes.js sans changer de comportement. Les sessions tournent en mode « streaming input » : on peut
 // leur envoyer un complément en cours de route (interruption puis nouveau message, la conversation garde
 // tout son contexte). Le QG ne lit, ne copie ni ne stocke aucun jeton : seul le binaire officiel les voit.
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -123,6 +124,52 @@ export function environnement(compte, envSession = {}) {
   return env;
 }
 
+// Windows refuse de lancer un programme dont la ligne de commande dépasse 32 767 caractères (spawn ENAMETOOLONG).
+// Le SDK y met les réglages de la session (--settings) : en mode auto, les règles « demander » hors des zones,
+// une par dossier ou fichier voisin du chemin vers chaque projet, soit des milliers sous un dossier Documents
+// chargé. Ces réglages vont donc dans un fichier, nommé d'après son contenu (les sessions identiques le partagent).
+export const DOSSIER_REGLAGES = path.join(plateforme.RACINE, 'runtime', 'ia', 'reglages');
+const GARDE_REGLAGES_MS = 7 * 24 * 3600 * 1000;
+
+export function reglagesEnFichier(reglages, dossier = DOSSIER_REGLAGES) {
+  if (!reglages || typeof reglages !== 'object') return reglages;
+  const texte = JSON.stringify(reglages);
+  const fichier = path.join(dossier, `${crypto.createHash('sha256').update(texte).digest('hex').slice(0, 20)}.json`);
+  if (fs.existsSync(fichier)) {
+    const maintenant = new Date();
+    fs.utimesSync(fichier, maintenant, maintenant); // encore servi : le ménage le garde
+  } else {
+    fs.mkdirSync(dossier, { recursive: true });
+    const provisoire = `${fichier}.${process.pid}.tmp`;
+    fs.writeFileSync(provisoire, texte);
+    fs.renameSync(provisoire, fichier); // jamais lu à moitié écrit par une session voisine
+  }
+  return fichier;
+}
+
+// Ménage au démarrage : les fichiers de réglages qu'aucune session n'a servis depuis une semaine.
+export function nettoyerReglages(dossier = DOSSIER_REGLAGES, maintenant = Date.now()) {
+  let retires = 0;
+  let noms = [];
+  try {
+    noms = fs.readdirSync(dossier);
+  } catch {
+    return 0;
+  }
+  for (const nom of noms) {
+    const f = path.join(dossier, nom);
+    try {
+      if (maintenant - fs.statSync(f).mtimeMs > GARDE_REGLAGES_MS) {
+        fs.rmSync(f, { force: true });
+        retires += 1;
+      }
+    } catch {
+      /* déjà retiré */
+    }
+  }
+  return retires;
+}
+
 function messageUtilisateur(texte, blocsImages = []) {
   const content = blocsImages.length ? [...blocsImages, { type: 'text', text: texte }] : texte;
   return { type: 'user', message: { role: 'user', content }, parent_tool_use_id: null };
@@ -181,6 +228,7 @@ export async function lancer({ prompt, images = [], options, compte, compteObj =
       // Réflexion résumée (lisible) et flux partiel : nécessaires pour les pensées en direct.
       ...(surPensee ? { includePartialMessages: true, thinking: { type: 'adaptive', display: 'summarized' } } : {}),
       ...options,
+      ...(options.settings ? { settings: reglagesEnFichier(options.settings) } : {}),
       env: environnement(compteObj, { ...envSessionPour(conso.role, compteObj, { compaction }), ...(envSession || {}) }),
     },
   });

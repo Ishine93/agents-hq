@@ -7,7 +7,7 @@ import crypto from 'node:crypto';
 import os from 'node:os';
 import { RACINE, REGLAGES, utiliserImmeubleDemo, etagesActifs, racines } from './config.js';
 import * as plateforme from './plateforme.js';
-import { etat, abonner, instantane, chargerHistorique, appliquerEvenement, DOSSIERS_DIR, sauver, utiliserDossiers, emettre, modelesPublics, mcpPublic, alerte, comptesPublics, modificationsDe, archiverDossier, ressortirDossier, dossiersArchives } from './bus.js';
+import { etat, abonner, nbClients, instantane, chargerHistorique, appliquerEvenement, DOSSIERS_DIR, sauver, utiliserDossiers, emettre, modelesPublics, mcpPublic, alerte, comptesPublics, modificationsDe, archiverDossier, ressortirDossier, dossiersArchives } from './bus.js';
 import { decouvrir, decouverteEnCache } from './decouverte.js';
 import { changerMode } from './mcp.js';
 import { resoudreDecision } from './decisions.js';
@@ -42,6 +42,14 @@ import { preparerNotes, notesPubliques, marquerVues } from './notes.js';
 import { installerJournalRecent, lignesRecentes, construireRapport, personnelConnu, dernierPlantage } from './rapport.js';
 import { rechercher } from './recherche-historique.js';
 import { alerter } from './telephone.js';
+import { nettoyerReglages } from './ia/claude.js';
+
+// Le SDK prévient, à chaque session, que canUseTool ne voit pas les outils autorisés d'office (lecture, outils du
+// QG) : c'est voulu, et la répétition noyait la fenêtre du serveur. Les autres avertissements s'affichent comme avant.
+process.removeAllListeners('warning');
+process.on('warning', (w) => {
+  if (w.code !== 'CLAUDE_SDK_CAN_USE_TOOL_SHADOWED') console.warn(`(node:${process.pid}) ${w.code ? `[${w.code}] ` : ''}${w.name}: ${w.message}`);
+});
 
 // dernières lignes affichées par le serveur, gardées en mémoire pour « Signaler un problème »
 installerJournalRecent();
@@ -549,10 +557,16 @@ serveur.listen(PORT, HOTE, () => {
   for (const c of comptes) console.log(`  ${c.nom} : ${compteConnecte(c) ? 'connecté' : `non connecté (Réglages › Comptes, ou ${plateforme.script('ajouter-un-compte')})`}`);
   // fenêtre application du QG (navigateur complet) si elle est installée, sinon le navigateur habituel
   if (OUVRIR && !(REGLAGES.ouvrirEnApp !== false && ouvrirApp(lien))) plateforme.ouvrirUrl(lien);
+  if (!DEMO && !REPLAY) nettoyerReglages(); // réglages des sessions Claude (1.0.9) servis depuis plus d'une semaine
   if (REPLAY) lancerReplay();
   else ordo.reprendreDossiers(); // dossiers interrompus par un arrêt : ils repartent
   // chien de garde (1.0.8) : sessions muettes depuis trop longtemps ; serveur relancé par serveur/gardien.js
   if (!DEMO && !REPLAY) setInterval(() => ordo.surveillerSilences(), 60000).unref();
+  // mise à jour pendant que le QG tourne (1.0.9) : avant, elle n'était cherchée qu'au lancement
+  if (!DEMO && !REPLAY && !installationDev()) {
+    setTimeout(surveillerMaj, 10 * 60 * 1000).unref();
+    setInterval(surveillerMaj, INTERVALLE_MAJ_MS).unref();
+  }
   const relance = Number(process.env.QG_RELANCE_APRES_PLANTAGE) || 0;
   if (relance) {
     const texte = tr('Le QG a planté et s’est relancé tout seul : les dossiers en cours reprennent. Si ça se répète, Réglages › À propos › « Signaler un problème ».');
@@ -632,6 +646,27 @@ function portRepond(port) {
       ok(false);
     });
   });
+}
+
+// Toutes les 3 h : une nouvelle version publiée ? Mise à jour automatique cochée, aucun dossier en cours et site
+// fermé : elle s'installe comme au lancement (le QG se relance seul, sans ouvrir le navigateur). Sinon le site la
+// propose avec un bouton « Installer ».
+const INTERVALLE_MAJ_MS = Number(process.env.QG_INTERVALLE_MAJ_MS) || 3 * 3600 * 1000;
+async function surveillerMaj() {
+  let m;
+  try {
+    m = await verifierMaj({ forcer: true });
+  } catch {
+    return; // hors ligne, GitHub qui limite : on réessaiera
+  }
+  if (!m.disponible || m.dev) return;
+  const occupe = [...etat.dossiers.values()].some((d) => d.etat === 'en_cours');
+  if (REGLAGES.miseAJourAuto !== false && !occupe && nbClients() === 0) {
+    console.log(tr('Nouvelle version {version} disponible (tu as la {actuelle}) : mise à jour automatique, le QG se relance tout seul.', { version: m.derniere, actuelle: m.actuelle }));
+    lancerMaj(() => arreter(CODE_MISE_A_JOUR));
+    return;
+  }
+  emettre('maj', { version: m.derniere, actuelle: m.actuelle });
 }
 
 let arretEnCours = false;
