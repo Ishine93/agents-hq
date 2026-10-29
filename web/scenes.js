@@ -11,11 +11,21 @@ import { phraseOutil, phrase, liste as listePhrases, sujet, enumerer, blaguesSec
 import { t as tr, langueCourante } from './i18n.js';
 import {
   versArt, coinTuile, construireCouche, spriteMeuble, animerMeuble, spriteCloison, spriteAscenseur, spriteHorloge, spriteTableau,
-  ledsService, animerJeu, spriteTele, spriteCouverture, oreiller, voileNuit, programmeTele, resteProgrammeTele,
+  ledsService, animerJeu, spriteTele, spriteCouverture, oreiller, voileNuit, programmeTele, resteProgrammeTele, animeDecor,
 } from './decor.js';
 import { TERMINAUX } from './etat.js';
 
 const VITESSE = 2.3; // cases par seconde
+const ECART_FILE = 0.75; // distance entre deux avatars qui se suivent (cases)
+const ATTENTE_MAX = 1800; // au-delà, celui qui attend passe quand même (jamais de blocage)
+const DECALAGE_CROISEMENT = 0.2; // pas de côté quand deux avatars se croisent de face (cases)
+const MAX_SOUS_AGENTS = 3; // sous-agents visibles par agent (outil Agent de Claude), aux postes libres de l'étage
+const ACCUEIL_ENTRE = [22000, 45000]; // une phrase de l'accueil du hall de temps en temps (ms)
+const PHRASES_ACCUEIL = [
+  'Bonjour, bienvenue au QG !', 'QG des agents, j’écoute ?', 'Le DG est en réunion, je prends un message ?',
+  'Badge visiteur ? Je vous l’imprime.', 'Les ascenseurs sont juste là.', 'Un café en attendant ?',
+  'Je vous annonce tout de suite.', 'Signez ici, s’il vous plaît.', 'Il y a un colis pour la Direction.',
+];
 const SILENCE = 20000;
 const SILENCE_LONG = 5 * 60 * 1000;
 const COUL_RESULTAT = { done: '#3ddc5a', blocked: '#ff9a1f', failed: '#ff3b3b' };
@@ -736,6 +746,16 @@ export class Directeur {
       .sort((a, b) => Math.hypot(a.gx - j.gx, a.gy - j.gy) - Math.hypot(b.gx - j.gx, b.gy - j.gy));
   }
 
+  // Accueil du hall : de temps en temps, une phrase (au téléphone, à un visiteur imaginaire…).
+  majAccueil(now) {
+    if (!this.accueilProchain || now < this.accueilProchain) return;
+    const acc = [...this.avatars.values()].filter((a) => a.type === 'accueil');
+    this.accueilProchain = now + ACCUEIL_ENTRE[0] + Math.random() * (ACCUEIL_ENTRE[1] - ACCUEIL_ENTRE[0]);
+    if (!acc.length) return;
+    const a = acc[Math.floor(Math.random() * acc.length)];
+    this.dire(a.id, { texte: tr(PHRASES_ACCUEIL[Math.floor(Math.random() * PHRASES_ACCUEIL.length)]) }, 3600, { phrase: true, parle: true });
+  }
+
   majJoy(now) {
     const j = this.avatars.get('joy');
     if (!j || j.cat !== 'joy' || !j.arrive || j.chemin.length) return;
@@ -880,7 +900,7 @@ export class Directeur {
     const etage = S.etage(id) || { id, nom: id, type: 'hall', ordre: 0 };
     this.etageId = id;
     this.etage = etage;
-    this.carte = construireCarte(etage.decor || etage.type); // décor choisi (Réglages › Étages), sinon celui du type
+    this.carte = construireCarte(etage.type, etage.decor); // décor choisi (Réglages › Étages), sinon celui du type
     this.couche = construireCouche(this.carte, etage);
     // cases des places connues : les places « debout » improvisées les évitent si possible
     const sp = this.carte.spots;
@@ -900,6 +920,7 @@ export class Directeur {
     this.bavardageJusqua.clear();
     this.joyActe = null;
     this.joyProchain = Date.now() + 4000;
+    this.accueilProchain = Date.now() + 6000;
     const plan = this.planAffiche();
     this.tableau = { dossier: plan ? plan.dossier : null, visibles: plan ? plan.taches.length : 0, prochain: 0 };
     this.dgPlanJusqua = 0;
@@ -1186,6 +1207,8 @@ export class Directeur {
     const t = tacheId ? S.taches.get(tacheId) : null;
     let look;
     if (type === 'dg' || type === 'joy') look = this.lookSpecial(type);
+    else if (type === 'accueil') look = apparence('accueil|' + id, null, 'agent');
+    else if (type === 'sousagent') look = apparence('sous|' + id, t ? t.modele : null, 'agent');
     else if (type === 'inspecteur') {
       const v = S.verifs.get(tacheId);
       const m = (v && v.verificateur && v.verificateur.modele) || (t && t.verif && t.verif.modele) || 'opus';
@@ -1246,7 +1269,7 @@ export class Directeur {
     if (p && this.libre(p.chaise, av)) return p;
     const prefFerme = t.modele === 'opus' || t.modele === 'fable';
     const libres = postes.filter((x) => this.libre(x.chaise, av));
-    libres.sort((a, b) => (prefFerme ? (b.ferme ? 1 : 0) - (a.ferme ? 1 : 0) : (a.ferme ? 1 : 0) - (b.ferme ? 1 : 0)));
+    libres.sort((a, b) => (b.principal ? 1 : 0) - (a.principal ? 1 : 0) || (prefFerme ? (b.ferme ? 1 : 0) - (a.ferme ? 1 : 0) : (a.ferme ? 1 : 0) - (b.ferme ? 1 : 0)));
     p = libres[0];
     if (!p) {
       // tous les postes sont pris : il travaille debout, près de l'îlot (sa place à lui, pas la chaise d'un autre)
@@ -1259,6 +1282,19 @@ export class Directeur {
     }
     this.postes.set(t.id, p.cle);
     return p;
+  }
+
+  posteSousAgent(av) {
+    const postes = this.carte.spots.postes || [];
+    const libres = postes.filter((p) => !p.principal && this.libre(p.chaise, av));
+    const p = libres[av.rang % Math.max(1, libres.length)] || libres[0];
+    if (p) {
+      this.resa.set(cle(p.chaise), av.id);
+      return p;
+    }
+    const parent = this.avatars.get(av.parent);
+    const s = parent ? this.deboutLibre(av, [parent.gx, parent.gy], { rayon: 3 }) : null;
+    return s ? { cle: 'debout:' + cle(s), chaise: s } : null;
   }
 
   utiliseMachine(t, av, now) {
@@ -1353,6 +1389,14 @@ export class Directeur {
       return { cat: 'dg', spot: sp.dg.siege, cle: 'dg:siege' };
     }
     if (av.type === 'joy') return this.cibleJoy(av, now);
+    if (av.type === 'accueil') return { cat: 'accueil', spot: av.place, cle: av.id };
+    if (av.type === 'sousagent') {
+      const t = S.taches.get(av.parent);
+      if (!t || TERMINAUX.has(t.etat) || (t.sousAgents || 0) <= av.rang || !this.avatars.has(t.id)) return { cat: 'depart' };
+      if (av.spot && av.cat === 'sousagent') return { cat: 'sousagent', spot: av.spot, cle: av.cle };
+      const p = this.posteSousAgent(av);
+      return p ? { cat: 'sousagent', spot: p.chaise, cle: 'sa:' + p.cle } : { cat: 'depart' };
+    }
     if (av.type === 'reserve') {
       const a = S.equipe.get(av.agentId);
       if (!a || a.etat === 'retire') return { cat: 'depart' };
@@ -1582,6 +1626,34 @@ export class Directeur {
       if (!parAgent || !this.avatars.has(t.id) || this.avatars.has('insp:' + t.id)) continue;
       this.avatars.set('insp:' + t.id, this.nouvelAvatar('insp:' + t.id, 'inspecteur', t.id, instant));
     }
+    // 2b. sous-agents (1.0.10) : un agent qui en lance (outil Agent) les voit apparaître aux postes libres de son étage,
+    // dans un petit nuage, et disparaître quand ils ont rendu leur résultat
+    for (const t of S.taches.values()) {
+      const n = t.etage === this.etageId && !TERMINAUX.has(t.etat) && this.avatars.has(t.id) ? Math.min(t.sousAgents || 0, MAX_SOUS_AGENTS) : 0;
+      for (let i = 0; i < n; i++) {
+        const id = 'sa:' + t.id + ':' + i;
+        if (this.avatars.has(id)) continue;
+        const nv = this.nouvelAvatar(id, 'sousagent', t.id, true);
+        nv.parent = t.id;
+        nv.rang = i;
+        const v = this.cible(nv, null, now);
+        if (v.cat === 'depart') continue;
+        this.deplacer(nv, v, true);
+        nv.alpha = 0;
+        nv.fondu = 1;
+        this.effets.push({ type: 'pouf', gx: nv.gx, gy: nv.gy, t0: now });
+        this.avatars.set(id, nv);
+      }
+    }
+    // 2c. accueil du hall (1.0.10) : une ou deux personnes derrière le comptoir, toujours là
+    (this.carte.spots.accueil || []).forEach((p, i) => {
+      const id = 'acc:' + i;
+      if (this.avatars.has(id)) return;
+      const nv = this.nouvelAvatar(id, 'accueil', null, true);
+      nv.place = p;
+      this.deplacer(nv, { cat: 'accueil', spot: p, cle: id }, true);
+      this.avatars.set(id, nv);
+    });
     // 3. DG
     if (this.dgPresent(now) && !this.avatars.has('dg')) {
       const dg = this.nouvelAvatar('dg', 'dg', null, instant || S.dg.etage !== this.etageId);
@@ -1688,6 +1760,11 @@ export class Directeur {
       this.retirer(av);
       return;
     }
+    if (av.type === 'sousagent') {
+      av.fondu = -1;
+      this.effets.push({ type: 'pouf', gx: av.gx, gy: av.gy, t0: Date.now() });
+      return;
+    }
     if (av.type === 'dg' && av.visite) {
       // le DG « disparaît » de son bureau d'étage quand il n'y dispatche plus
       av.fondu = -1;
@@ -1765,6 +1842,75 @@ export class Directeur {
     }
   }
 
+  // ---------- croisements ----------
+  // Sens de marche d'un avatar (vers la prochaine case de son chemin), null s'il ne marche pas.
+  sensMarche(av) {
+    const n = av.chemin[0];
+    if (!n || av.versAsc) return null;
+    const mx = n.x + 0.5 - av.gx;
+    const my = n.y + 0.5 - av.gy;
+    const m = Math.hypot(mx, my);
+    if (m < 0.001) {
+      const s = av.chemin[1];
+      if (!s) return null;
+      const sx = s.x - n.x;
+      const sy = s.y - n.y;
+      return { x: sx, y: sy };
+    }
+    return { x: mx / m, y: my / m };
+  }
+
+  // Un autre avatar qui marche lui barre-t-il la route (même chemin, juste devant) ? Deux avatars ne marchent
+  // jamais l'un dans l'autre : on suit celui qui va dans le même sens ; à un carrefour, le premier arrivé (le plus
+  // petit identifiant) passe. Ceux qu'on croise de face ou qui sont arrêtés à leur place ne gênent pas.
+  gene(av) {
+    if (av.alpha < 0.5) return false;
+    const m = this.sensMarche(av);
+    if (!m) return false;
+    for (const o of this.avatars.values()) {
+      if (o === av || o.supprimer || o.alpha < 0.5 || o.type === 'fantome' || o.retard) continue;
+      const dx = o.gx - av.gx;
+      const dy = o.gy - av.gy;
+      const d = Math.hypot(dx, dy);
+      if (d > ECART_FILE) continue;
+      const mo = this.sensMarche(o);
+      if (!mo) continue; // arrêté (assis, à sa place) : on passe à côté
+      const meme = m.x * mo.x + m.y * mo.y;
+      if (meme < -0.5) continue; // de face : on se croise (voir ecarter)
+      if (d < 0.02) {
+        if (av.id > o.id) return true; // pile au même endroit : un seul repart
+        continue;
+      }
+      const devant = (dx * m.x + dy * m.y) / d;
+      if (devant < 0.3) continue; // à côté ou derrière
+      if (meme < 0.5 && av.id < o.id) continue; // carrefour : priorité au plus petit identifiant
+      return true;
+    }
+    return false;
+  }
+
+  // Deux avatars qui se croisent de face s'écartent chacun vers sa droite, puis reviennent au milieu.
+  ecarter(dt) {
+    const k = Math.min(1, dt / 160);
+    for (const av of this.avatars.values()) {
+      const m = this.sensMarche(av);
+      let cx = 0;
+      let cy = 0;
+      if (m) {
+        for (const o of this.avatars.values()) {
+          if (o === av || o.alpha < 0.5 || o.supprimer) continue;
+          const mo = this.sensMarche(o);
+          if (!mo || m.x * mo.x + m.y * mo.y > -0.5 || Math.hypot(o.gx - av.gx, o.gy - av.gy) > 0.9) continue;
+          cx = -m.y * DECALAGE_CROISEMENT;
+          cy = m.x * DECALAGE_CROISEMENT;
+          break;
+        }
+      }
+      av.ox = (av.ox || 0) + (cx - (av.ox || 0)) * k;
+      av.oy = (av.oy || 0) + (cy - (av.oy || 0)) * k;
+    }
+  }
+
   // ---------- boucle ----------
   maj(now, dt) {
     if (!this.carte) return;
@@ -1783,6 +1929,7 @@ export class Directeur {
     this.majBavardages(now);
     this.majJeux(now);
     this.majJoy(now);
+    this.majAccueil(now);
     for (const [id, b] of this.bulles) if (now > b.jusqua + 1000) this.bulles.delete(id);
     this.glissements = this.glissements.filter((g) => now - g.t0 < g.duree);
     for (const av of this.avatars.values()) {
@@ -1829,6 +1976,11 @@ export class Directeur {
         continue;
       }
       let reste = (VITESSE * dt) / 1000;
+      // à la queue leu leu (1.0.10) : celui de derrière attend que la voie se libère, au plus ATTENTE_MAX
+      if (av.chemin.length && this.gene(av)) {
+        av.attente = (av.attente || 0) + dt;
+        if (av.attente < ATTENTE_MAX) reste = 0;
+      } else av.attente = 0;
       while (av.chemin.length && reste > 0) {
         const n = av.chemin[0];
         const tx = n.x + 0.5;
@@ -1854,6 +2006,7 @@ export class Directeur {
       }
     }
     for (const [id, av] of this.avatars) if (av.supprimer) this.avatars.delete(id);
+    this.ecarter(dt);
     // ascenseur
     const cibleAsc = now < this.asc.jusqua ? 1 : 0;
     this.asc.ouverture += Math.sign(cibleAsc - this.asc.ouverture) * Math.min(Math.abs(cibleAsc - this.asc.ouverture), dt / 450);
@@ -1940,6 +2093,24 @@ export class Directeur {
       }
     } else if (av.type === 'inspecteur') {
       v.bras = 'clip';
+    } else if (av.type === 'sousagent') {
+      v.bras = 'taper';
+      v.frame = Math.floor((now + av.phase) / 150) % 2;
+    } else if (av.type === 'accueil') {
+      // accueil : il tape, décroche le téléphone, lit un registre
+      const cyc = (now + av.phase) % 16000;
+      if (cyc < 7000) {
+        v.bras = 'taper';
+        v.frame = Math.floor((now + av.phase) / 190) % 2;
+      } else if (cyc < 10500) {
+        v.bras = 'tel';
+        if (Math.floor((now + av.phase) / 1800) % 2) parle();
+      } else if (cyc < 13500) {
+        v.bras = 'lire';
+        v.frame = Math.floor((now + av.phase) / 900) % 2;
+        v.dossierCouleur = '#2f6fde';
+      }
+      if (av.place && av.place.dir) v.dir = av.place.dir;
     } else if (av.type === 'reserve' && av.cat === 'dodo') {
       // salle de repos : couché dans son lit, les yeux fermés (debout et somnolent s'il n'y a plus de lit)
       v.yeuxFermes = true;
@@ -2014,6 +2185,13 @@ export class Directeur {
     const s = av.spot || {};
     const ph = now + av.phase;
     v.centre = s.centre || null;
+    if (s.pose) {
+      // décor au choix (1.0.10) : la place dit la pose (bras), son rythme et l'accessoire tenu
+      v.bras = s.pose;
+      v.frame = Math.floor(ph / (s.rythme || 400)) % 2;
+      if (s.accessoire) v.accessoire = s.accessoire;
+      return;
+    }
     switch (s.activite) {
       case 'billard': {
         // chacun son tour : il vise, recule la queue, frappe ; sinon il attend appuyé sur sa queue
@@ -2301,6 +2479,11 @@ export class Directeur {
       return { texte: sel ? nj + ' · happiness manager' : nj, couleur: '#ffd23f' };
     }
     if (av.type === 'fantome') return null;
+    if (av.type === 'accueil') return { texte: tr('Accueil'), couleur: '#7fa7d9' };
+    if (av.type === 'sousagent') {
+      const p = this.store.taches.get(av.parent);
+      return { texte: tr('Sous-agent de {nom}', { nom: p ? this.store.nom(p) : '?' }), couleur: '#9aa3b5' };
+    }
     if (av.type === 'reserve') {
       const a = S.equipe.get(av.agentId);
       if (!a) return null;
@@ -2336,7 +2519,7 @@ export class Directeur {
     const carte = this.carte;
     // petites animations du décor (machines, jeux, voyants), ralenties en graphismes Léger
     const td = now * (this.vitesseDecor || 1);
-    const typeTheme = carte.type;
+    const typeTheme = carte.look || carte.type; // thème visuel (décor au choix), pas la logique de l'étage
     // --- surcouches murales ---
     const plan = carte.tableau ? this.planAffiche() : null;
     let tab = null;
@@ -2411,7 +2594,7 @@ export class Directeur {
       // un meuble de plusieurs cases se trie sur sa case la plus en avant
       const k = it.x + it.y + (it.w || 1) + (it.h || 1) - 1 - 0.02;
       const extra = [];
-      if (['baie', 'imprimante3d', 'machine_cafe', 'poste_machine', 'arcade', 'jukebox'].includes(it.type)) extra.push((g) => animerMeuble(g, it, tx, ty, td));
+      if (['baie', 'imprimante3d', 'machine_cafe', 'poste_machine', 'arcade', 'jukebox'].includes(it.type) || animeDecor(it.type)) extra.push((g) => animerMeuble(g, it, tx, ty, td));
       if (it.jeu) {
         const n = joueurs[it.jeu] || 0;
         extra.push((g) => animerJeu(g, it, tx, ty, td, it.jeu === 'billard' ? n >= 1 : n >= 2));
@@ -2465,10 +2648,10 @@ export class Directeur {
     const ordre = [...this.avatars.values()].sort((a, b) => a.gx + a.gy - (b.gx + b.gy));
     for (const av of ordre) {
       if (av.alpha <= 0.01) continue;
-      const t = av.tacheId ? S.taches.get(av.tacheId) : null;
+      const t = av.tacheId && av.type !== 'sousagent' ? S.taches.get(av.tacheId) : null;
       const v = this.visuel(av, now);
       const L = this.lookDe(av);
-      const [fx, fy] = versArt(av.gx, av.gy);
+      const [fx, fy] = versArt(av.gx + (av.ox || 0), av.gy + (av.oy || 0));
       let k = av.gx + av.gy;
       const sel = this.selection && (this.selection === av.tacheId || this.selection === av.id || (av.agentId && this.selection === 'ag:' + av.agentId && av.type === 'reserve')) && av.type !== 'inspecteur';
       const surv = this.survol === av.id;

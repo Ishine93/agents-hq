@@ -169,7 +169,7 @@ export function reglagesPublics() {
 }
 
 // Les étages livrés gardent leur nom traduit tant que tu ne les as pas renommés.
-const NOMS_LIVRES = new Set(['Direction', 'Bac à sable', 'Hall', 'Salle de pause', 'Salle de repos', 'Sous-sol serveurs', "Bureau d'études", 'Atelier 3D', 'Studio vidéo']);
+const NOMS_LIVRES = new Set(['Direction', 'Bac à sable', 'Hall', 'Salle de pause', 'Salle de repos', 'Sous-sol serveurs', "Bureau d'études", 'Atelier 3D', 'Studio vidéo', 'Isoloir']);
 export const etagesPublics = () =>
   etages().map(({ id, nom, type, libelleType, decor, ordre, projet, actif, dossiers }) => ({
     id, nom: NOMS_LIVRES.has(nom) ? t(nom) : nom, type, ...(libelleType ? { libelleType } : {}), ...(decor ? { decor } : {}), ordre, projet, actif: !!actif, dossiers: dossiers || (projet ? [projet] : []),

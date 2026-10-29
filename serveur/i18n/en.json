@@ -721,5 +721,17 @@
   "Le bac à sable de Codex n’est pas prêt : la fenêtre d’administration a affiché la raison.": "The Codex sandbox is not ready: the administrator window showed why.",
   "décor inconnu": "unknown decor",
   "La dictée locale ne trouve plus son Python (QG déplacé ou copié depuis un autre PC) : relance {script} pour la réparer.": "Local dictation can no longer find its Python (HQ moved or copied from another PC): run {script} again to repair it.",
-  "Codex ne peut pas démarrer sur ce PC : son bac à sable Windows se prépare une fois, en administrateur (Réglages › Comptes IA › « Préparer le bac à sable »). Détail : {detail}": "Codex cannot start on this PC: its Windows sandbox needs a one-time setup, as administrator (Settings › AI accounts › “Set up the sandbox”). Details: {detail}"
+  "Codex ne peut pas démarrer sur ce PC : son bac à sable Windows se prépare une fois, en administrateur (Réglages › Comptes IA › « Préparer le bac à sable »). Détail : {detail}": "Codex cannot start on this PC: its Windows sandbox needs a one-time setup, as administrator (Settings › AI accounts › “Set up the sandbox”). Details: {detail}",
+  "Rien n’est enregistré : {n} ligne(s) à corriger.": "Nothing is saved: {n} line(s) to fix.",
+  "Isoloir": "Booth",
+  "{compte} fait déjà tourner ta tâche, et un abonnement ChatGPT ne prend qu’une session à la fois": "{compte} is already running your task, and a ChatGPT subscription takes only one session at a time",
+  "modèle inconnu : {modele}": "unknown model: {modele}",
+  "effort inconnu : {effort}": "unknown effort: {effort}",
+  "{nom} finit sa réponse : ton message part juste après, dans la même conversation.": "{nom} is finishing their answer: your message goes right after, in the same conversation.",
+  "Message transmis en direct à {nom}.": "Message passed on live to {nom}.",
+  "(pas de réponse écrite)": "(no written answer)",
+  "{nom} s’est arrêté : {raison}. Écris-lui de nouveau dans ce dossier pour reprendre.": "{nom} stopped: {raison}. Write to them again in this request to resume.",
+  "Je regarde ce qui existe déjà avant de répondre.": "I’m looking at what already exists before answering.",
+  "(simulation) Voilà ce que j’ai trouvé : tout est en place, rien à changer pour l’instant.": "(simulation) Here is what I found: everything is in place, nothing to change for now.",
+  "{nom} ({ref}) : {avertissements}.": "{nom} ({ref}): {avertissements}."
 }

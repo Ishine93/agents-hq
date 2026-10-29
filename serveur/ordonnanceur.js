@@ -3,7 +3,7 @@
 // Le « moteur » (sessions Claude réelles ou simulation) est injecté par index.js.
 import fs from 'node:fs';
 import path from 'node:path';
-import { REGLAGES, etage as trouverEtage } from './config.js';
+import { REGLAGES, RACINE, etage as trouverEtage, etages as tousLesEtages, racines } from './config.js';
 import { etat, majDossier, changerEtatTache, majTache, message, majDg, emettre, alerte, effacerDossier, cacherDossier, montrerDossier } from './bus.js';
 import { canUseToolPour, refuserPour, demander } from './permissions.js';
 import { validerTaches, compteDg } from './dg.js';
@@ -23,6 +23,7 @@ import { t as tr } from './i18n.js';
 import { verdictEffectif, repriseVerif } from './economie.js';
 import { travailDossier, profilEffectif, verificationProfil, missionDirecte, nomProfil } from './travail.js';
 import { verificationsEtage, promptReworkControles, raisonControle } from './controles.js';
+import { cheminRegistre, ecrireRegistre, noterParole, evenementRelecture } from './registre.js';
 
 const notifierQuestionDg = (d) =>
   notifier({ id: `QD-${d.id}`, type: 'question', titre: tr('Le DG a une question'), texte: d.question, dossier: d.id, etage: d.etages[0] || 'direction', actions: [{ id: 'repondre', libelle: tr('Répondre') }] });
@@ -75,7 +76,8 @@ export function initialiser(m, dernierId) {
 const tachesDe = (d) => [...etat.taches.values()].filter((t) => t.dossier === d.id);
 const tacheRef = (d, ref) => etat.taches.get(`${d.id}-${ref}`);
 const numRef = (t) => Number(t.ref.slice(1));
-const cleProjet = (t) => trouverEtage(t.etage)?.projet?.toLowerCase();
+// projet d'une tâche (verrous d'écriture, départs espacés) ; une demande directe travaille dans le dossier choisi à l'envoi
+const cleProjet = (t) => (t.x?.direct ? etat.dossiers.get(t.dossier)?.direct?.cwd : trouverEtage(t.etage)?.projet)?.toLowerCase();
 const etageDg = (d) => (d.etages.length === 1 ? d.etages[0] : 'direction');
 
 function tableau(d) {
@@ -124,6 +126,175 @@ export function creerDossier({ texte, etageAffiche, compte, compteAgents = null,
   return d;
 }
 
+// ---------------------------------------------------------------- demandes directes (1.0.10)
+// L'utilisateur parle à UN agent, sans DG : son texte part tel quel, avec le compte, le modèle et l'effort choisis à
+// l'envoi (jamais remplacés). L'agent travaille à l'isoloir ; ses réponses arrivent dans le fil du dossier. Un message
+// ajouté au dossier continue la même conversation (une tâche par tour : T1, T2…).
+export const ETAGE_DIRECT = 'isoloir';
+
+// Dossier de travail : le projet de l'étage affiché à l'envoi, sinon le seul étage de projet, sinon le premier dossier
+// racine, sinon le bac à sable.
+function lieuDirect(etageAffiche) {
+  const projet = (e) => e && e.actif !== false && e.projet && e.id !== 'direction';
+  const projets = tousLesEtages().filter(projet);
+  const e = [trouverEtage(etageAffiche)].find(projet) || (projets.length === 1 ? projets[0] : null);
+  if (e) return { etage: e.id, cwd: e.projet, dossiersSup: (e.dossiers || []).filter((x) => x !== e.projet) };
+  const r = racines()[0];
+  if (r) return { etage: null, cwd: r, dossiersSup: [] };
+  const bac = projets.find((x) => x.type === 'bac') || null;
+  return { etage: bac?.id || null, cwd: bac?.projet || RACINE, dossiersSup: [] };
+}
+
+export function creerDossierDirect({ texte, etageAffiche, compte, modele, effort = null, pieces = [], skills = [], skillsExclus = [], travail = null }) {
+  const lieu = lieuDirect(etageAffiche);
+  const reglage = reglageDg();
+  const d = {
+    id: `D${++compteurDossiers}`,
+    texte,
+    titre: texte.length > 50 ? texte.slice(0, 49) + '…' : texte,
+    compte,
+    compteAgents: null,
+    compteImpose: compte, // jamais d'autre compte que celui choisi
+    direct: { modele, effort, ...lieu },
+    dg: { modele: reglage.modele, effort: reglage.effort }, // (aucun appel au DG : gardé pour l'affichage commun)
+    consignes: consignesActuelles(),
+    travail: travailDossier(travail?.cout),
+    etat: 'en_cours',
+    etages: [ETAGE_DIRECT],
+    question: null,
+    synthese: null,
+    creeLe: Date.now(),
+    etageAffiche: etageAffiche || 'hall',
+    skills,
+    skillsExclus,
+    x: { dgSession: null, essaisPlan: 0, syntheseEnCours: false, pieces: [], complementsEnAttente: [], modePlan: 'direct-utilisateur' },
+  };
+  majDossier(d);
+  const jointes = joindre(d, pieces);
+  message(d.id, 'toi', texte, d.etages, jointes.map(piecePublique));
+  ajouterTacheDirecte(d, texte, jointes);
+  return d;
+}
+
+// Un tour de la conversation : une tâche à l'isoloir, qui reprend la conversation du tour d'avant (même agent si
+// possible).
+// Gardien du contexte (1.0.10) : réglage du dossier (figé à l'envoi avec son coût) ; registre refait à chaque étape.
+const gardienDe = (d) => (d && !d.direct ? profilEffectif(d).gardien || 'non' : 'non');
+function majRegistre(d) {
+  if (gardienDe(d) !== 'non') ecrireRegistre(d, tachesDe(d));
+}
+
+function ajouterTacheDirecte(d, texte, jointes = []) {
+  const avant = tachesDe(d).sort((a, b) => numRef(a) - numRef(b));
+  const prec = avant[avant.length - 1] || null;
+  const agentPrec = prec?.agent ? agentEquipe(prec.agent) : null;
+  const ref = `T${avant.length + 1}`;
+  const t = {
+    id: `${d.id}-${ref}`,
+    dossier: d.id,
+    ref,
+    titre: texte.length > 60 ? texte.slice(0, 59) + '…' : texte,
+    etage: ETAGE_DIRECT,
+    nature: 'direct',
+    modele: d.direct.modele,
+    effort: d.direct.effort,
+    modeleReel: null,
+    effortReel: null,
+    etat: 'ready',
+    attend: [],
+    motifFile: null,
+    inputsFrom: [],
+    dernierOutil: null,
+    derniereActivite: null,
+    verif: { mode: 'self', modele: null },
+    resultat: null,
+    tentative: 1,
+    debut: null,
+    fin: null,
+    sousAgents: 0,
+    x: {
+      prompt: texte,
+      piecesTache: jointes.map((p) => ({ chemin: p.chemin, nom: p.nom })),
+      doneWhen: [],
+      verification: { mode: 'self' },
+      deps: [],
+      profil: 'edition',
+      justification: null,
+      risque: 'low',
+      approuvee: true,
+      consignes: [],
+      session: null,
+      sortie: null,
+      reprise: null,
+      reworks: 0,
+      relances: 0,
+      gen: 0,
+      enAttenteDg: false,
+      agentDemande: agentPrec && agentPrec.etat !== 'retire' ? agentPrec.id : '',
+      skills: [],
+      iaDemandee: null,
+      compteDemande: null,
+      direct: true,
+      resumeDirect: prec?.x.session || null, // la conversation continue même si l'agent d'avant n'est plus là
+    },
+    skills: [],
+    agent: null,
+    reembauche: false,
+    prenom: agentPrec && agentPrec.etat !== 'retire' ? agentPrec.prenom : tirerPrenom(),
+  };
+  majTache(t, null);
+  emettre('plan', {
+    dossier: d.id,
+    taches: tachesDe(d).sort((a, b) => numRef(a) - numRef(b)).map((x) => ({ ref: x.ref, titre: x.titre, etage: x.etage, deps: [], modele: x.modele, effort: x.effort, estimation: null })),
+    estimation: null,
+  }, d.id);
+  setImmediate(tick);
+  return t;
+}
+
+const promptDirect = (t) => {
+  const pieces = t.x.piecesTache || [];
+  if (!pieces.length) return t.x.prompt;
+  return [t.x.prompt, '', "Images jointes par l'utilisateur (lis-les avec Read) :", ...pieces.map((p) => `- ${p.chemin}${p.nom ? ` (${p.nom})` : ''}`)].join('\n');
+};
+
+// Message ajouté à une demande directe : pendant le tour, il arrive à l'agent tout de suite si son IA le permet
+// (sinon juste après) ; après, il ouvre le tour suivant de la même conversation.
+function completerDirect(d, texte, pieces) {
+  const jointes = joindre(d, pieces);
+  message(d.id, 'toi', texte, d.etages, jointes.map(piecePublique));
+  const enCours = tachesDe(d).find((t) => !TERMINAUX.has(t.etat));
+  if (enCours) {
+    const suite = { texte, pieces: jointes };
+    const differer = () => {
+      d.x.complementsEnAttente.push(suite);
+      message(d.id, 'systeme', tr('{nom} finit sa réponse : ton message part juste après, dans la même conversation.', { nom: enCours.prenom || enCours.ref }), d.etages);
+    };
+    const canal = ['running', 'permission'].includes(enCours.etat) ? canaux.get(enCours.id) : null;
+    if (!canal?.injecter) return differer();
+    canal.injecter(promptDirect({ x: { prompt: texte, piecesTache: jointes } })).then(
+      (ok) => (ok ? message(d.id, 'systeme', tr('Message transmis en direct à {nom}.', { nom: enCours.prenom || enCours.ref }), d.etages) : differer()),
+      () => differer(),
+    );
+    return;
+  }
+  d.etat = 'en_cours';
+  d.synthese = null;
+  majDossier(d);
+  ajouterTacheDirecte(d, texte, jointes);
+}
+
+// Fin d'un tour : la réponse de l'agent part dans le fil, la tâche se termine (aucun vérificateur).
+function finDirect(t, d, r) {
+  t.sousAgents = 0;
+  if (r.echec) return gererEchec(t, d, r, 'production');
+  const texte = r.texte || tr('(pas de réponse écrite)');
+  const resume = texte.replace(/\s+/g, ' ').trim();
+  t.x.sortie = { status: 'done', summary: resume.length > 280 ? resume.slice(0, 279) + '…' : resume, changedFiles: [], artifacts: [], handoffNotes: '', questionsForDg: [], selfCheck: [] };
+  message(d.id, 'agent', texte, d.etages, [], { nom: t.prenom || t.ref, tache: t.id, reponse: true });
+  terminer(t, 'done', t.x.sortie);
+}
+
 // Enregistre les images envoyées par le site et les ajoute aux pièces du dossier.
 function joindre(d, pieces) {
   if (!pieces?.length) return [];
@@ -143,9 +314,12 @@ const promptComplement = (textes) =>
 // Complément de l'utilisateur sur un dossier existant (il avait oublié une info, il précise…).
 export function completer(d, texte, pieces = []) {
   if (d.etat === 'annule') throw new Error(tr('Ce dossier est annulé : envoie une nouvelle demande.'));
+  if (d.direct) return completerDirect(d, texte, pieces);
   if (d.etat === 'clarification') return repondre(d, texte, pieces);
   const jointes = joindre(d, pieces);
   message(d.id, 'toi', texte, d.etages.length ? d.etages : ['hall'], jointes.map(piecePublique));
+  noterParole(d, 'complement', texte);
+  majRegistre(d);
   if (d.etat === 'planification') {
     d.x.complementsEnAttente.push({ texte, pieces: jointes });
     message(d.id, 'systeme', tr('Le DG prépare encore son plan : il prendra ce complément en compte dès que le plan sera prêt.'));
@@ -353,6 +527,7 @@ function ajouterTaches(d, liste) {
     estimation: d.estimation || null,
   }, d.id);
   if (accord) accorderCout(d, garde).catch((e) => console.error('accord coût', e.message));
+  majRegistre(d);
 }
 
 // ---------------------------------------------------------------- garde-fou Fable
@@ -411,7 +586,9 @@ export function repondre(d, texte, pieces = []) {
   if (d.etat !== 'clarification') throw new Error(tr("Le DG n'attend pas de réponse sur ce dossier."));
   const jointes = joindre(d, pieces);
   message(d.id, 'toi', texte, null, jointes.map(piecePublique));
+  noterParole(d, 'reponse', d.question ? `${d.question}\n→ ${texte}` : texte);
   d.question = null;
+  majRegistre(d);
   if (!tachesDe(d).length) {
     d.etat = 'planification';
     majDossier(d);
@@ -591,7 +768,7 @@ export function tick() {
       }
       if (t.x.gardeFable === 'attente') continue;
       if (t.x.accordCout === 'attente') continue; // C1 : plan au-dessus du seuil, ton accord d'abord
-      if (estFable(t) && REGLAGES.gardeFable?.actif !== false && (quotaFable(d.compte)?.reste ?? 100) <= 0) basculerOpus(t, tr('Fable est épuisé pour cette semaine'));
+      if (estFable(t) && !t.x.direct && REGLAGES.gardeFable?.actif !== false && (quotaFable(d.compte)?.reste ?? 100) <= 0) basculerOpus(t, tr('Fable est épuisé pour cette semaine'));
       if (!t.x.approuvee) {
         demanderApprobation(t);
         continue;
@@ -654,6 +831,12 @@ function router(t, d) {
     return a.attente ? attendreRoute(t, d, a.attente) : true;
   }
   const r = calculerRoute(t, d);
+  // demande directe : le compte, le modèle et l'effort choisis à l'envoi, jamais remplacés (ni bascule proposée)
+  if (t.x.direct) {
+    if (r.attente) return attendreRoute(t, d, { ...r.attente, proposition: null });
+    t.x.route = { ...r.route, compte: r.route.compte || d.compte, modele: t.modele, effort: t.effort, justification: null, repli: false, bascule: null };
+    return true;
+  }
   if (r.attente) return attendreRoute(t, d, r.attente);
   t.x.route = r.route;
   return true;
@@ -875,7 +1058,7 @@ function lancer(t) {
   let fork = false;
   if (!t.agent) {
     const r = t.x.agentDemande ? reembaucher(t.x.agentDemande, t, d) : null;
-    if (t.x.agentDemande && !r) message(d.id, 'systeme', tr("{agent} n'est pas réembauchable pour {ref} : nouvelle recrue.", { agent: t.x.agentDemande, ref: t.ref }), [t.etage]);
+    if (t.x.agentDemande && !r && !t.x.direct) message(d.id, 'systeme', tr("{agent} n'est pas réembauchable pour {ref} : nouvelle recrue.", { agent: t.x.agentDemande, ref: t.ref }), [t.etage]);
     if (r) {
       t.agent = r.agent.id;
       t.reembauche = true;
@@ -894,8 +1077,9 @@ function lancer(t) {
   const amonts = t.inputsFrom.map((ref) => [ref, tacheRef(d, ref)]).filter(([, u]) => u?.x.sortie);
   changerEtatTache(t, reprise?.phase === 'rework' ? 'rework' : 'briefing', { attend: [], motifFile: null });
   if (amonts.length && !reprise) emettre('passation', { de: amonts.map(([, u]) => u.id), a: t.id }, d.id);
-  let prompt = reprise ? reprise.prompt : promptProduction(t, amonts.map(([r, u]) => [r, u.x.sortie]), d.x.pieces || [], consigneTache(t, d));
-  if (resumeAgent && !reprise) {
+  let prompt = reprise ? reprise.prompt : t.x.direct ? promptDirect(t) : promptProduction(t, amonts.map(([r, u]) => [r, u.x.sortie]), d.x.pieces || [], consigneTache(t, d), gardienDe(d) !== 'non' ? cheminRegistre(d.id) : null);
+  if (t.x.direct && !reprise && !resumeAgent && t.x.resumeDirect) resumeAgent = t.x.resumeDirect;
+  if (resumeAgent && !reprise && !t.x.direct) {
     prompt = `NOUVELLE MISSION, confiée par le DG. Tu as déjà travaillé sur ce projet : ton contexte passé reste valable, mais cette mission est indépendante de la précédente.\n\n${prompt}`;
   }
   executerProduction(t, d, prompt, reprise?.resume || resumeAgent, { fork: fork && !reprise });
@@ -932,7 +1116,8 @@ async function executerProduction(t, d, prompt, resume, { fork = false } = {}) {
   else delete t.routage;
   let r;
   try {
-    r = await moteur.produire(t, d, {
+    // appel de méthode (pas détachée) : le moteur de la démo se sert de this
+    r = await moteur[t.x.direct ? 'produireDirect' : 'produire'](t, d, {
       prompt,
       resume,
       fork,
@@ -963,7 +1148,8 @@ async function executerProduction(t, d, prompt, resume, { fork = false } = {}) {
         publierMesures(t);
         // garde-fou (1.0.7) : trop de compactions dans la même tâche, elle s'arrête (suite à la fin de la session)
         const max = profilEffectif(d).maxCompactions;
-        if (max >= 1 && t.x.compactions >= max && !t.x.arretCompactions) {
+        // (demande directe : pas de DG pour redécouper, l'agent continue comme dans Claude Code)
+        if (max >= 1 && t.x.compactions >= max && !t.x.arretCompactions && !t.x.direct) {
           t.x.arretCompactions = t.x.compactions;
           message(d.id, 'systeme', tr('{ref} : {n} compactions de contexte dans la même tâche, le garde-fou l’arrête. Le DG va la redécouper.', { ref: t.ref, n: t.x.compactions }), [t.etage]);
           ctrl.abort();
@@ -972,6 +1158,12 @@ async function executerProduction(t, d, prompt, resume, { fork = false } = {}) {
       surContexte: (n) => {
         if (t.x.gen !== gen) return;
         mesurerContexte(t, n);
+      },
+      // sous-agents lancés par l'agent (outil Agent) : ils apparaissent aux postes libres de son étage
+      surSousAgents: (n) => {
+        if (t.x.gen !== gen) return;
+        t.sousAgents = n;
+        emettre('sousagents', { tache: t.id, n }, d.id);
       },
     });
   } catch (e) {
@@ -985,8 +1177,11 @@ async function executerProduction(t, d, prompt, resume, { fork = false } = {}) {
     t.x.compteSession = r.compte || t.compte;
   }
   if (r.contexte != null) t.x.contexte = r.contexte;
+  // ce que l'agent a écarté sans échouer (agent ACP : serveur MCP ignoré, modèle ou effort refusé…) : dit dans le fil
+  if (r.avertissements?.length) message(d.id, 'systeme', tr('{nom} ({ref}) : {avertissements}.', { nom: t.prenom || t.ref, ref: t.ref, avertissements: r.avertissements.slice(0, 5).join(' ; ') }), [t.etage]);
   if (t.x.arretSilence) return relancerApresSilence(t, d);
   if (t.x.arretCompactions) return arretCompactions(t, d, r);
+  if (t.x.direct) return finDirect(t, d, r);
   if (r.echec) return gererEchec(t, d, r, t.etat === 'rework' ? 'rework' : 'production');
   t.x.sortie = r.sortie;
   if (await roundComplement(t, d)) return;
@@ -1345,7 +1540,9 @@ function repriseDe(t, phase, raison) {
   return {
     phase,
     resume: t.x.session,
-    prompt: `Ta session précédente s'est interrompue (${raison}). Reprends là où tu t'étais arrêté, termine la mission, puis rends ta sortie structurée complète.`,
+    prompt: t.x.direct
+      ? `Ta session précédente s'est interrompue (${raison}). Reprends là où tu t'étais arrêté et termine ta réponse.`
+      : `Ta session précédente s'est interrompue (${raison}). Reprends là où tu t'étais arrêté, termine la mission, puis rends ta sortie structurée complète.`,
   };
 }
 
@@ -1370,14 +1567,21 @@ function terminer(t, etatFinal, sortie) {
         artefacts: (sortie.artifacts || []).slice(0, 20).map((a) => ({ chemin: a.path, nature: a.kind })),
       }
     : t.resultat;
-  if (etatFinal === 'failed') t.x.enAttenteDg = true;
+  const direct = !!t.x.direct;
+  if (etatFinal === 'failed' && !direct) t.x.enAttenteDg = true;
   // L'agent n'est pas renvoyé : il retourne à la réserve de son étage (sauf s'il n'a rien réussi).
-  // En échec, il attend la décision du DG (qui peut le relancer) : on le libère après le plan_delta.
-  if (t.agent && etatFinal !== 'failed') liberer(t.agent, { session: t.x.session, sortie: t.x.sortie, contexte: t.x.contexte ?? null, reussi: etatFinal === 'done' });
+  // En échec, il attend la décision du DG (qui peut le relancer) : on le libère après le plan_delta. Une demande
+  // directe n'a pas de DG : son agent est libéré tout de suite.
+  if (t.agent && (etatFinal !== 'failed' || direct)) liberer(t.agent, { session: t.x.session, sortie: t.x.sortie, contexte: t.x.contexte ?? null, reussi: etatFinal === 'done' });
   if (!t.agent && t.prenom) libererPrenom(t.prenom); // jamais lancée : le prénom promis se libère
   mesuresDeFin(t);
   changerEtatTache(t, etatFinal, { attend: [], motifFile: null });
   const d = etat.dossiers.get(t.dossier);
+  if (d && !direct) {
+    majRegistre(d);
+    // gardien « relecture » : le DG relit le rapport complet et corrige la suite si le travail dérive
+    if (etatFinal === 'done' && t.resultat && gardienDe(d) === 'relecture' && d.etat === 'en_cours') reveilDG(d, evenementRelecture(t, cheminRegistre(d.id)));
+  }
   setImmediate(() => {
     tick();
     if (d) verifierFinDossier(d);
@@ -1427,6 +1631,11 @@ export function validerUtilisateur(t, decision) {
 // { type: 'utilisateur', texte, pieces } (instruction de l'utilisateur : complément, réponse).
 function reveilDG(d, evenement, delai = REGLAGES.attenteDeltaMs) {
   if (d.etat === 'annule') return;
+  if (d.direct) {
+    const t = tachesDe(d).sort((a, b) => numRef(b) - numRef(a))[0];
+    if (t?.etat === 'failed') message(d.id, 'systeme', tr('{nom} s’est arrêté : {raison}. Écris-lui de nouveau dans ce dossier pour reprendre.', { nom: t.prenom || t.ref, raison: t.resultat?.summary || '?' }), d.etages);
+    return;
+  }
   const r = reveils.get(d.id) || { evenements: [], minuterie: null };
   r.evenements.push(evenement);
   reveils.set(d.id, r);
@@ -1569,6 +1778,21 @@ function appliquerDelta(d, delta) {
 async function verifierFinDossier(d) {
   if (d.etat !== 'en_cours' || d.x.syntheseEnCours) return;
   const taches = tachesDe(d);
+  if (d.direct) {
+    if (!taches.length || !taches.every((t) => TERMINAUX.has(t.etat))) return;
+    // message arrivé pendant le tour : le tour suivant part tout de suite, dans la même conversation
+    const suite = d.x.complementsEnAttente.shift();
+    if (suite) {
+      ajouterTacheDirecte(d, suite.texte, suite.pieces);
+      return;
+    }
+    const der = taches.sort((a, b) => numRef(b) - numRef(a))[0];
+    d.etat = der.etat === 'done' ? 'termine' : 'echec';
+    d.synthese = der.etat === 'done' ? der.resultat?.summary || null : null;
+    notifier({ type: 'info', titre: tr(der.etat === 'done' ? '{nom} a répondu ({id})' : '{nom} s’est arrêté ({id})', { nom: der.prenom || der.ref, id: d.id }), texte: d.titre, dossier: d.id, telephone: 'fin' });
+    majDossier(d);
+    return;
+  }
   // Blocage : plus rien n'avance et tout ce qui reste attend des tâches en échec. On prévient le DG une
   // fois (il peut relancer l'amont) ; s'il ne relance rien, on saute les tâches bloquées.
   const restantes = taches.filter((t) => !TERMINAUX.has(t.etat));

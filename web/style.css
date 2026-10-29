@@ -785,6 +785,16 @@ body.complement #saisie { border-color: #9b6dff; box-shadow: 0 0 0 2px rgba(155,
   font-size: 12.5px;
 }
 .pastille-envoi.modifie { border-color: #9b6dff; }
+/* Coût › mode avancé (1.0.10) : le fichier agents.md du QG */
+.cout-fichier-bloc { margin: 6px 0 12px; }
+.champ.cout-fichier { width: 100%; box-sizing: border-box; font: 400 12px/1.5 ui-monospace, 'Cascadia Mono', Consolas, monospace; white-space: pre; overflow: auto; tab-size: 2; min-height: 320px; resize: vertical; }
+.cout-fichier-erreurs { margin: 6px 0; padding-left: 18px; color: #ff9b8a; }
+.cout-fichier-erreurs .lien { background: none; border: none; padding: 0; color: inherit; text-decoration: underline; cursor: pointer; font: inherit; }
+.cout-fichier-bloc .boutons { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
+/* demande directe (1.0.10) : modèle et réflexion choisis à l'envoi */
+.pastille-envoi.reglage-direct { border-color: #9b5de5; }
+.pastille-envoi.reglage-direct select:disabled { opacity: 0.5; }
+.cible-saisie.cible-direct { border-color: #9b5de5; background: #2a1f45; }
 .pastille-envoi .lib { color: var(--dim); font-weight: 700; }
 .pastille-envoi .sep { color: var(--dim); }
 .pastille-envoi select {

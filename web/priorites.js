@@ -359,11 +359,11 @@ export function sectionPriorites(param) {
     ligneI('prio-quota-bascule', t('Autre compte libre'), [
       t('Ce que fait le QG quand un compte est en pause et qu’un autre compte libre pourrait prendre ses tâches.'),
       choixAide(t('Me demander'), t('une carte te propose d’attendre ou de passer les tâches du dossier sur un autre compte.')),
-      choixAide(t('Passer tout seul'), t('les tâches du dossier passent sur un autre compte libre, sans te demander.'), null, t('changer de compte pour contourner une limite peut être contraire aux conditions d’utilisation du fournisseur (OpenAI le déconseille) ; les agents changent de conversation et perdent leur contexte.')),
+      choixAide(t('Passer tout seul'), t('les tâches du dossier passent sur un autre compte libre, sans te demander.'), null, t('changer de compte pour contourner une limite peut être contraire aux conditions d’utilisation du fournisseur (OpenAI le déconseille). Entre deux comptes Claude, les agents gardent leur conversation ; vers une autre IA (Codex, un agent ACP), ils repartent d’une conversation neuve et perdent leur contexte.')),
       choixAide(t('Ne jamais changer'), t('les tâches attendent la reprise du compte.')),
       t('Un changement de compte vaut pour ce dossier seulement et s’arrête quand le compte reprend.'),
     ], choix(prio.quota.bascule, [['demander', t('me demander avant de passer sur un autre compte')], ['auto', t('passer tout seul sur un autre compte libre')], ['jamais', t('ne jamais changer de compte : attendre la reprise')]], (v) => envoyer({ quota: { bascule: v } }), { 'aria-label': t('Autre compte libre') }),
-    prio.quota.bascule === 'auto' ? h('div', { class: 'param-avert' }, t('Changer de compte pour contourner une limite peut être contraire aux conditions d’utilisation du fournisseur (OpenAI le déconseille). Les agents changent de conversation : le contexte est perdu.')) : null),
+    prio.quota.bascule === 'auto' ? h('div', { class: 'param-avert' }, t('Changer de compte pour contourner une limite peut être contraire aux conditions d’utilisation du fournisseur (OpenAI le déconseille). Entre deux comptes Claude, les agents gardent leur conversation ; vers une autre IA, ils perdent leur contexte.')) : null),
     prio.quota.bascule === 'jamais' ? null : ligneI('prio-quota-ordre', t('Comptes de remplacement'), [
       t('Vers quels comptes passer quand un compte est en pause, dans l’ordre de préférence. Le premier qui est connecté, libre et sait faire la tâche est proposé (ou pris tout seul, selon le choix du dessus).'),
       t('Liste vide : le premier compte connecté et libre qui sait faire la tâche (les agents déjà essayés par le QG d’abord).'),

@@ -86,8 +86,9 @@ export function resumePourDg(compteId) {
   if (comptes.length) lignes.push(`Connecteurs activés pour ce compte : ${comptes.join(', ')}.`);
   for (const e of etages()) {
     const actifs = Object.keys(serveursProjet(e)).filter((nom) => modeEtage(cfg, e, nom) !== 'off');
-    if (actifs.length && e.actif) lignes.push(`MCP du projet ${e.nom} : ${actifs.join(', ')} (seulement si l'application correspondante est ouverte).`);
+    if (actifs.length && e.actif) lignes.push(`MCP du projet ${e.nom} : ${actifs.map((nom) => `${nom} (${modeEtage(cfg, e, nom)})`).join(', ')} (seulement si l'application correspondante est ouverte).`);
   }
+  if (lignes.length) lignes.push("Qui les reçoit : une tâche Claude (pas Haiku, qui n'en reçoit aucun) a les connecteurs de son compte et les MCP du projet ; une tâche sur Codex ou un agent ACP n'a que les MCP du projet en mode auto (ni les connecteurs claude.ai, ni ce qui est en mode demander). Une tâche qui a besoin d'un connecteur doit donc tourner sur Claude.");
   return lignes.length ? lignes.join('\n') : 'Aucun MCP activé.';
 }
 

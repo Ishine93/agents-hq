@@ -193,6 +193,27 @@ export function creerSimulation() {
       return { ok: true, resultats: commandes.map((commande) => ({ commande, ok: true, code: 0, duree: 600 })), echec: null };
     },
 
+    // Demande directe (1.0.10) : l'agent réfléchit, utilise quelques outils, lance un sous-agent, puis répond.
+    async produireDirect(t, d, ctx) {
+      const signal = ctx.abortController.signal;
+      const session = ctx.resume || `sim-${t.id}`;
+      try {
+        await attendre(1200, signal);
+        ctx.surInit({ model: MODELES_REELS[t.modele] || t.modele, session_id: session });
+        await this.penserSimule(t.id, d.id, signal, [tr('Je regarde ce qui existe déjà avant de répondre.')]);
+        for (let i = 0; i < 4; i++) {
+          await attendre(1800, signal);
+          const [nom, cible] = OUTILS[i % OUTILS.length];
+          ctx.surOutil(nom, tr(cible));
+          if (i === 1) ctx.surSousAgents?.(2);
+          if (i === 3) ctx.surSousAgents?.(0);
+        }
+        return { sessionId: session, texte: tr('(simulation) Voilà ce que j’ai trouvé : tout est en place, rien à changer pour l’instant.') };
+      } catch (e) {
+        return { sessionId: session, texte: null, echec: String(e?.message || e) };
+      }
+    },
+
     async produire(t, d, ctx) {
       const signal = ctx.abortController.signal;
       const session = ctx.resume || `sim-${t.id}-${t.tentative}`;

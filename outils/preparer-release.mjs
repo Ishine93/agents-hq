@@ -41,9 +41,13 @@ const DOSSIERS = [
   ['serveur/ia', (f) => /\.js$/.test(f)],
   ['web', (f) => /\.(js|css|html|png)$/.test(f) && f !== 'mock.js'],
   ['web/i18n', (f) => /\.js$/.test(f)],
+  // décors au choix (1.0.10) : plans des étages et dessin de leurs meubles
+  ['web/plans', (f) => /\.js$/.test(f)],
+  ['web/meubles', (f) => /\.js$/.test(f)],
   ['config/defauts', () => true],
   ['config/defauts/fiches', () => true],
-  ['outils', (f) => /\.(ps1|mjs|sh)$/.test(f)],
+  // (sans l'aperçu des décors, outil de développement qui écrit ses images hors du QG)
+  ['outils', (f) => /\.(ps1|mjs|sh)$/.test(f) && f !== 'apercu-decors.mjs'],
   // notes de version (1.0.7) : lues par le site (numéro de version en haut à gauche)
   ['notes', (f) => /^\d+\.\d+\.\d+\.md$/.test(f)],
   ['docs', (f) => /\.md$/.test(f)],

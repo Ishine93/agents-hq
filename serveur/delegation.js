@@ -18,7 +18,7 @@ import { message, emettre, majDossier } from './bus.js';
 import { copierImage, piecePublique } from './pieces.js';
 import { enregistrerAppel, enregistrerCout } from './conso.js';
 import { genererParApi, coutUsage, coutAuPire, FORMATS } from './ia/images-api.js';
-import { dossierConfig } from './ia/codex.js';
+import { dossierConfig, capacites as capacitesCodex } from './ia/codex.js';
 import { t as tr } from './i18n.js';
 
 export const NOM_OUTIL = 'mcp__qg__generer_image';
@@ -222,6 +222,16 @@ export async function genererImage(t, d, args = {}, { signal = null } = {}) {
     return indisponible(ch.indisponible);
   }
   const nomCompte = trouverCompte(ch.compte)?.nom || ch.compte;
+  // abonnement ChatGPT : une session à la fois par compte. L'agent qui tourne déjà dessus attendrait sa propre
+  // place jusqu'au délai : on le dit tout de suite.
+  const compteAgent = t.x?.route?.compte || t.compte || null;
+  const places = ch.moteur !== 'api' ? capacitesCodex(trouverCompte(ch.compte)).sessionsParCompte : null;
+  if (ch.compte === compteAgent && places != null && places <= 1) {
+    rendre();
+    const motif = tr('{compte} fait déjà tourner ta tâche, et un abonnement ChatGPT ne prend qu’une session à la fois', { compte: nomCompte });
+    journaliser({ ...base, compte: ch.compte, moteur: ch.moteur, cout: 0, statut: 'indisponible', accord: 'sans', motif });
+    return indisponible(motif);
+  }
   const estimation = ch.moteur === 'api' ? coutAuPire({ description, taille, qualite, references: refs }) : 0;
   const plafond = im.api.plafondMensuelUsd;
   const total = ch.moteur === 'api' ? totalApiDuMois() : 0;

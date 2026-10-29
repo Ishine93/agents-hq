@@ -105,7 +105,7 @@ if (!REPLAY && !DEMO) demarrerDetection();
 if (!REPLAY) demarrerBonheur({ demo: DEMO });
 const moteur = DEMO
   ? creerSimulation()
-  : { planifier: dg.planifier, reagir: dg.reagir, synthese: dg.synthese, produire: taches.produire, verifier: taches.verifier, controler: (t, d, commandes, ctx) => lancerControles(commandes, ctx) };
+  : { planifier: dg.planifier, reagir: dg.reagir, synthese: dg.synthese, produire: taches.produire, produireDirect: taches.produireDirect, verifier: taches.verifier, controler: (t, d, commandes, ctx) => lancerControles(commandes, ctx) };
 const dernierId = REPLAY ? 0 : chargerHistorique();
 // pauses des comptes (D4) : en mémoire seulement ; celles rejouées depuis le journal ne valent plus
 if (etat.ordonnanceur?.pauses) etat.ordonnanceur = { ...etat.ordonnanceur, pauses: {} };
@@ -349,6 +349,15 @@ async function api(req, res, chemin) {
     // niveau de coût choisi à l'envoi (pastille de la barre d'envoi) ; absent : celui des réglages
     if (corps.travail != null && !COUTS.includes(corps.travail?.cout)) return json(res, 400, { erreur: tr('niveau de coût inconnu : {cout}', { cout: String(corps.travail?.cout ?? corps.travail) }) });
     const travail = corps.travail != null ? { cout: corps.travail.cout } : null;
+    // demande directe (1.0.10) : un agent seul, sans DG, avec le modèle et l'effort choisis à l'envoi
+    if (corps.direct) {
+      const modele = String(corps.direct.modele || '').trim();
+      const effort = String(corps.direct.effort || '').trim();
+      if (!modele || !/^[\w.:\-[\]/]{1,80}$/.test(modele)) return json(res, 400, { erreur: tr('modèle inconnu : {modele}', { modele }) });
+      if (effort && !/^[a-z]{2,12}$/.test(effort)) return json(res, 400, { erreur: tr('effort inconnu : {effort}', { effort }) });
+      const dd = ordo.creerDossierDirect({ texte, etageAffiche: String(corps.etageAffiche || 'hall'), compte: compte?.id || null, modele, effort: effort || null, pieces: corps.pieces || [], skills, skillsExclus, travail });
+      return json(res, 200, { id: dd.id });
+    }
     const d = ordo.creerDossier({ texte, etageAffiche: String(corps.etageAffiche || 'hall'), compte: compte?.id || null, compteAgents, dg: cDg && cDg.id !== compte?.id ? { compte: cDg.id } : null, pieces: corps.pieces || [], skills, skillsExclus, travail });
     return json(res, 200, { id: d.id });
   }

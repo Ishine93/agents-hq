@@ -5,6 +5,8 @@
 import { REGLAGES, RACINE, langueIA } from './config.js';
 import { etat, pensee, traductionPensee } from './bus.js';
 import { executerSession } from './session.js';
+import { trouverCompte } from './comptes.js';
+import { choisirAmbiance } from './routeur.js';
 
 // Mots-outils fréquents par langue : assez pour reconnaître quelques phrases.
 const MOTS = {
@@ -71,15 +73,22 @@ async function traduire({ cible, dossierId, bloc }) {
   if (!source || source === cibleLangue) return;
   const d = etat.dossiers.get(dossierId);
   const t = etat.taches.get(cible);
+  // compte Claude de la demande : Haiku sur ce compte ; autre IA : le compte et le modèle léger de l'ambiance
+  const c = d?.compte ? trouverCompte(d.compte) : null;
+  const amb = !c || (c.fournisseur || 'claude') === 'claude' ? { compte: d?.compte, modele: 'haiku' } : choisirAmbiance();
+  if (!amb) return;
+  const consigne = `Tu es traducteur. Traduis en ${langueIA()} le texte placé entre les balises <texte> : ce sont les notes de travail d'un agent, affichées à l'utilisateur. Garde le sens, le ton et les retours à la ligne. Laisse tels quels les noms de fichiers, identifiants, commandes, blocs de code et citations. Réponds uniquement par la traduction, sans balises ni commentaire.`;
   const s = await executerSession({
     prompt: `<texte>\n${b.texte}\n</texte>`,
-    compte: d?.compte,
+    compte: amb.compte,
     conso: { role: 'traduction', dossier: dossierId, tache: t ? t.id : undefined, etage: t ? t.etage : 'direction' },
     options: {
-      model: 'haiku', maxTurns: 1, tools: [], permissionMode: 'dontAsk', settingSources: [], mcpServers: {}, strictMcpConfig: true,
+      ...(amb.modele ? { model: amb.modele } : {}), maxTurns: 1, tools: [], permissionMode: 'dontAsk', settingSources: [], mcpServers: {}, strictMcpConfig: true,
       persistSession: false, cwd: RACINE, thinking: { type: 'disabled' },
-      systemPrompt: `Tu es traducteur. Traduis en ${langueIA()} le texte placé entre les balises <texte> : ce sont les notes de travail d'un agent, affichées à l'utilisateur. Garde le sens, le ton et les retours à la ligne. Laisse tels quels les noms de fichiers, identifiants, commandes, blocs de code et citations. Réponds uniquement par la traduction, sans balises ni commentaire.`,
+      systemPrompt: consigne,
     },
+    // autres IA (Claude s'en passe) : rôle utilitaire, lecture seule
+    demande: { role: 'utilitaire', profil: 'lecture', cwd: RACINE, consignes: consigne, schema: null, titre: 'QG traduction' },
   });
   const texte = typeof s.result?.result === 'string' ? s.result.result.trim() : '';
   if (texte) traductionPensee(cible, dossierId, bloc, { texte, langue: cibleLangue, source });

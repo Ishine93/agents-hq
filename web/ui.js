@@ -71,7 +71,7 @@ const PHASES = { reflexion: 'réfléchit', redaction: 'rédige sa réponse', rap
 const COUL_TYPE = {
   roblox: '#e3342f', unreal: '#3df2ff', atelier3d: '#f06a2a', etudes: '#c99a5e', serveur: '#5c626a',
   direction: '#c9a227', hall: '#2f6fde', bac: '#f5c400', unity: '#9aa4b5', godot: '#478cbf', comfyui: '#b07cff',
-  web: '#3fd36b', python: '#ffd23f', projet: '#7fa7d9', pause: '#19b39b', repos: '#f27fb8',
+  web: '#3fd36b', python: '#ffd23f', projet: '#7fa7d9', pause: '#19b39b', repos: '#f27fb8', isoloir: '#9b5de5',
 };
 // Étages sans projet où le bouton « Documents » montre quand même ceux d'un autre étage (vues d'ensemble).
 const DOCS_AILLEURS = new Set(['hall', 'direction']);
@@ -272,6 +272,12 @@ export class Interface {
       this.majReglageCout();
     });
     $('#cible-saisie').addEventListener('change', () => this.choisirCible($('#cible-saisie').value));
+    // demande directe : modèle et réflexion, retenus par compte pour la prochaine fois
+    $('#modele-direct').addEventListener('change', () => {
+      this.retenirDirect({ modele: $('#modele-direct').value, effort: null });
+      this.majReglageDirect();
+    });
+    $('#effort-direct').addEventListener('change', () => this.retenirDirect({ modele: $('#modele-direct').value, effort: $('#effort-direct').value }));
     const saisie = $('#saisie');
     saisie.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
@@ -417,7 +423,7 @@ export class Interface {
     const e = this.store.etage(this.etageId);
     $('#etage-nom').textContent = e ? e.nom : '—';
     $('#etage-ordre').textContent = e ? libOrdre(e.ordre) : '';
-    $('#etage-ordre').style.background = e ? COUL_TYPE[e.decor || e.type] || '#888' : '#888';
+    $('#etage-ordre').style.background = e ? (COUL_TYPE[e.decor] || COUL_TYPE[e.type] || '#888') : '#888';
     const liste = this.etagesTries();
     const i = liste.findIndex((x) => x.id === this.etageId);
     $('#etage-haut').disabled = i <= 0;
@@ -470,7 +476,7 @@ export class Interface {
         title: tr('Aller à {etage}', { etage: e.nom }),
         on: { click: () => this.allerEtage(e.id) },
       },
-      h('span', { class: 'ordre', style: { background: COUL_TYPE[e.decor || e.type] || '#888' } }, libOrdre(e.ordre)),
+      h('span', { class: 'ordre', style: { background: (COUL_TYPE[e.decor] || COUL_TYPE[e.type] || '#888') } }, libOrdre(e.ordre)),
       h('span', { class: 'nom' }, e.nom),
       m.dg ? h('span', { class: 'dg', title: nomDg ? tr('{nom}, le DG, est ici', { nom: nomDg }) : tr('le DG est ici') }, S.nomDg()) : null,
       etageJoy(S, now) === e.id ? h('span', { class: 'joy', title: tr('{nom}, le happiness manager, est ici', { nom: S.nomJoy() }) }, '😊') : null,
@@ -644,6 +650,7 @@ export class Interface {
       this.compte = v;
       this.majComptes();
       this.majReglageCout();
+      if (this.calculerMode()?.type === 'direct') this.majReglageDirect();
       this.conso.majBouton();
     });
     box.replaceChildren(sel);
@@ -702,6 +709,9 @@ export class Interface {
   calculerMode() {
     const S = this.store;
     let m = this.mode;
+    if (m && m.type === 'direct') return m;
+    // dossier qui vient d'être créé (demande directe) : le site le reçoit un instant plus tard
+    if (m && m.dossier && !S.dossiers.has(m.dossier) && m.attendu && Date.now() - m.attendu < 8000) return m;
     if (m && m.dossier && !S.dossiers.has(m.dossier)) m = this.mode = null;
     if (m && m.type === 'completer' && S.dossiers.get(m.dossier).etat === 'annule') m = this.mode = null;
     const clar = S.dossierEnClarification();
@@ -744,7 +754,8 @@ export class Interface {
   // Choix dans le menu de destination : 'nouveau', 'repondre:D3' ou 'completer:D3'.
   choisirCible(v) {
     const S = this.store;
-    if (!v || v === 'nouveau') {
+    if (v === 'direct') this.mode = { type: 'direct' };
+    else if (!v || v === 'nouveau') {
       const clar = S.dossierEnClarification();
       // « Nouveau dossier » alors que le DG attend une réponse : on ne rebascule pas tout seul sur la réponse.
       this.mode = clar ? { type: 'nouveau', ignore: clar.id } : null;
@@ -757,7 +768,7 @@ export class Interface {
   }
 
   valeurCible(m) {
-    return m ? m.type + ':' + m.dossier : 'nouveau';
+    return m ? (m.type === 'direct' ? 'direct' : m.type + ':' + m.dossier) : 'nouveau';
   }
 
   // Menu « où va le message » : nouveau dossier, réponse au DG, puis chaque dossier (actifs d'abord, puis finis).
@@ -769,9 +780,9 @@ export class Interface {
     const repondre = ds.filter((d) => d.etat === 'clarification');
     const actifs = ds.filter((d) => DOSSIER_ACTIF.has(d.etat) && d.etat !== 'clarification');
     const finis = ds.filter((d) => !DOSSIER_ACTIF.has(d.etat));
-    const ajout = (d) => ({ v: 'completer:' + d.id, l: tr('Ajouter au dossier {dossier} · {titre}', { dossier: d.id, titre: court(d.titre || d.texte, 38) }) });
+    const ajout = (d) => ({ v: 'completer:' + d.id, l: d.direct ? tr('Continuer la demande directe {dossier} · {titre}', { dossier: d.id, titre: court(d.titre || d.texte, 30) }) : tr('Ajouter au dossier {dossier} · {titre}', { dossier: d.id, titre: court(d.titre || d.texte, 38) }) });
     const groupes = [
-      { options: [{ v: 'nouveau', l: tr('Nouveau dossier') }] },
+      { options: [{ v: 'nouveau', l: tr('Nouveau dossier') }, { v: 'direct', l: tr('Demande directe (un agent seul)') }] },
       repondre.length ? { label: nomDg ? tr('{nom} attend ta réponse', { nom: nomDg }) : tr('Le DG attend ta réponse'), options: repondre.map((d) => ({ v: 'repondre:' + d.id, l: nomDg ? tr('Répondre à {nom} ({dossier})', { nom: nomDg, dossier: d.id }) : tr('Répondre au DG ({dossier})', { dossier: d.id }) })) } : null,
       actifs.length ? { label: tr('Dossiers en cours'), options: actifs.map(ajout) } : null,
       finis.length ? { label: tr('Dossiers terminés'), options: finis.map(ajout) } : null,
@@ -787,11 +798,15 @@ export class Interface {
       }).flat());
     }
     if (sel.value !== valeur) sel.value = valeur;
-    sel.className = 'cible-saisie cible-' + (m ? m.type : 'nouveau');
-    const d = m ? S.dossiers.get(m.dossier) : null;
+    const d = m && m.dossier ? S.dossiers.get(m.dossier) : null;
+    sel.className = 'cible-saisie cible-' + (m ? (d && d.direct ? 'direct' : m.type) : 'nouveau');
     sel.title = !m
       ? tr('Le message ouvre un nouveau dossier : {nom} le découpe en tâches.', { nom: this.leDg() })
-      : m.type === 'repondre'
+      : m.type === 'direct'
+        ? tr('Le message part à un agent seul, sans {nom} : il répond comme dans Claude Code ou Codex, avec le modèle et la réflexion choisis à côté. Il travaille à l’isoloir, dans le projet de l’étage affiché.', { nom: this.leDg() })
+        : d && d.direct
+          ? tr('Le message continue la conversation de la demande directe {dossier}, avec le même agent.', { dossier: m.dossier })
+          : m.type === 'repondre'
         ? nomDg
           ? tr('Le message répond à la question de {nom} sur le dossier {dossier}.', { nom: nomDg, dossier: m.dossier })
           : tr('Le message répond à la question du DG sur le dossier {dossier}.', { dossier: m.dossier })
@@ -803,12 +818,19 @@ export class Interface {
     const m = (this.modeEffectif = this.calculerMode());
     const s = $('#saisie');
     const nomDg = this.dgPerso();
+    const dDirect = m && m.dossier && (S.dossiers.get(m.dossier) || {}).direct;
     s.placeholder = m && m.type === 'repondre'
       ? nomDg ? tr('Répondre à {nom}…', { nom: nomDg }) : tr('Répondre au DG…')
-      : m && m.type === 'completer'
+      : m && m.type === 'direct'
+        ? tr('Demande directe : écris à l’agent…')
+        : m && m.type === 'completer' && dDirect
+          ? tr('Continuer la demande directe {dossier}…', { dossier: m.dossier })
+          : m && m.type === 'completer'
         ? tr('Compléter le dossier {dossier}…', { dossier: m.dossier })
         : nomDg ? tr('Écrire à {nom}…', { nom: nomDg }) : tr('Écrire au DG…');
     s.title = tr('Entrée pour envoyer, Maj+Entrée pour aller à la ligne. Ctrl+V ou glisser-déposer pour joindre des images.');
+    // lecteur d'écran : à qui part le message (l'agent seul d'une demande directe, sinon le DG)
+    s.setAttribute('aria-label', (m && m.type === 'direct') || dDirect ? tr('Message à l’agent de la demande directe') : tr('Message au DG'));
     this.majCibles(m);
     const q = $('#question-dg');
     const d = m && m.type === 'repondre' ? S.dossiers.get(m.dossier) : null;
@@ -818,9 +840,13 @@ export class Interface {
     } else q.hidden = true;
     document.body.classList.toggle('clarification', !!(m && m.type === 'repondre'));
     document.body.classList.toggle('complement', !!(m && m.type === 'completer'));
-    // Le coût et les skills ne servent qu'à un nouveau dossier.
-    $('#btn-skills').hidden = !!m;
-    $('#reglage-cout').hidden = !!m;
+    // Le coût et les skills ne servent qu'à un nouveau dossier (ou une demande directe, qui ajoute modèle et réflexion).
+    const direct = !!(m && m.type === 'direct');
+    document.body.classList.toggle('direct', direct);
+    $('#btn-skills').hidden = !!m && !direct;
+    $('#reglage-cout').hidden = !!m && !direct;
+    $('#reglage-direct').hidden = !direct;
+    if (direct) this.majReglageDirect();
     $('#au-dessus').hidden = q.hidden && !(this.jointes && this.jointes.liste.length);
   }
 
@@ -840,15 +866,19 @@ export class Interface {
       else {
         const corps = { texte, etageAffiche: this.etageId, compte: this.compte, ...this.choixSkills.pourEnvoi() };
         corps.travail = { cout: this.coutDemande() };
-        await envoyer('/api/dossiers', avecPieces(corps));
+        const direct = m && m.type === 'direct';
+        if (direct) corps.direct = { modele: $('#modele-direct').value, effort: $('#effort-direct').value || null };
+        const r = await envoyer('/api/dossiers', avecPieces(corps));
         this.choixSkills.vider(); // les skills choisis valent pour ce dossier-là
         this.coutChoix = null; // le niveau choisi vaut pour cette demande-là
         this.majReglageCout();
+        // demande directe : la suite de la conversation part dans ce dossier, comme dans Claude Code
+        if (direct && r && r.id) this.mode = { type: 'completer', dossier: r.id, attendu: Date.now() };
       }
       s.value = '';
       this.jointes.vider();
-      if (m && m.type === 'completer') {
-        // complément envoyé : le prochain message repart sur un nouveau dossier
+      if (m && m.type === 'completer' && !(this.store.dossiers.get(m.dossier) || {}).direct) {
+        // complément envoyé : le prochain message repart sur un nouveau dossier (une demande directe continue)
         this.mode = null;
         this.toast('info', tr('Ajouté au dossier {dossier}. Le prochain message ouvrira un nouveau dossier.', { dossier: m.dossier }));
       }
@@ -860,6 +890,45 @@ export class Interface {
       this.envoiEnCours = false;
       $('#btn-envoyer').disabled = false;
     }
+  }
+
+  // ---------- demande directe (1.0.10) : modèle et réflexion choisis à l'envoi ----------
+  // Les modèles du compte choisi en bas de l'écran ; le dernier choix est retenu pour ce compte.
+  lireDirect() {
+    try {
+      return JSON.parse(localStorage.getItem('qg-direct') || '{}') || {};
+    } catch {
+      return {};
+    }
+  }
+
+  retenirDirect(choix) {
+    const tout = this.lireDirect();
+    tout[this.compte] = choix;
+    try {
+      localStorage.setItem('qg-direct', JSON.stringify(tout));
+    } catch {
+      /* stockage indisponible : le choix vaut pour cette page */
+    }
+    this.choixDirectPage = { compte: this.compte, ...choix };
+  }
+
+  majReglageDirect() {
+    const S = this.store;
+    const liste = (S.modeles || {})[this.compte] || [];
+    const memo = (this.choixDirectPage && this.choixDirectPage.compte === this.compte ? this.choixDirectPage : this.lireDirect()[this.compte]) || {};
+    const m = liste.find((x) => x.id === memo.modele) || liste.find((x) => /opus/i.test(x.id)) || liste[0] || null;
+    const efforts = m && m.efforts && m.efforts.length ? m.efforts : [];
+    const effort = efforts.includes(memo.effort) ? memo.effort : efforts.includes('high') ? 'high' : efforts[Math.floor(efforts.length / 2)] || '';
+    const LIB = { low: tr('faible'), medium: tr('moyenne'), high: tr('poussée'), xhigh: tr('très poussée'), max: tr('maximale') };
+    const selM = $('#modele-direct');
+    const selE = $('#effort-direct');
+    selM.replaceChildren(...(liste.length ? liste.map((x) => h('option', { value: x.id }, x.nom || x.id)) : [h('option', { value: '' }, tr('aucun modèle'))]));
+    selM.value = m ? m.id : '';
+    selE.replaceChildren(...(efforts.length ? efforts.map((e) => h('option', { value: e }, LIB[e] || e)) : [h('option', { value: '' }, tr('par défaut'))]));
+    selE.value = effort;
+    selE.disabled = !efforts.length;
+    $('#reglage-direct').title = tr('Demande directe : le modèle et la réflexion de l’agent, pour ce message. Rien ne les change en route.');
   }
 
   // ---------- coût de la demande (pastille, 1.0.6 B2 ; Personnalisé en 1.0.7) ----------
@@ -877,7 +946,8 @@ export class Interface {
 
   majReglageCout() {
     const box = $('#reglage-cout');
-    box.hidden = !!this.calculerMode();
+    const mode = this.calculerMode();
+    box.hidden = !!mode && mode.type !== 'direct';
     const def = travailDe(this.store.reglages).cout;
     const choix = this.coutDemande();
     const sel = $('#cout-demande');

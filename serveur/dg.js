@@ -473,7 +473,7 @@ export async function planifier(dossier, { reponse = null, erreurs = null, piece
       '',
       `AGENTS EN RÉSERVE (ils ont déjà travaillé sur ces projets et connaissent le code ; champ "agent" pour les réembaucher) :\n${resumeEquipePourDg(dossier.compteAgents || dossier.compte)}`,
       '',
-      `Contraintes du serveur : ${REGLAGES.maxTaches} tâches au plus ; refs T1, T2… uniques ; tâches de l'étage direction en profil lecture.`,
+      `Contraintes du serveur : ${Math.min(profilEffectif(dossier).maxTaches || REGLAGES.maxTaches, MAX_TACHES_ABSOLU)} tâches au plus ; refs T1, T2… uniques ; tâches de l'étage direction en profil lecture.`,
       ...listePieces(dossier.x.pieces),
       'Fais un court repérage si utile, puis rends le plan.',
     ].join('\n');
@@ -526,9 +526,11 @@ export async function synthese(dossier, tableau) {
 }
 
 // Validation du plan par le serveur (le schéma garantit déjà la forme).
+const MAX_TACHES_ABSOLU = 30; // la borne de Coût › Nombre de tâches max
 export function validerTaches(taches, refsExistantes, { maxTotal = REGLAGES.maxTaches, profil = null, mode = 'plan', comptes = null } = {}) {
   const erreurs = [];
-  if (profil?.maxTaches) maxTotal = Math.min(maxTotal, profil.maxTaches);
+  // le profil de travail fixe le plafond (Personnalisé : jusqu'à 30) ; sans profil, celui des réglages
+  if (profil?.maxTaches) maxTotal = Math.min(profil.maxTaches, MAX_TACHES_ABSOLU);
   if (mode === 'direct') {
     if (profil?.agentDirect === 'jamais') erreurs.push('Mode "direct" non permis par le profil de travail : rends un plan (mode "plan").');
     if (taches.length !== 1) erreurs.push(`Mode "direct" : une seule tâche attendue (${taches.length}).`);

@@ -182,7 +182,7 @@ function messageUtilisateur(texte, blocsImages = []) {
  * @param surImage rappel (base64, type, outil) pour chaque image reçue dans le résultat d'un outil
  * @returns {Promise<{result, sessionId, init, erreur, limite, exception}>}
  */
-export async function lancer({ prompt, images = [], options, compte, compteObj = null, surInit, surOutil, surActivite, surImage, surCommande, surModification, surPensee, surCompaction, surContexte, canal, conso = {}, envSession = null, compaction = null }) {
+export async function lancer({ prompt, images = [], options, compte, compteObj = null, surInit, surOutil, surActivite, surImage, surCommande, surModification, surPensee, surCompaction, surContexte, surSousAgents, canal, conso = {}, envSession = null, compaction = null }) {
   const surFlux = surPensee ? suiviPensees(surPensee) : null;
   const file = [];
   let reveil = null;
@@ -233,6 +233,7 @@ export async function lancer({ prompt, images = [], options, compte, compteObj =
     },
   });
   const outilsParId = new Map();
+  const sousAgents = new Set(); // outils Agent en cours (1.0.10 : sous-agents visibles à l'étage)
   const meta = { role: 'autre', ...conso, compte: compte || compteObj?.id };
   // Consommation. Le message assistant n'a que l'usage du début de l'appel (quelques tokens écrits) ;
   // l'usage final arrive dans le flux (message_delta) et, pour tout le tour, dans le message result.
@@ -299,6 +300,10 @@ export async function lancer({ prompt, images = [], options, compte, compteObj =
         for (const b of m.message?.content || []) {
           if (b.type === 'tool_use') {
             outilsParId.set(b.id, b.name);
+            if (surSousAgents && (b.name === 'Agent' || b.name === 'Task')) {
+              sousAgents.add(b.id);
+              surSousAgents(sousAgents.size);
+            }
             surOutil?.(b.name, cibleOutil(b.name, b.input, options.cwd));
             if (b.name === 'Bash') surCommande?.({ id: b.id, commande: String(b.input?.command || '').slice(0, 4000), description: b.input?.description || '', debut: Date.now(), enCours: true });
           }
@@ -316,6 +321,7 @@ export async function lancer({ prompt, images = [], options, compte, compteObj =
         }
         for (const b of Array.isArray(m.message?.content) ? m.message.content : []) {
           if (b?.type !== 'tool_result') continue;
+          if (sousAgents.delete(b.tool_use_id)) surSousAgents?.(sousAgents.size);
           if (outilsParId.get(b.tool_use_id) === 'Bash') {
             surCommande?.({ id: b.tool_use_id, sortie: finDe(texteResultat(b.content), 6000), erreur: !!b.is_error, fin: Date.now(), enCours: false });
           }

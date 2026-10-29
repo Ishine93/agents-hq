@@ -21,6 +21,7 @@ import { confierValidationsEnAttente } from './ordonnanceur.js';
 import { renommerMemoire, miniJeuPublic } from './personnages.js';
 import { t } from './i18n.js';
 import { travailReglages } from './travail.js';
+import { fabriquerFichier, fichierParDefaut, lireFichier as lireFichierTravail, patchConsignes, resumeChangements } from './fichier-travail.js';
 import { chargerPriorites, modifierPriorites, prereglages, apercu, pausesComptes, pauseDe, leverPauseCompte, reglageDg, dgConseille, dgSousConseille, comptesDisponibles, NATURES, TYPES as TYPES_TACHE } from './routeur.js';
 import { modeleDg, effortDg } from './dg.js';
 import { convertirEffort } from './ia/fournisseurs.js';
@@ -333,6 +334,8 @@ export async function routesReglages(req, res, chemin, ctx) {
     return (e ? json(res, 200, { fiche: fiche(e) }) : json(res, 404, { erreur: t('étage inconnu') })), true;
   }
   if (GET && (m = chemin.match(/^\/api\/etages\/([^/]+)\/markdown$/))) return json(res, 200, { fichiers: listerMarkdown(decodeURIComponent(m[1])) }), true;
+  // Coût › mode avancé (1.0.10) : profil et consignes en un texte ; ?defaut=1 : les valeurs d'origine, consignes gardées
+  if (GET && chemin === '/api/travail/fichier') return json(res, 200, { texte: url.searchParams.get('defaut') ? fichierParDefaut() : fabriquerFichier() }), true;
   if (GET && chemin === '/api/fichier') {
     try {
       return json(res, 200, lireFichier(String(url.searchParams.get('chemin') || ''), url.searchParams.get('etage'))), true;
@@ -354,7 +357,7 @@ export async function routesReglages(req, res, chemin, ctx) {
     }
   }
 
-  const routes = /^\/api\/(reglages|priorites|racines|choisir-dossier|comptes|personnalisation|equipe\/renommer|bonheur\/stock|conso\/limites|dictee\/installer|codex\/installer|prerequis\/(verifier|agir)|telephone\/essai|onboarding\/terminer|etages\/[^/]+\/(modifier|retirer))/;
+  const routes = /^\/api\/(reglages|priorites|racines|choisir-dossier|comptes|personnalisation|equipe\/renommer|bonheur\/stock|conso\/limites|dictee\/installer|codex\/installer|prerequis\/(verifier|agir)|telephone\/essai|onboarding\/terminer|travail\/fichier|etages\/[^/]+\/(modifier|retirer))/;
   if (!routes.test(chemin)) return false;
   const corps = await ctx.lireCorps(req, chemin === '/api/bonheur/stock' ? 30 * 1024 * 1024 : 256 * 1024);
   try {
@@ -482,6 +485,18 @@ export async function routesReglages(req, res, chemin, ctx) {
       return json(res, 200, r), true;
     }
     if (chemin === '/api/bonheur/stock') return json(res, 200, remplacerStock(corps)), true;
+    // Coût › mode avancé : rien n'est enregistré tant qu'une ligne est fausse ; les erreurs donnent leur ligne
+    if (chemin === '/api/travail/fichier') {
+      const lu = lireFichierTravail(String(corps.texte ?? '').slice(0, 64 * 1024));
+      if (lu.erreurs.length) return json(res, 400, { erreur: t('Rien n’est enregistré : {n} ligne(s) à corriger.', { n: lu.erreurs.length }), erreurs: lu.erreurs }), true;
+      const changes = resumeChangements(lu);
+      modifierReglages({ travail: { personnalise: null } }); // la personnalisation est remplacée, pas fusionnée
+      modifierReglages({ travail: travailReglages({ travail: lu.travail }) });
+      modifierPriorites(patchConsignes(lu.consignes));
+      publierReglages();
+      emettre('priorites', prioritesPubliques());
+      return json(res, 200, { texte: fabriquerFichier(), changes, reglages: reglagesPublics() }), true;
+    }
     // Réglages › Priorités : un champ à la fois, ou un préréglage proposé selon les comptes présents
     if (chemin === '/api/priorites') {
       if (corps.prereglage) {

@@ -56,21 +56,25 @@ function assurerConfig() {
     perso.onboarding = true;
     ecrireJson(path.join(CONFIG, 'reglages.json'), perso);
   }
-  // 1.0.2 : salle de pause (agents qui attendent) et salle de repos (agents en réserve), juste au-dessus du hall.
-  const fichierEtages = path.join(CONFIG, 'etages.json');
-  const brutEtages = lireJson('config', 'etages.json');
+  ajouterSallesCommunes(path.join(CONFIG, 'etages.json'));
+}
+
+// 1.0.2 : salle de pause (agents qui attendent) et salle de repos (agents en réserve) ; 1.0.10 : isoloir (demandes
+// directes). Ajoutées juste au-dessus du hall quand elles manquent (installation ou immeuble de la démo plus anciens).
+function ajouterSallesCommunes(fichierEtages) {
+  const brutEtages = JSON.parse(fs.readFileSync(fichierEtages, 'utf8'));
   const manquants = SALLES_COMMUNES.filter((s) => !brutEtages.etages.some((e) => e.type === s.type));
-  if (manquants.length) {
-    for (const e of brutEtages.etages) if (e.ordre >= 1) e.ordre += manquants.length;
-    manquants.forEach((s, i) => brutEtages.etages.push({ ...s, ordre: 1 + i }));
-    ecrireJson(fichierEtages, brutEtages);
-  }
+  if (!manquants.length) return;
+  for (const e of brutEtages.etages) if (e.ordre >= 1) e.ordre += manquants.length;
+  manquants.forEach((s, i) => brutEtages.etages.push({ ...s, ordre: 1 + i }));
+  ecrireJson(fichierEtages, brutEtages);
 }
 
 // Étages communs (sans projet) : le DG n'y envoie jamais de tâche, la scène y place les agents.
 const SALLES_COMMUNES = [
   { id: 'salle-repos', nom: 'Salle de repos', type: 'repos', projet: null, actif: true, note: 'Les agents en réserve y dorment, prêts à être réembauchés.' },
   { id: 'salle-pause', nom: 'Salle de pause', type: 'pause', projet: null, actif: true, note: 'Les agents qui attendent leur tour y jouent (billard, baby-foot, télé).' },
+  { id: 'isoloir', nom: 'Isoloir', type: 'isoloir', projet: null, actif: true, note: 'Demandes directes (1.0.10) : un agent seul, sans DG, comme dans Claude Code ou Codex.' },
 ];
 assurerConfig();
 
@@ -116,6 +120,7 @@ export function utiliserImmeubleDemo(dossierDemo, { neuf = false } = {}) {
     const brut = adapterDefauts(fs.readFileSync(path.join(DEFAUTS, 'etages-demo.json'), 'utf8')).replaceAll('{DEMO}', societeDemo.replace(/\\/g, '\\\\'));
     fs.writeFileSync(FICHIER_ETAGES, brut);
   }
+  ajouterSallesCommunes(FICHIER_ETAGES);
   for (const e of JSON.parse(fs.readFileSync(FICHIER_ETAGES, 'utf8')).etages) {
     if (!e.projet) continue;
     fs.mkdirSync(e.projet, { recursive: true });

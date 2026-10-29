@@ -381,6 +381,12 @@ export class Etat {
           this.dgDepuis = t;
         }
         break;
+      case 'sousagents': {
+        // sous-agents lancés par un agent (outil Agent, 1.0.10) : ils apparaissent aux postes libres de son étage
+        const ta = this.taches.get(ev.tache);
+        if (ta) ta.sousAgents = ev.n;
+        break;
+      }
       case 'outil': {
         const liste = this.outils.get(ev.tache) || [];
         liste.push({ nom: ev.nom, cible: ev.cible, t });

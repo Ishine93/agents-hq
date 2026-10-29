@@ -11,6 +11,10 @@ import { message, emettre, etagesPublics } from './bus.js';
 import { ajouterServicesEtage } from './services.js';
 import * as plateforme from './plateforme.js';
 import { t } from './i18n.js';
+import { THEMES_BUREAU, decorsPermis } from '../web/plans/index.js';
+
+// Étages qui font partie de l'immeuble : ni désactivables, ni retirables, sans dossiers à eux.
+export const ETAGES_IMMEUBLE = ['direction', 'hall', 'salle-pause', 'salle-repos', 'isoloir'];
 
 const MEMO = path.join(RACINE, 'runtime', 'detection.json');
 const norme = (p) => path.resolve(p).toLowerCase();
@@ -39,7 +43,10 @@ export const TYPES = {
 };
 
 // Décors qu'un étage de projet peut prendre à la place de celui de son type (Réglages › Étages, 1.0.9).
-export const DECORS = ['etudes', 'atelier3d', 'unreal', 'roblox', 'bac'];
+// Décors d'un étage (Réglages › Étages) : thèmes d'origine pour un étage de projet (1.0.9) et décors au choix de sa
+// famille (1.0.10, web/plans/), y compris pour les étages de l'immeuble.
+export const DECORS = THEMES_BUREAU;
+export { decorsPermis };
 
 export function typeDe(dir) {
   const a = (f) => fs.existsSync(path.join(dir, f));
@@ -227,7 +234,7 @@ export function modifierEtage(id, { nom, actif, fiche, dossiers, decor } = {}) {
   if (!e) throw new Error(t('étage inconnu'));
   if (dossiers !== undefined) {
     // les salles communes et la Direction (qui suit les dossiers racines) n'ont pas de dossiers à elles
-    if (!e.projet || ['direction', 'hall', 'salle-pause', 'salle-repos'].includes(id)) throw new Error(t("cet étage fait partie de l'immeuble"));
+    if (!e.projet || ETAGES_IMMEUBLE.includes(id)) throw new Error(t("cet étage fait partie de l'immeuble"));
     const liste = validerDossiers(Array.isArray(dossiers) ? dossiers : [], id);
     // `dossiers` juste après `projet`, comme dans etages.json
     const cles = Object.keys(e).filter((k) => k !== 'dossiers');
@@ -239,10 +246,9 @@ export function modifierEtage(id, { nom, actif, fiche, dossiers, decor } = {}) {
     }
   }
   if (nom !== undefined) e.nom = String(nom).trim().slice(0, 40) || e.nom;
-  if (actif !== undefined && !['direction', 'hall', 'salle-pause', 'salle-repos'].includes(id)) e.actif = !!actif;
+  if (actif !== undefined && !ETAGES_IMMEUBLE.includes(id)) e.actif = !!actif;
   if (decor !== undefined) {
-    if (!e.projet) throw new Error(t("cet étage fait partie de l'immeuble"));
-    if (decor && !DECORS.includes(decor)) throw new Error(t('décor inconnu'));
+    if (decor && !decorsPermis(e.type).includes(decor)) throw new Error(t('décor inconnu'));
     if (decor) e.decor = decor;
     else delete e.decor; // décor du type
   }
@@ -258,7 +264,7 @@ export function modifierEtage(id, { nom, actif, fiche, dossiers, decor } = {}) {
 
 // Retire un étage de l'immeuble (le projet n'est pas touché).
 export function retirerEtage(id) {
-  if (['direction', 'hall', 'salle-pause', 'salle-repos'].includes(id)) throw new Error(t("cet étage fait partie de l'immeuble"));
+  if (ETAGES_IMMEUBLE.includes(id)) throw new Error(t("cet étage fait partie de l'immeuble"));
   const brut = lireEtages();
   const i = brut.etages.findIndex((x) => x.id === id);
   if (i < 0) throw new Error(t('étage inconnu'));

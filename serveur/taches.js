@@ -5,6 +5,7 @@ import { message, commande, modification } from './bus.js';
 import { penseeTraduite } from './traduction-pensees.js';
 import { skillsSession, optionsSkills, lireSkill, analyser as analyserSkill, dossierSkill } from './skills.js';
 import { dossierPieces, sauverCapture, piecePublique } from './pieces.js';
+import { blocRegistreAgent } from './registre.js';
 import { serveurQg, definitionsQg, OUTILS_QG } from './outils-qg.js';
 import { imagesActives, NOM_OUTIL as OUTIL_IMAGE } from './delegation.js';
 import { REGLAGES, directive, etage as trouverEtage } from './config.js';
@@ -83,7 +84,8 @@ function blocAmont(ref, r) {
 }
 
 // consigne : celle de l'utilisateur pour le type de cette tâche (routeur.consigneTache), recopiée telle quelle
-export function promptProduction(t, amonts, piecesDossier = [], consigne = '') {
+// registre : chemin du registre du dossier quand le gardien du contexte est actif (1.0.10)
+export function promptProduction(t, amonts, piecesDossier = [], consigne = '', registre = null) {
   const e = trouverEtage(t.etage);
   const parties = [
     `[TÂCHE ${t.ref} — ${t.titre}]`,
@@ -103,6 +105,7 @@ export function promptProduction(t, amonts, piecesDossier = [], consigne = '') {
   if (piecesDossier.length) {
     parties.push('', "IMAGES JOINTES PAR L'UTILISATEUR (lis-les avec Read si elles servent ta mission) :", ...piecesDossier.map((p) => `- ${p.chemin}${p.nom ? ` (${p.nom})` : ''}`));
   }
+  if (registre) parties.push('', blocRegistreAgent(registre));
   parties.push(
     '',
     "Outils du QG : mcp__qg__montrer affiche des images à l'utilisateur ; mcp__qg__demander lui pose une question (avec options illustrées) et attend sa réponse, seulement pour une décision qui lui revient.",
@@ -136,7 +139,8 @@ function optionsProduction(t, dossier, ctx, captures) {
   const r = t.x.route;
   const modele = r ? r.modele : t.modele;
   const effort = r ? r.effort : t.effort;
-  const mcp = optionsMcp(t.etage, r?.compte && r.compte !== compteTache(dossier) ? r.compte : dossier.compte, t.x.profil.startsWith('lecture') || /haiku/i.test(modele || ''));
+  // connecteurs du compte qui fait vraiment tourner la session (route, sinon « Agents de la demande », sinon la demande)
+  const mcp = optionsMcp(t.etage, r?.compte || compteTache(dossier), t.x.profil.startsWith('lecture') || /haiku/i.test(modele || ''));
   const repPieces = dossierPieces(dossier.id);
   // skills de l'agent : « toujours » dans son prompt, « disponibles » chargés seulement s'il en a besoin
   const sk = optionsSkills(skillsSession({ role: 'agent', dossier, tache: t, etage: t.etage }), { projet: e.projet });
@@ -208,6 +212,94 @@ function demandeProduction(t, dossier, ctx, captures) {
   };
 }
 
+// ---------------------------------------------------------------- demande directe (1.0.10)
+// Un agent seul, comme dans Claude Code ou Codex : le texte de l'utilisateur tel quel, le modèle et l'effort choisis à
+// l'envoi, le prompt système de Claude Code, aucune sortie structurée, aucun vérificateur. Il peut lancer ses propres
+// sous-agents (outil Agent) et des commandes en arrière-plan. Les zones d'écriture et les refus restent ceux du QG.
+const OUTILS_DIRECT = ['Agent', 'TaskStop', 'Monitor'];
+
+function consignesDirect(dossier, langue = REGLAGES.langueIA || 'fr') {
+  const lieu = dossier.direct || {};
+  const fr = [
+    "Tu travailles dans le QG des agents, en DEMANDE DIRECTE : l'utilisateur te parle comme dans Claude Code, sans directeur ni découpage. Réponds-lui directement, en français.",
+    `Dossier de travail : ${lieu.cwd || '?'}. Tu y écris librement ; ailleurs, l'écriture demande son accord.`,
+    "Organise-toi comme tu l'entends : si c'est utile, lance tes propres sous-agents (outil Agent) ou des commandes en arrière-plan.",
+  ];
+  const en = [
+    'You work in the Agents HQ, as a DIRECT REQUEST: the user talks to you as in Claude Code, with no director and no task split. Answer them directly, in English.',
+    `Working folder: ${lieu.cwd || '?'}. You may write there freely; writing elsewhere needs their approval.`,
+    'Organize yourself as you see fit: if useful, start your own sub-agents (Agent tool) or background commands.',
+  ];
+  return (langue === 'en' ? en : fr).join('\n');
+}
+
+function optionsDirect(t, dossier, ctx) {
+  const lieu = dossier.direct;
+  const profil = optionsProfil('edition');
+  const r = t.x.route;
+  const mcp = optionsMcp(lieu.etage || 'hall', r?.compte || dossier.compte, false);
+  const repPieces = dossierPieces(dossier.id);
+  const sk = optionsSkills(skillsSession({ role: 'agent', dossier, tache: t, etage: lieu.etage || t.etage }), { projet: lieu.cwd });
+  return {
+    model: r ? r.modele : t.modele,
+    effort: r ? r.effort : t.effort,
+    cwd: lieu.cwd,
+    additionalDirectories: [...(lieu.dossiersSup || []), ...(fs.existsSync(repPieces) ? [repPieces] : [])],
+    ...profil,
+    ...(sk.plugins ? { plugins: sk.plugins, skills: sk.skills } : {}),
+    tools: [...profil.tools, ...OUTILS_DIRECT, ...(sk.plugins ? ['Skill'] : [])],
+    allowedTools: [...profil.allowedTools, ...mcp.autorises, 'TodoWrite', ...OUTILS_DIRECT, ...(sk.plugins ? ['Skill'] : [])],
+    disallowedTools: [...profil.disallowedTools, ...mcp.interdits],
+    canUseTool: ctx.canUseTool,
+    settingSources: ['project'],
+    mcpServers: mcp.mcpServers,
+    strictMcpConfig: mcp.strictMcpConfig,
+    systemPrompt: { type: 'preset', preset: 'claude_code', append: consignesDirect(dossier) + sk.append },
+    abortController: ctx.abortController,
+    resume: ctx.resume || undefined,
+    title: `QG ${dossier.id} — ${t.titre}`,
+  };
+}
+
+export async function produireDirect(t, dossier, ctx) {
+  const lieu = dossier.direct;
+  const sk = skillsSession({ role: 'agent', dossier, tache: t, etage: lieu.etage || t.etage });
+  const repPieces = dossierPieces(dossier.id);
+  const s = await executerSession({
+    prompt: ctx.prompt,
+    options: optionsDirect(t, dossier, ctx),
+    demande: {
+      role: 'tache',
+      profil: 'edition',
+      cwd: lieu.cwd,
+      dossiersSup: lieu.dossiersSup || [],
+      pieces: fs.existsSync(repPieces) ? repPieces : null,
+      consignes: consignesDirect(dossier) + optionsSkills(sk, { projet: lieu.cwd }).append,
+      schema: null,
+      outilsQg: null,
+      mcp: lieu.etage ? mcpDemande(lieu.etage, false) : {},
+      skills: { toujours: sk.toujours, dispo: skillsDemande(sk.dispo) },
+      titre: `QG ${dossier.id} — ${t.titre}`,
+    },
+    compte: t.x.route?.compte || dossier.compte,
+    conso: { role: 'tache', dossier: dossier.id, tache: t.id, etage: t.etage },
+    compaction: profilEffectif(dossier).compactionAgents,
+    surInit: ctx.surInit,
+    surOutil: ctx.surOutil,
+    surActivite: ctx.surActivite,
+    surCompaction: ctx.surCompaction,
+    surContexte: ctx.surContexte,
+    surSousAgents: ctx.surSousAgents,
+    surCommande: (c) => commande(t.id, dossier.id, c),
+    surModification: (mod) => modification(t, dossier.id, mod),
+    surPensee: penseeTraduite(t.id, dossier.id),
+    canal: ctx.canal,
+  });
+  // pas de sortie structurée : la réponse est le dernier message de l'agent
+  const raison = s.erreur || s.exception || !s.result || s.result.subtype !== 'success' ? raisonEchec(s) : null;
+  return { sessionId: s.sessionId, texte: raison ? null : String(s.result.result || '').trim(), echec: raison, erreur: s.erreur, limite: s.limite, contexte: s.contexte ?? null, compte: s.compte || t.x.route?.compte || dossier.compte, avertissements: s.avertissements || null };
+}
+
 // ctx : { canUseTool, abortController, resume, prompt, surInit, surOutil, surActivite, canal }
 export async function produire(t, dossier, ctx) {
   const captures = [];
@@ -223,6 +315,7 @@ export async function produire(t, dossier, ctx) {
     surActivite: ctx.surActivite,
     surCompaction: ctx.surCompaction,
     surContexte: ctx.surContexte,
+    surSousAgents: ctx.surSousAgents, // sous-agents (explorateur…) visibles à l'étage
     surCommande: (c) => commande(t.id, dossier.id, c),
     surModification: (mod) => modification(t, dossier.id, mod),
     surPensee: penseeTraduite(t.id, dossier.id),
@@ -241,7 +334,7 @@ export async function produire(t, dossier, ctx) {
   });
   const raison = raisonEchec(s);
   const plafond = s.result?.subtype === 'error_max_budget_usd' ? (plafondOptions(t, dossier).maxBudgetUsd ?? null) : undefined;
-  return { sessionId: s.sessionId, sortie: raison ? null : s.result.structured_output, echec: raison, erreur: s.erreur, limite: s.limite, contexte: s.contexte ?? null, compte: s.compte || t.x.route?.compte || compteTache(dossier), ...(plafond !== undefined ? { plafondAtteint: plafond ?? true } : {}) };
+  return { sessionId: s.sessionId, sortie: raison ? null : s.result.structured_output, echec: raison, erreur: s.erreur, limite: s.limite, contexte: s.contexte ?? null, compte: s.compte || t.x.route?.compte || compteTache(dossier), avertissements: s.avertissements || null, ...(plafond !== undefined ? { plafondAtteint: plafond ?? true } : {}) };
 }
 
 function git(cwd, args) {

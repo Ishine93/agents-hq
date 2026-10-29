@@ -42,6 +42,7 @@ export function rendreMcp(box, ui) {
   const blocComptes = h('section', { class: 'reglage' }, ...titreI('mcp-comptes', t('Connecteurs MCP par compte'), [
     t('Les connecteurs de ton compte claude.ai (Notion, Drive, Gmail…) et les serveurs MCP de tes projets. Par défaut, un connecteur n’est jamais donné aux agents : choisis « Sur demande » (chaque appel lève la main) ou « Auto ».'),
     ...modes,
+    t('Avec plusieurs IA : seuls les agents Claude reçoivent les connecteurs de leur compte claude.ai, et une tâche sur Haiku n’en reçoit aucun. Codex et les agents ACP (Grok, Cursor…) ne reçoivent que les MCP des projets réglés sur « Auto » : ils ne savent pas lever la main à chaque appel. Le DG le sait et met sur Claude les tâches qui ont besoin d’un connecteur.'),
     exempleAide(t('tu veux qu’un agent lise une page Notion : mets Notion sur « Sur demande » ; à chaque lecture, il lève la main et tu réponds oui ou non.')),
   ]));
   for (const c of comptes) {
@@ -63,7 +64,11 @@ export function rendreMcp(box, ui) {
           relire),
         serveurs.length
           ? h('ul', { class: 'liste-mcp' }, serveurs.map((s) => ligneMcp(ui, 'compte', c.id, s)))
-          : h('div', { class: 'vide' }, info.decouverte ? t('Aucun connecteur.') : t('Pas encore lu : clique sur « Relire les connecteurs ».'))),
+          : (c.fournisseur || 'claude') !== 'claude'
+            ? h('div', { class: 'vide' }, c.fournisseur === 'codex'
+              ? t('Codex ne reçoit pas les connecteurs de claude.ai, ni les connecteurs (apps) de ChatGPT sur le web : ceux-là restent sur chatgpt.com. Il reçoit les outils du QG et les MCP de tes projets réglés sur « Auto » ; ceux en « Sur demande » ne lui sont pas donnés, car il ne peut pas lever la main à chaque appel.')
+              : t('Un agent ACP ne reçoit pas les connecteurs de claude.ai. Il reçoit les outils du QG et les MCP de tes projets réglés sur « Auto » ; ceux en « Sur demande » ne lui sont pas donnés.'))
+            : h('div', { class: 'vide' }, info.decouverte ? t('Aucun connecteur.') : t('Pas encore lu : clique sur « Relire les connecteurs ».'))),
     );
   }
   sections.push(blocComptes);
@@ -72,6 +77,7 @@ export function rendreMcp(box, ui) {
   const blocEtages = h('section', { class: 'reglage' }, ...titreI('mcp-etages', t('MCP des projets (par étage)'), [
     t('Les serveurs MCP qu’un projet déclare dans son fichier .mcp.json, avec les mêmes trois choix que les connecteurs des comptes.'),
     ...modes,
+    t('« Sur demande » ne vaut qu’avec Claude. Codex et les agents ACP reçoivent seulement les serveurs réglés sur « Auto ».'),
   ]));
   if (!parEtage.length) blocEtages.append(h('div', { class: 'vide' }, t('Aucun projet ne déclare de serveur MCP (fichier .mcp.json).')));
   for (const [id, liste] of parEtage.sort((a, b) => ((S.etage(b[0]) || {}).ordre || 0) - ((S.etage(a[0]) || {}).ordre || 0))) {

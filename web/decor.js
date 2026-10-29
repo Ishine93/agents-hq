@@ -7,6 +7,10 @@ import {
 import { W, H, HW } from './carte.js';
 import { texteCanvas, tronquer, mesurer, dessinerTexte } from './police.js';
 import { langueCourante } from './i18n.js';
+import { MEUBLES as MEUBLES_DECORS, ANIMES as ANIMES_DECORS, JEUX as JEUX_DECORS, THEMES as THEMES_DECORS, SOLS as SOLS_DECORS, MURS as MURS_DECORS, DECORS_MURS } from './meubles/index.js';
+
+/** Ce meuble d'un décor au choix a-t-il une animation (web/meubles/) ? */
+export const animeDecor = (type) => !!ANIMES_DECORS[type];
 
 // Texte d'une enseigne peinte, en français ou en anglais. La langue est lue quand les murs sont peints :
 // construireCouche (non mise en cache) repeint tout à chaque changement d'étage.
@@ -80,7 +84,7 @@ const THEMES = {
   },
 };
 export function theme(type) {
-  return THEMES[type] || THEMES.roblox;
+  return THEMES[type] || THEMES_DECORS[type] || THEMES.roblox;
 }
 
 // ---------- tuiles de sol ----------
@@ -217,6 +221,8 @@ function tuile(typeTheme, zone, x, y) {
         if (dansTuile(px, py)) pixel(g, [px, py], nuance(col, -0.08));
       }
     }
+  } else if (SOLS_DECORS[motif]) {
+    SOLS_DECORS[motif](g, col, { parite, variante, rnd, x, y }, outils());
   }
   bordsBas(g, nuance(col, motif === 'damier' && parite ? 0.12 : -0.2));
   cacheTuiles.set(cle, c);
@@ -347,6 +353,10 @@ function murPlat(typeTheme, longueur, cote, etage) {
       break;
     }
     default: {
+      if (MURS_DECORS[T.mur]) {
+        MURS_DECORS[T.mur](g, longueur, cote, rnd, outils());
+        break;
+      }
       R(0, 0, longueur, HW, '#9c9c97');
       for (let i = 0; i < longueur * 2; i++) {
         g.fillStyle = rnd() < 0.5 ? '#8f8f8a' : '#a9a9a3';
@@ -360,7 +370,8 @@ function murPlat(typeTheme, longueur, cote, etage) {
       }
     }
   }
-  if (typeTheme === 'pause' || typeTheme === 'repos') {
+  if (DECORS_MURS[typeTheme]) DECORS_MURS[typeTheme](g, cote, longueur, etage, outils());
+  else if (typeTheme === 'pause' || typeTheme === 'repos') {
     if (cote === 'droite') decorMurDroitDetente(g, typeTheme, longueur);
     else decorMurGaucheDetente(g, typeTheme, longueur, etage);
   } else if (typeTheme === 'direction') {
@@ -765,13 +776,14 @@ export function cisailler(plat, cote, debut, v0 = 0) {
 
 // ---------- couche statique : sol + murs ----------
 export function construireCouche(carte, etage) {
-  const T = theme(carte.type);
+  const look = carte.look || carte.type;
+  const T = theme(look);
   const c = creerCanvas(LARGEUR_MONDE, HAUTEUR_MONDE);
   const g = c.getContext('2d');
   for (let y = 0; y < H; y++) {
     for (let x = 0; x < W; x++) {
       const [tx, ty] = coinTuile(x, y);
-      g.drawImage(tuile(carte.type, carte.zones[y][x], x, y), tx, ty);
+      g.drawImage(tuile(look, carte.zones[y][x], x, y), tx, ty);
     }
   }
   const P0 = projeteur(OX, OY);
@@ -785,7 +797,7 @@ export function construireCouche(carte, etage) {
   // tapis du salon de l'équipe (réserve d'agents)
   if (carte.salon) {
     const sl = carte.salon;
-    const coul = { roblox: ['#7a2f8f', '#b155c9'], unreal: ['#123a52', '#1f6f8a'], direction: ['#c9a227', '#2a3d6e'], serveur: ['#2b4a3a', '#3d6a52'], bac: ['#1d1d1d', '#f5c400'] }[carte.type] || ['#6b3a2a', '#c27a4a'];
+    const coul = T.salon || { roblox: ['#7a2f8f', '#b155c9'], unreal: ['#123a52', '#1f6f8a'], direction: ['#c9a227', '#2a3d6e'], serveur: ['#2b4a3a', '#3d6a52'], bac: ['#1d1d1d', '#f5c400'] }[look] || ['#6b3a2a', '#c27a4a'];
     poly(g, [P0(sl.x0 + 0.08, sl.y0 + 0.08), P0(sl.x1 - 0.1, sl.y0 + 0.08), P0(sl.x1 - 0.1, sl.y1 - 0.12), P0(sl.x0 + 0.08, sl.y1 - 0.12)], coul[0]);
     poly(g, [P0(sl.x0 + 0.22, sl.y0 + 0.22), P0(sl.x1 - 0.24, sl.y0 + 0.22), P0(sl.x1 - 0.24, sl.y1 - 0.26), P0(sl.x0 + 0.22, sl.y1 - 0.26)], coul[1]);
   }
@@ -793,10 +805,10 @@ export function construireCouche(carte, etage) {
   poly(g, [P0(0, H, 0), P0(W, H, 0), P0(W, H, -10), P0(0, H, -10)], T.dalle);
   poly(g, [P0(W, 0, 0), P0(W, H, 0), P0(W, H, -10), P0(W, 0, -10)], nuance(T.dalle, -0.25));
   // murs
-  const droite = murPlat(carte.type, W * 32, 'droite', etage);
+  const droite = murPlat(look, W * 32, 'droite', etage);
   const md = cisailler(droite, 'droite', 0);
   g.drawImage(md.c, md.x, md.y);
-  const gauche = murPlat(carte.type, H * 32, 'gauche', etage);
+  const gauche = murPlat(look, H * 32, 'gauche', etage);
   const gg = gauche.getContext('2d');
   gg.fillStyle = 'rgba(0,0,20,0.14)';
   gg.fillRect(0, 0, gauche.width, gauche.height);
@@ -814,6 +826,20 @@ export function construireCouche(carte, etage) {
   for (let u = 0; u < W * 32 + 4; u++) g.fillRect(OX + u, OY + Math.floor(u / 2) - HW - 3 - (u < 4 ? 0 : 0), 1, 1);
   for (let u = 0; u < H * 32 + 4; u++) g.fillRect(OX - 1 - u, OY + Math.floor(u / 2) - HW - 3, 1, 1);
   return c;
+}
+
+// Outils prêtés aux décors au choix (web/meubles/) : ce qu'il faut pour dessiner comme decor.js.
+let OUTILS = null;
+function outils() {
+  if (!OUTILS) {
+    OUTILS = {
+      spriteTuile, spriteBloc, pieds, plante, livres, livresX, ecranContenu, litFait, theme, cadre, fenetre, affiche,
+      plaqueEtage, enseigneQG, etoile, guirlande, texteDouble, enseigne, texteCanvas, mesurer, tronquer, dessinerTexte,
+      creerCanvas, poly, projeteur, prisme, quadY, quadX, quadZ, pixel, contourner, nuance, melange, hacher, aleatoire, modele,
+      CONTOUR, HW, W, H, BOIS_LIT, DRAP, COUVERTURES,
+    };
+  }
+  return OUTILS;
 }
 
 // ---------- mobilier ----------
@@ -1634,7 +1660,9 @@ export function spriteMeuble(it, typeTheme, etat = {}) {
       break;
     }
     default:
-      s = spriteTuile(20, (g, P) => prisme(g, P, 0.3, 0.3, 0.7, 0.7, 0, 10, '#ff00ff'));
+      s = MEUBLES_DECORS[it.type]
+        ? MEUBLES_DECORS[it.type](it, typeTheme, etat, outils())
+        : spriteTuile(20, (g, P) => prisme(g, P, 0.3, 0.3, 0.7, 0.7, 0, 10, '#ff00ff'));
   }
   if (cacheMeubles.size > 3000) cacheMeubles.clear();
   cacheMeubles.set(cle, s);
@@ -1678,6 +1706,8 @@ export function animerMeuble(g, it, tx, ty, t) {
     pixel(g, P(sx, 0.6, 37), '#ffffff', 3, 1);
     const tir = (t / 320) % 1;
     pixel(g, P(sx + 0.03, 0.6, 39 + tir * 9), '#ffe14d', 1, 1);
+  } else if (ANIMES_DECORS[it.type]) {
+    ANIMES_DECORS[it.type](g, it, tx, ty, t, outils());
   } else if (it.type === 'jukebox') {
     const cols = ['#ff5fa2', '#3df2ff', '#ffe14d', '#7dff6a'];
     const k = Math.floor(t / 420);
@@ -1693,6 +1723,7 @@ export function animerMeuble(g, it, tx, ty, t) {
 // Jeux en cours (balle de baby-foot, de ping-pong, bille blanche du billard) : `actif` quand au moins deux joueurs sont là
 // (un seul suffit au billard).
 export function animerJeu(g, it, tx, ty, t, actif) {
+  if (JEUX_DECORS[it.type]) return JEUX_DECORS[it.type](g, it, tx, ty, t, actif, outils());
   const P = projeteur(tx + 32, ty);
   if (it.type === 'billard') {
     // la blanche part du bas de la table, file vers le triangle puis revient se placer
@@ -1735,7 +1766,7 @@ export const resteProgrammeTele = (t) => TELE_PROGRAMME_MS - (t % TELE_PROGRAMME
 export function spriteTele(carte, t) {
   const canal = programmeTele(t) === 'foot' ? 0 : 1;
   const f = Math.floor(t / 160) % 48;
-  const cle = carte.type + '|' + canal + '|' + f;
+  const cle = (carte.skin || carte.type) + '|' + canal + '|' + f;
   let r = cacheTele.get(cle);
   if (r) return r;
   const debut = Math.round(carte.tele.x0 * 32);
@@ -1911,7 +1942,7 @@ export function spriteCloison(cote, typeTheme) {
 const cacheAsc = new Map();
 export function spriteAscenseur(carte, ouverture, etiquetteEtage, sens) {
   const o = Math.round(Math.max(0, Math.min(1, ouverture)) * 8);
-  const cle = o + '|' + etiquetteEtage + '|' + sens + '|' + carte.type;
+  const cle = o + '|' + etiquetteEtage + '|' + sens + '|' + (carte.look || carte.type) + '|' + (carte.ascenseurMetal || '');
   let r = cacheAsc.get(cle);
   if (r) return r;
   const largeur = (carte.ascenseur.y1 - carte.ascenseur.y0) * 32;
@@ -1922,7 +1953,7 @@ export function spriteAscenseur(carte, ouverture, etiquetteEtage, sens) {
     g.fillStyle = col;
     g.fillRect(x, y, w, h);
   };
-  const metal = carte.type === 'direction' ? '#c9a227' : '#9aa3ad';
+  const metal = carte.ascenseurMetal || (carte.type === 'direction' ? '#c9a227' : '#9aa3ad');
   R(5, 13, largeur - 10, HW - 13, CONTOUR);
   R(6, 14, largeur - 12, HW - 14, metal);
   R(7, 15, largeur - 14, 1, nuance(metal, 0.3));

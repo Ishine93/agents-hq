@@ -198,7 +198,7 @@ export class Accueil {
     return {
       contenu: [
         h('h4', {}, t('Connecteurs MCP')),
-        h('p', { class: 'meta' }, t('Les connecteurs de ton compte claude.ai (Notion, Drive, Gmail…) ne sont jamais donnés aux agents par défaut. Tu pourras les activer un par un dans Réglages › Connecteurs MCP. Les serveurs MCP déclarés par un projet (.mcp.json) demandent ton accord à chaque appel.')),
+        h('p', { class: 'meta' }, t('Les connecteurs de ton compte claude.ai (Notion, Drive, Gmail…) ne sont jamais donnés aux agents par défaut. Tu pourras les activer un par un dans Réglages › Connecteurs MCP. Les serveurs MCP déclarés par un projet (.mcp.json) demandent ton accord à chaque appel avec Claude ; Codex et les autres agents ne les reçoivent que si tu les règles sur « Auto ».')),
         h('h4', {}, t('Dictée')),
         dic.disponible
           ? h('p', {}, '✓ ' + t('Dictée locale prête : bouton 🎤 ou {raccourci}.', { raccourci: infosPlateforme(this.store).raccourciDictee }))

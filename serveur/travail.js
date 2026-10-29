@@ -19,7 +19,7 @@ export function profilsTravail() {
 }
 
 // Les boutons connus et leurs valeurs permises (pour filtrer « personnalise » et les valeurs inconnues).
-const ENUMS = {
+export const ENUMS = {
   decoupage: ['chantier', 'parallele', 'actuel'],
   agentDirect: ['jamais', 'petite', 'projet-unique'],
   verifDefaut: ['self', 'risque', 'code'],
@@ -28,9 +28,10 @@ const ENUMS = {
   perimetre: ['strict', 'complements', 'bonus'],
   exploration: ['interdite', 'permise', 'encouragee'],
   ambiance: [null, false],
+  gardien: ['non', 'registre', 'relecture'], // gardien du contexte (1.0.10)
 };
-const NOMBRES = ['compactionAgents', 'compactionVerif', 'compactionDg', 'maxCompactions', 'maxTaches', 'verifMaxTurns', 'maxRework', 'seuilAccordFenetre', 'plafondTacheFacteur'];
-const PEUT_ETRE_NUL = new Set(['seuilAccordFenetre', 'plafondTacheFacteur', 'maxCompactions']);
+export const NOMBRES = ['compactionAgents', 'compactionVerif', 'compactionDg', 'maxCompactions', 'maxTaches', 'verifMaxTurns', 'maxRework', 'seuilAccordFenetre', 'plafondTacheFacteur'];
+export const PEUT_ETRE_NUL = new Set(['seuilAccordFenetre', 'plafondTacheFacteur', 'maxCompactions']);
 
 function valeurValide(cle, v) {
   if (cle in ENUMS) return ENUMS[cle].includes(v);
@@ -128,6 +129,10 @@ const TEXTES = {
     },
     passation: '- Passation : une tâche dont le résultat sert à d\'autres l\'écrit en entier dans un fichier livrable ; ses notes de passation disent où le trouver et quoi y regarder.',
     modele: '- Modèle et effort : ce profil n\'y touche pas ; choisis-les pour chaque tâche selon sa difficulté.',
+    gardien: {
+      registre: "- Gardien du contexte : le QG tient le registre du dossier (la demande, ses compléments, le plan, ce que chaque tâche rend) et chaque agent sait où le lire. Pour un gros document du projet (cahier des charges, spécification de milliers de lignes), donne à chaque tâche les sections à lire (titres ou numéros de lignes) plutôt que le document entier.",
+      relecture: "- Gardien du contexte : le QG tient le registre du dossier (la demande, ses compléments, le plan, ce que chaque tâche rend) et chaque agent sait où le lire. Pour un gros document du projet (cahier des charges, spécification de milliers de lignes), donne à chaque tâche les sections à lire (titres ou numéros de lignes) plutôt que le document entier. Après chaque tâche terminée, tu recevras son rapport complet : vérifie qu'il colle à la demande et aux décisions déjà prises, et corrige la suite s'il dérive.",
+    },
     rappel: (n, m) => `Rappel du PROFIL DE TRAVAIL : Coût = ${n} (${m} tâches au plus).`,
   },
   en: {
@@ -155,6 +160,10 @@ const TEXTES = {
     },
     passation: '- Handoff: a task whose result serves others writes it in full to a deliverable file; its handoff notes say where to find it and what to look at.',
     modele: '- Model and effort: this profile does not touch them; choose them for each task according to its difficulty.',
+    gardien: {
+      registre: '- Context keeper: the HQ keeps the request log (the request, its additions, the plan, what each task returns) and every agent knows where to read it. For a large project document (requirements, a specification of thousands of lines), give each task the sections to read (headings or line numbers) rather than the whole document.',
+      relecture: '- Context keeper: the HQ keeps the request log (the request, its additions, the plan, what each task returns) and every agent knows where to read it. For a large project document (requirements, a specification of thousands of lines), give each task the sections to read (headings or line numbers) rather than the whole document. After each finished task you will receive its full report: check that it fits the request and the decisions already made, and correct the rest if it drifts.',
+    },
     rappel: (n, m) => `WORK PROFILE reminder: Cost = ${n} (at most ${m} tasks).`,
   },
 };
@@ -170,7 +179,8 @@ export function blocDirective(profil, langue = REGLAGES.langueIA || 'fr') {
     T.perimetre[profil.perimetre] || T.perimetre.bonus,
     T.passation,
     T.modele,
-  ].join('\n');
+    T.gardien[profil.gardien] || null,
+  ].filter(Boolean).join('\n');
 }
 
 export function rappelProfil(profil, langue = REGLAGES.langueIA || 'fr') {

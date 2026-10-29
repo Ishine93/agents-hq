@@ -219,6 +219,15 @@ export function boutonsCout() {
         [t('vide'), t('aucune limite : une tâche peut coûter bien plus que prévu.')],
       ],
       exemple: t('une tâche estimée à 2 $, avec 3 : elle s’arrête si elle atteint 6 $.') },
+    { cle: 'gardien', lib: t('Gardien du contexte'),
+      quoi: t('Sur une grosse demande, chaque agent ne voit que sa tâche, et le DG se résume quand sa mémoire est pleine : un détail décidé au début peut se perdre, et le travail peut dériver peu à peu. Le gardien garde le fil du dossier.'),
+      choix: [
+        ['non', t('non'), t('Comme avant : chaque agent reçoit sa mission et les notes des tâches dont il dépend.'), t('Rien en plus.'), t('Sur une très grosse demande, un détail du début peut se perdre.')],
+        ['registre', t('registre'), t('Le QG tient le registre du dossier : ta demande, tes compléments et tes réponses, le plan, et ce que chaque tâche a rendu. Chaque agent sait où le lire et le lit si sa tâche en dépend. Les agents apprennent aussi à lire un gros document par sections plutôt qu’en entier.'), t('Presque gratuit : aucun appel à l’IA en plus.'), t('Personne ne vérifie que le travail reste cohérent : chaque agent lit le registre s’il le juge utile.')],
+        ['relecture', t('relecture par le DG'), t('En plus du registre, le DG relit le rapport de chaque tâche terminée et vérifie qu’il colle à ta demande et aux décisions prises : rien d’oublié, rien de contradictoire, pas de dérive. S’il voit un écart, il corrige la suite du plan : il prévient les tâches concernées, en ajoute ou en retire.'), t('Le plus sûr sur une grosse demande, par exemple un cahier des charges de plusieurs milliers de lignes.'), t('Le plus cher : le DG se réveille après chaque tâche, avec son modèle et son effort (jamais baissés). Monte aussi « Compaction du DG » pour qu’il garde plus de choses en tête.')],
+      ],
+      note: t('Le registre est un fichier du dossier (registre.md, à côté des images jointes), refait à chaque étape. Une demande directe n’en a pas besoin : l’agent garde toute la conversation.'),
+      exemple: t('un cahier des charges de 40 000 lignes, découpé en 12 tâches : avec « relecture », le DG remarque que la tâche 5 a changé le format des dates décidé à la tâche 2, et prévient la tâche 7 de garder le bon format.') },
     { cle: 'ambiance', lib: t('Ambiance (bavardages, Joy)'),
       quoi: t('Les personnages du QG bavardent entre eux (le mini-jeu), et Joy récolte de nouvelles blagues. Chacun de ces petits appels à l’IA est pris sur ton forfait. Vaut pour tout le QG, selon le choix fait ici dans les Réglages (pas celui d’une demande).'),
       choix: [
