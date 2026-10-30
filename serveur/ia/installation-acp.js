@@ -8,6 +8,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import * as plateforme from '../plateforme.js';
+import { t } from '../i18n.js';
 import { commandeNpm as npmDuQg } from './codex-installation.js';
 
 const LIGNES_MAX = 12;
@@ -90,17 +91,17 @@ export function installerAgent(id, npm, { commande = commandeNpm(), dossier = do
   publier();
   const promesse = new Promise((resolve) => {
     if (!npm?.paquet || !npm?.version) {
-      resolve(echouer('pas de paquet npm pour cet agent'));
+      resolve(echouer(t('pas de paquet npm pour cet agent')));
       return;
     }
     if (!commande) {
-      resolve(echouer('npm introuvable : le Node portable du QG est incomplet (réinstalle le QG).'));
+      resolve(echouer(t('npm introuvable : le Node portable du QG est incomplet (réinstalle le QG).')));
       return;
     }
     try {
       fs.mkdirSync(dossier, { recursive: true });
     } catch (e) {
-      resolve(echouer(`dossier ${dossier} impossible à créer : ${e.message}`));
+      resolve(echouer(t('dossier {dossier} impossible à créer : {erreur}', { dossier, erreur: e.message })));
       return;
     }
     let p;
@@ -112,7 +113,7 @@ export function installerAgent(id, npm, { commande = commandeNpm(), dossier = do
         windowsHide: true,
       });
     } catch (e) {
-      resolve(echouer(`npm n'a pas pu démarrer : ${e.message}`));
+      resolve(echouer(t(`npm n'a pas pu démarrer : {erreur}`, { erreur: e.message })));
       return;
     }
     const minuterie = setTimeout(() => {
@@ -138,7 +139,7 @@ export function installerAgent(id, npm, { commande = commandeNpm(), dossier = do
     p.stderr.on('data', lire);
     p.on('error', (e) => {
       clearTimeout(minuterie);
-      resolve(echouer(`npm n'a pas pu démarrer : ${e.message}`));
+      resolve(echouer(t(`npm n'a pas pu démarrer : {erreur}`, { erreur: e.message })));
     });
     p.on('close', (code, signal) => {
       clearTimeout(minuterie);
@@ -146,11 +147,11 @@ export function installerAgent(id, npm, { commande = commandeNpm(), dossier = do
       if (reste.trim()) e.lignes = [...e.lignes, reste.trim().slice(0, 300)].slice(-LIGNES_MAX);
       if (code !== 0) {
         const derniere = [...e.lignes].reverse().find((l) => /err/i.test(l)) || e.lignes.at(-1) || '';
-        resolve(echouer(signal ? `installation arrêtée (${signal}, délai dépassé ?)` : `npm a échoué (code ${code})${derniere ? ` : ${derniere}` : ''}`));
+        resolve(echouer(signal ? t('installation arrêtée ({signal}, délai dépassé ?)', { signal }) : t('npm a échoué (code {code})', { code }) + (derniere ? ` : ${derniere}` : '')));
         return;
       }
       if (!lanceurInstalle(id, npm, { dossier })) {
-        resolve(echouer(`npm a terminé, mais le programme de ${npm.paquet} est introuvable dans runtime/acp/${id}.`));
+        resolve(echouer(t('npm a terminé, mais le programme de {paquet} est introuvable dans runtime/acp/{id}.', { paquet: npm.paquet, id })));
         return;
       }
       etats.set(id, { ...e, etat: null, erreur: null, fin: Date.now() });
@@ -162,9 +163,4 @@ export function installerAgent(id, npm, { commande = commandeNpm(), dossier = do
   });
   enCours.set(id, promesse);
   return promesse;
-}
-
-// Tests : remet les états à zéro.
-export function reinitialiserInstallations() {
-  etats.clear();
 }

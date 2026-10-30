@@ -44,7 +44,6 @@ export const codexLanceur = () => path.join(RACINE, 'node_modules', '@openai', '
 // Codex installé à la demande par le QG (Réglages › Comptes IA) : runtime/codex, version épinglée.
 export const codexRuntime = () => path.join(RACINE, 'runtime', 'codex');
 export const codexLanceurRuntime = (dossier = codexRuntime()) => path.join(dossier, 'node_modules', '@openai', 'codex', 'bin', 'codex.js');
-export const codexPaquet = (plat = PLATEFORME, arch = process.arch) => `@openai/codex-${plat}-${arch === 'x64' ? 'x64' : 'arm64'}`;
 
 // Commande pour lancer Codex : { exe, args, present }. Les args précèdent ceux de l'appel (exec, login…).
 export function codexCommande(plat = PLATEFORME, { env = process.env, existe = fs.existsSync } = {}) {

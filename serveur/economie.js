@@ -10,24 +10,30 @@ export const COMPACTION_PAR_DEFAUT = { tache: 400000, verif: 300000, dg: 300000 
 
 // Rôles qui attendent parfois l'utilisateur longtemps (mcp__qg__demander) : cache d'une heure pour les clés API (A7).
 const ROLES_CACHE_LONG = new Set(['tache', 'dg']);
+const ROLES_AGENTS = new Set(['tache', 'verif']); // ceux qui lancent des commandes
 
 /**
  * Variables à poser pour une session Claude, fusionnées après envPour() (A1).
  * @param role  le rôle de conso (tache, verif, dg, question…)
  * @param compte  le compte résolu (ou null)
- * @param compaction  seuil propre (profil du lot B) ; sinon la valeur par défaut du rôle
+ * @param compaction  seuil propre (profil du lot B) ; null : celui de Claude Code (Standard, 1.0.11) ; absent : la
+ *   valeur par défaut du rôle
  */
-export function envSessionPour(role, compte = null, { compaction = null } = {}) {
+export function envSessionPour(role, compte = null, { compaction } = {}) {
   const env = {};
-  const seuil = compaction || COMPACTION_PAR_DEFAUT[role];
+  const seuil = compaction === null ? null : compaction || COMPACTION_PAR_DEFAUT[role];
   if (seuil) env.CLAUDE_CODE_AUTO_COMPACT_WINDOW = String(seuil);
   // Abonnement : la conversation principale a déjà 1 h de cache ; on ne change rien.
   if (compte?.cleApi && ROLES_CACHE_LONG.has(role)) env.CLAUDE_CODE_PROMPT_CACHE_TTL = '1h';
+  // 1.0.11 : les serveurs de dev qui lisent HOST (et ceux qu'un agent lance sans adresse) écoutent en local, sans
+  // fenêtre du pare-feu de Windows
+  if (ROLES_AGENTS.has(role)) env.HOST = '127.0.0.1';
   return env;
 }
 
 // B6 : plafond par tâche = facteur du profil × estimation (lot C), plancher 0,50 $ ; null si pas de facteur ou d'estimation.
-// Les totaux restaurés à la reprise ne comptent pas : le SDK repart de zéro avec ce plafond.
+// À la reprise, la tâche reçoit ce qu'il lui reste (taches.js) et l'adaptateur Claude ajoute le total que la
+// conversation reprise porte déjà, car Claude Code compare son plafond à ce total (1.0.11).
 export const PLANCHER_PLAFOND_USD = 0.5;
 export function plafondTache(profil, estimationUsd) {
   const f = profil?.plafondTacheFacteur;

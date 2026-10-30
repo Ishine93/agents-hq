@@ -38,16 +38,16 @@ function carteHall(zones, meubles, cloisons, g, spots, extra) {
   };
 }
 
-// Rosace au sol de 3 × 3 cases : chaque case a sa zone ('r00'…'r22'), donc son morceau du motif.
-const rosace = (x0, y0) => (x, y) => (x >= x0 && x < x0 + 3 && y >= y0 && y < y0 + 3 ? 'r' + (x - x0) + (y - y0) : null);
+// Rosace au sol de 3 × 3 cases, de (6, 6) à (8, 8) : une seule zone, le motif 'hall_rosace' dessine son morceau
+// d'après la case (web/meubles/hall.js, motif « parPosition »).
+const dansRosace = (x, y) => x >= 6 && x <= 8 && y >= 6 && y <= 8;
 
 // ---------- Grand hall ----------
 // Le hall d'un immeuble de bureaux : porte tambour dans la façade vitrée (au fond à droite), grand comptoir d'accueil
 // en marbre devant le mur au nom du QG, entre deux colonnes ; quatre portiques d'accès devant l'ascenseur ; rosace
 // de marbre au milieu ; banquettes d'attente, boîtes aux lettres au mur, plantes.
 function zoneGrand(x, y) {
-  const r = rosace(6, 6)(x, y);
-  if (r) return r;
+  if (dansRosace(x, y)) return 'rosace';
   if (x <= 2 && y <= 5) return 'lobby';
   if (x >= 6 && x <= 11 && y <= 2) return 'accueil';
   return 'def';
@@ -56,6 +56,10 @@ function zoneGrand(x, y) {
 function carteGrand() {
   const { meubles, cloisons, m, c, bord, fin } = chantier();
   const zones = zonesDe(zoneGrand);
+
+  // --- tapis (peints avec le sol, sous les avatars) : paillasson de la porte tambour, tapis persan du salon ---
+  m('hall_tapis', 12, 0, { w: 4, h: 3, sol: true, variante: 'paillasson', bornes: [0.75, 0.85, 3.25, 2.15] });
+  m('hall_tapis', 10, 7, { w: 4, h: 5, sol: true, variante: 'persan', bornes: [0.6, 0.6, 3.4, 4.4] });
 
   // --- portiques d'accès : quatre couloirs (3, 1) à (3, 4), caissons entre eux ---
   for (let y = 1; y <= 5; y++) bord('hall_portique', 3, y, 'n', { fin: y === 1 || y === 5 });
@@ -110,10 +114,6 @@ function carteGrand() {
   return carteHall(zones, meubles, cloisons, g, spots, {
     look: 'hall-grand',
     ascenseurMetal: '#c9a227',
-    tapis: [
-      { x0: 12.75, y0: 0.85, x1: 15.25, y1: 2.15, c0: '#3a3d46', c1: '#4f545f' },
-      { x0: 10.6, y0: 7.6, x1: 13.4, y1: 11.4, c0: '#7a2a2a', c1: '#a8423a' },
-    ],
     horloge: { y: 9.3 },
     pancarte: { gx: 0, gy: 9.8 },
   });
@@ -131,6 +131,10 @@ function zoneVerre(x, y) {
 function carteVerre() {
   const { meubles, cloisons, m, c, bord, fin } = chantier();
   const zones = zonesDe(zoneVerre);
+
+  // --- tapis : paillasson des portes coulissantes, tapis gris du salon ---
+  m('hall_tapis', 12, 0, { w: 4, h: 2, sol: true, variante: 'paillasson', bornes: [0.8, 0.85, 3.2, 1.9] });
+  m('hall_tapis', 4, 7, { w: 5, h: 4, sol: true, variante: 'gris', bornes: [0.6, 0.6, 4.4, 3.4] });
 
   // --- portiques en verre : trois couloirs (1, 5) à (3, 5) ---
   for (let x = 1; x <= 4; x++) bord('hall_portique_verre', x, 5, 'o', { fin: x === 1 || x === 4 });
@@ -174,10 +178,6 @@ function carteVerre() {
   return carteHall(zones, meubles, cloisons, g, spots, {
     look: 'hall-verre',
     ascenseurMetal: '#d9dde4',
-    tapis: [
-      { x0: 12.8, y0: 0.85, x1: 15.2, y1: 1.9, c0: '#2b2f36', c1: '#3a3f48' },
-      { x0: 4.6, y0: 7.6, x1: 8.4, y1: 10.4, c0: '#c9ccd2', c1: '#dfe2e6' },
-    ],
     horloge: { y: 6.6 },
     pancarte: { gx: 0, gy: 9.8 },
   });
@@ -198,6 +198,9 @@ function zoneDino(x, y) {
 function carteDino() {
   const { meubles, cloisons, m, c, bord, fin } = chantier();
   const zones = zonesDe(zoneDino);
+
+  // --- tapis rouge devant les portes du muséum ---
+  m('hall_tapis', 12, 0, { w: 4, h: 2, sol: true, variante: 'musee', bornes: [0.8, 0.85, 3.2, 1.9] });
 
   // --- cordons de velours et tourniquets en laiton : couloirs (3, 2) et (3, 3) ---
   for (const y of [0, 1, 4, 5]) bord('hall_cordon', 3, y, 'o');
@@ -241,7 +244,6 @@ function carteDino() {
   return carteHall(zones, meubles, cloisons, g, spots, {
     look: 'hall-dino',
     ascenseurMetal: '#b08a3a',
-    tapis: [{ x0: 12.8, y0: 0.85, x1: 15.2, y1: 1.9, c0: '#5a1f1f', c1: '#7a2a2a' }],
     horloge: { y: 6.6 },
     pancarte: { gx: 0, gy: 9.8 },
   });

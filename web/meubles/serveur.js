@@ -424,11 +424,16 @@ function cuve(it, look, etat, O) {
       R(cx, cy - 7, 1, 11, '#c86a80');
       R(cx - 1, cy + 4, 2, 6, '#e08a9a');
     } else if (v === 1) {
+      // pendant l'easter egg, la pupille (qui bouge) et la main (qui fait coucou) sont dessinées par ANIMES
       R(cx - 5, cy - 5, 10, 10, '#f4f4f0');
       R(cx - 6, cy - 3, 12, 6, '#f4f4f0');
-      R(cx - 2, cy - 2, 5, 5, '#3a8ad6');
-      R(cx - 1, cy - 1, 3, 3, '#15151f');
+      if (!etat.effet) {
+        R(cx - 2, cy - 2, 5, 5, '#3a8ad6');
+        R(cx - 1, cy - 1, 3, 3, '#15151f');
+      }
       R(cx + 3, cy + 3, 4, 1, '#e3342f');
+    } else if (etat.effet) {
+      // la main est dessinée par animCuve
     } else {
       R(cx - 4, cy - 2, 8, 7, '#d8b8a0');
       for (let k = 0; k < 4; k++) R(cx - 4 + k * 2, cy - 9 + (k === 0 ? 3 : 0), 1, 7, '#d8b8a0');
@@ -452,29 +457,58 @@ function chandelier(it, look, etat, O) {
   });
 }
 
-// Table d'opération (2 cases selon x) : drap blanc sur une forme allongée, sangles et électrodes.
+// Table d'opération (2 cases selon x) : drap blanc sur une forme allongée, sangles et électrodes. Phase 3 de
+// l'easter egg du levier : la créature s'est redressée, bras tendus, le drap retombé sur les jambes.
 function tableOp(it, look, etat, O) {
-  return O.spriteBloc(2, 1, 60, (g, P) => {
+  const assis = etat.effet === 3;
+  return O.spriteBloc(2, 1, 66, (g, P) => {
+    const electrodes = () => {
+      for (const [x, y] of [[0.26, 0.3], [0.26, 0.7]]) {
+        O.prisme(g, P, x, y - 0.04, x + 0.08, y + 0.04, 30, 34, '#c9a227');
+        O.prisme(g, P, x + 0.02, y - 0.01, x + 0.05, y + 0.02, 34, 56, '#1d1d1d');
+      }
+    };
     for (const x of [0.3, 1.62]) O.prisme(g, P, x, 0.42, x + 0.08, 0.58, 0, 18, '#5d636c');
     O.prisme(g, P, 0.24, 0.36, 1.76, 0.64, 2, 4, '#3a3d44');
     O.prisme(g, P, 0.1, 0.16, 1.9, 0.84, 18, 22, '#8d939c');
     // forme sous le drap : tête, torse, jambes, pieds
     O.prisme(g, P, 0.18, 0.2, 1.84, 0.8, 22, 25, '#e8e6ee');
-    O.prisme(g, P, 0.2, 0.36, 0.44, 0.64, 25, 32, '#f2f0f8');
-    O.prisme(g, P, 0.5, 0.26, 1.08, 0.74, 25, 31, '#f2f0f8');
+    if (assis) {
+      electrodes();
+      // la créature assise : veste sombre, cou à boulons, tête verte au crâne plat
+      O.prisme(g, P, 0.36, 0.3, 0.6, 0.7, 25, 46, '#3a3a46');
+      O.prisme(g, P, 0.42, 0.42, 0.56, 0.58, 46, 49, '#6fbf4a');
+      O.prisme(g, P, 0.47, 0.32, 0.51, 0.42, 46.5, 48.5, '#8d939c');
+      O.prisme(g, P, 0.47, 0.58, 0.51, 0.68, 46.5, 48.5, '#8d939c');
+      O.prisme(g, P, 0.38, 0.36, 0.62, 0.64, 49, 62, '#7fcf5a');
+      O.prisme(g, P, 0.37, 0.35, 0.63, 0.65, 60, 64, '#15151f');
+      O.quadX(g, P, 0.621, 0.41, 0.47, 54.5, 57, '#ffffff');
+      O.quadX(g, P, 0.621, 0.53, 0.59, 54.5, 57, '#ffffff');
+      O.quadX(g, P, 0.622, 0.44, 0.46, 55, 56.5, '#15151f');
+      O.quadX(g, P, 0.622, 0.56, 0.58, 55, 56.5, '#15151f');
+      O.quadX(g, P, 0.621, 0.43, 0.57, 51, 52, '#2a5a1f');
+      O.quadX(g, P, 0.621, 0.4, 0.6, 59, 59.6, '#3a7a2a');
+      O.prisme(g, P, 0.62, 0.26, 1.08, 0.74, 25, 29, '#f2f0f8');
+    } else {
+      O.prisme(g, P, 0.2, 0.36, 0.44, 0.64, 25, 32, '#f2f0f8');
+      O.prisme(g, P, 0.5, 0.26, 1.08, 0.74, 25, 31, '#f2f0f8');
+    }
     O.prisme(g, P, 1.1, 0.3, 1.66, 0.7, 25, 28, '#f2f0f8');
     O.prisme(g, P, 1.66, 0.3, 1.8, 0.46, 25, 32, '#f2f0f8');
     O.prisme(g, P, 1.66, 0.54, 1.8, 0.7, 25, 32, '#f2f0f8');
-    for (const x of [0.7, 1.3]) O.prisme(g, P, x, 0.14, x + 0.06, 0.86, 22, 31.5, '#5a3a22');
-    // deux grands pieds verts dépassent du drap, et une main qui pend
+    for (const x of assis ? [1.3] : [0.7, 1.3]) O.prisme(g, P, x, 0.14, x + 0.06, 0.86, 22, 31.5, '#5a3a22');
+    // deux grands pieds verts dépassent du drap ; une main pend, ou les deux bras se tendent
     O.prisme(g, P, 1.84, 0.3, 1.96, 0.44, 24, 33, '#6fbf4a');
     O.prisme(g, P, 1.84, 0.56, 1.96, 0.7, 24, 33, '#6fbf4a');
-    O.prisme(g, P, 0.86, 0.84, 0.98, 0.92, 12, 24, '#6fbf4a');
-    O.prisme(g, P, 0.84, 0.84, 1.0, 0.94, 8, 12, '#5aa03a');
-    // électrodes et fils vers le haut
-    for (const [x, y] of [[0.26, 0.3], [0.26, 0.7]]) {
-      O.prisme(g, P, x, y - 0.04, x + 0.08, y + 0.04, 30, 34, '#c9a227');
-      O.prisme(g, P, x + 0.02, y - 0.01, x + 0.05, y + 0.02, 34, 56, '#1d1d1d');
+    if (assis) {
+      for (const y of [0.3, 0.6]) {
+        O.prisme(g, P, 0.6, y, 1.0, y + 0.1, 40, 44, '#3a3a46');
+        O.prisme(g, P, 1.0, y, 1.1, y + 0.1, 40, 44, '#7fcf5a');
+      }
+    } else {
+      O.prisme(g, P, 0.86, 0.84, 0.98, 0.92, 12, 24, '#6fbf4a');
+      O.prisme(g, P, 0.84, 0.84, 1.0, 0.94, 8, 12, '#5aa03a');
+      electrodes();
     }
   });
 }
@@ -530,19 +564,20 @@ function jacob(it, look, etat, O) {
   });
 }
 
-// Le grand levier : socle de fonte, deux mâchoires de cuivre et un long manche à poignée rouge, relevé.
+// Le grand levier : socle de fonte, deux mâchoires de cuivre et un long manche à poignée rouge, relevé ; abaissé
+// (lames dans les mâchoires) pendant l'easter egg « Il est vivant ! ».
 function levier(it, look, etat, O) {
+  if (etat.effet) {
+    return O.spriteTuile(78, (g, P) => {
+      socleLevier(g, P, O);
+      O.poly(g, [P(0.64, 0.4, 28), P(0.64, 0.44, 28), P(0.3, 0.44, 31), P(0.3, 0.4, 31)], '#d8884a');
+      O.poly(g, [P(0.64, 0.58, 28), P(0.64, 0.62, 28), P(0.3, 0.62, 31), P(0.3, 0.58, 31)], '#d8884a');
+      O.prisme(g, P, 0.22, 0.4, 0.3, 0.62, 29, 33, '#3a2a22');
+      O.prisme(g, P, 0.12, 0.47, 0.22, 0.55, 29, 32, '#d2382c');
+    });
+  }
   return O.spriteTuile(78, (g, P) => {
-    O.prisme(g, P, 0.18, 0.22, 0.82, 0.78, 0, 12, '#2a2d33');
-    O.quadY(g, P, 0.78, 0.22, 0.78, 3, 9, '#3a3f48');
-    for (let i = 0; i < 6; i++) O.quadY(g, P, 0.78, 0.22 + i * 0.1, 0.27 + i * 0.1, 1, 3, i % 2 ? '#1d1d1d' : '#f5c400');
-    // mâchoires (contacts) et isolateurs
-    for (const y of [0.32, 0.62]) {
-      O.prisme(g, P, 0.3, y, 0.42, y + 0.08, 12, 20, '#e8e2d0');
-      O.prisme(g, P, 0.31, y + 0.01, 0.41, y + 0.07, 20, 30, '#d8884a');
-    }
-    O.prisme(g, P, 0.58, 0.4, 0.7, 0.62, 12, 22, '#e8e2d0');
-    O.prisme(g, P, 0.6, 0.42, 0.68, 0.6, 22, 28, '#c9a227');
+    socleLevier(g, P, O);
     // lames et manche
     O.poly(g, [P(0.64, 0.4, 28), P(0.64, 0.44, 28), P(0.5, 0.44, 66), P(0.5, 0.4, 66)], '#d8884a');
     O.poly(g, [P(0.64, 0.58, 28), P(0.64, 0.62, 28), P(0.5, 0.62, 66), P(0.5, 0.58, 66)], '#d8884a');
@@ -550,6 +585,18 @@ function levier(it, look, etat, O) {
     O.prisme(g, P, 0.47, 0.47, 0.53, 0.55, 68, 76, '#d2382c');
     O.pixel(g, P(0.48, 0.48, 75), '#ff9a9a', 1, 2);
   });
+}
+// Socle de fonte, mâchoires (contacts) de cuivre et isolateurs du levier.
+function socleLevier(g, P, O) {
+  O.prisme(g, P, 0.18, 0.22, 0.82, 0.78, 0, 12, '#2a2d33');
+  O.quadY(g, P, 0.78, 0.22, 0.78, 3, 9, '#3a3f48');
+  for (let i = 0; i < 6; i++) O.quadY(g, P, 0.78, 0.22 + i * 0.1, 0.27 + i * 0.1, 1, 3, i % 2 ? '#1d1d1d' : '#f5c400');
+  for (const y of [0.32, 0.62]) {
+    O.prisme(g, P, 0.3, y, 0.42, y + 0.08, 12, 20, '#e8e2d0');
+    O.prisme(g, P, 0.31, y + 0.01, 0.41, y + 0.07, 20, 30, '#d8884a');
+  }
+  O.prisme(g, P, 0.58, 0.4, 0.7, 0.62, 12, 22, '#e8e2d0');
+  O.prisme(g, P, 0.6, 0.42, 0.68, 0.6, 22, 28, '#c9a227');
 }
 
 function tableauNoir(it, look, etat, O) {
@@ -610,22 +657,104 @@ function animOnduleur(g, it, tx, ty, t, O) {
   for (let i = 0; i < n; i++) O.quadY(g, P, 0.62, 0.34 + i * 0.08, 0.4 + i * 0.08, 40, 46, '#3dff7a');
 }
 
-function animNoc(g, it, tx, ty, t, O) {
+function animNoc(g, it, tx, ty, t, O, effet) {
   const P = O.projeteur(tx + 32, ty);
   const y0 = it.part === 'g' ? 0.08 : 0;
   const y1 = it.part === 'd' ? 0.92 : 1;
+  if (effet) {
+    pong(g, P, O, it, y0, y1, effet.depuis);
+    return;
+  }
   const u = ((t / 3000) + (it.part === 'm' ? 0.3 : it.part === 'd' ? 0.6 : 0)) % 1;
   const y = y0 + 0.1 + u * (y1 - y0 - 0.2);
   O.pixel(g, P(0.22, y, 44), '#ffffff', 1, 2);
 }
 
-function animClim(g, it, tx, ty, t, O) {
+// Easter egg de la supervision : une partie de Pong sur les trois écrans du poste ; la balle passe d'un écran à
+// l'autre (terrain commun, en y de l'étage), les raquettes sont sur les écrans des deux bouts.
+function pong(g, P, O, it, y0, y1, d) {
+  const zh = it.part === 'm' ? 54 : 46;
+  const a = y0 + 0.08;
+  const b = y1 - 0.08;
+  O.quadX(g, P, 0.22, a, b, 31, zh, '#04121c');
+  const base = it.y - (it.part === 'g' ? 0 : it.part === 'm' ? 1 : 2);
+  const ya = base + 0.26;
+  const yb = base + 2.74;
+  const tri = (v) => (v % 2 < 1 ? v % 2 : 2 - (v % 2));
+  const yBalle = ya + 0.06 + tri(d / 1100) * (yb - ya - 0.12);
+  const zBalle = 34 + tri(d / 700 + 0.3) * 9;
+  const zr = Math.max(35, Math.min(42, zBalle));
+  for (const yr of [ya, yb]) {
+    const l = yr - it.y;
+    if (l > a && l < b) O.quadX(g, P, 0.221, l - 0.025, l + 0.025, zr - 3, zr + 4, '#ffffff');
+  }
+  if (it.part === 'm') for (let z = 32; z < zh - 1; z += 3) O.quadX(g, P, 0.221, 0.485, 0.515, z, z + 1.5, '#b8c4ce');
+  const lb = yBalle - it.y;
+  if (lb > a + 0.04 && lb < b - 0.04) O.quadX(g, P, 0.222, lb - 0.045, lb + 0.045, zBalle, zBalle + 3, '#ffffff');
+}
+
+function animClim(g, it, tx, ty, t, O, effet) {
   // souffle froid qui sort par le bas
   const P = O.projeteur(tx + 32, ty);
   for (let i = 0; i < 3; i++) {
     const ph = (t / 1500 + i / 3) % 1;
     O.pixel(g, P(0.25 + i * 0.25, 0.62 + ph * 0.5, 6), `rgba(150,210,255,${(0.7 * (1 - ph)).toFixed(2)})`, 3, 1);
   }
+  if (!effet) return;
+  // easter egg : neige sur le dessus, rafales de flocons qui partent du haut au-dessus des baies (on les voit
+  // par-dessus les rangées), un pingouin sort du climatiseur cliqué
+  const d = effet.depuis;
+  O.quadZ(g, P, 64.4, 0.18, 0.12, 0.82, 0.3, '#ffffff');
+  O.quadZ(g, P, 64.4, 0.7, 0.3, 0.82, 0.52, '#ffffff');
+  for (let x = 0.16; x < 0.86; x += 0.1) O.quadY(g, P, 0.622, x, x + 0.025, 58 + (Math.round(x * 37) % 4), 64, '#dff2ff');
+  for (let i = 0; i < 50; i++) {
+    const age = (d - i * 80) / 2000;
+    if (age < 0 || age > 1) continue;
+    const u = 0.2 + ((i * 0.377) % 0.6) + Math.sin(age * 6 + i) * 0.12;
+    const v = 0.35 + age * (1.2 + (i % 4) * 0.45);
+    const z = 66 + Math.sin(age * Math.PI) * (16 + (i % 3) * 8) + (1 - age) * 2;
+    const [x, y] = P(u, v, z);
+    g.fillStyle = i % 3 ? '#ffffff' : '#cfe9ff';
+    if (i % 5 === 0) {
+      g.fillRect(x - 1, y, 3, 1);
+      g.fillRect(x, y - 1, 1, 3);
+    } else g.fillRect(x, y, i % 4 ? 2 : 1, i % 4 ? 2 : 1);
+  }
+  if (effet.clique) pingouin(g, P, O, d);
+}
+
+// Pingouin qui sort par la trappe du dessus du climatiseur, salue de l'aile et y redescend.
+function pingouin(g, P, O, d) {
+  const leve = d < 400 ? d / 400 : d > 4800 ? Math.max(0, 1 - (d - 4800) / 500) : 1;
+  if (leve <= 0) return;
+  O.quadZ(g, P, 64.3, 0.34, 0.2, 0.66, 0.46, '#1a1d22');
+  const [fx, fy] = P(0.5, 0.33, 64);
+  const dy = Math.round((1 - leve) * 24);
+  g.save();
+  g.beginPath();
+  g.rect(fx - 20, fy - 60, 40, 62);
+  g.clip();
+  const R = (x, y, w, h, c) => {
+    g.fillStyle = c;
+    g.fillRect(fx + x, fy + dy + y, w, h);
+  };
+  const noir = '#15151f';
+  R(-6, -23, 12, 2, noir);
+  R(-7, -21, 14, 18, noir);
+  R(-6, -3, 12, 2, noir);
+  R(-5, -15, 10, 12, '#f4f8fc');
+  R(-4, -16, 8, 1, '#f4f8fc');
+  R(-4, -20, 3, 3, '#ffffff');
+  R(1, -20, 3, 3, '#ffffff');
+  R(-3, -19, 1, 2, noir);
+  R(2, -19, 1, 2, noir);
+  R(-1, -17, 3, 2, '#ff9a1f');
+  R(-6, -1, 5, 2, '#ff9a1f');
+  R(1, -1, 5, 2, '#ff9a1f');
+  R(-9, -15, 2, 9, noir);
+  if (d > 400 && d < 4800 && Math.floor(d / 220) % 2) for (let k = 0; k < 8; k++) R(7 + Math.round(k * 0.5), -16 - k, 2, 1, noir);
+  else R(7, -15, 2, 9, noir);
+  g.restore();
 }
 
 // Arcs électriques : du tore de la bobine vers les baies voisines de la frise (x - 1, y + 1) et (x + 1, y - 1).
@@ -651,12 +780,20 @@ function eclair(g, P, x0, y0, z0, x1, y1, z1, t, graineArc) {
     prev = pt;
   }
 }
-function animTesla(g, it, tx, ty, t, O) {
+function animTesla(g, it, tx, ty, t, O, effet) {
   const P = O.projeteur(tx + 32, ty);
   const v = it.variante || 0;
+  // easter egg du levier : la bobine se charge (1), lâche la grande décharge (2), puis se calme (3)
+  const charge = !effet ? 0 : effet.phase === 1 ? effet.depuis / 1000 : effet.phase === 2 ? 1 : Math.max(0, 1 - (effet.depuis - 4500) / 1500);
+  if (effet && effet.phase === 2) {
+    const k = Math.floor(t / 70);
+    eclair(g, P, 0.5, 0.5, 70, -0.5, 1.5, 64, k * 37, v * 3);
+    eclair(g, P, 0.5, 0.5, 70, 1.5, -0.5, 64, k * 41, v * 3 + 1);
+    eclair(g, P, 0.5, 0.5, 72, 0.5 + Math.sin(k + v) * 0.6, 0.5 + Math.cos(k * 1.3 + v) * 0.6, 120, k * 29, v);
+  }
   // lueur autour du tore (une couronne, sans voiler le métal)
   g.save();
-  g.globalAlpha = 0.35 + 0.2 * Math.sin(t / 120 + v);
+  g.globalAlpha = Math.min(1, 0.35 + 0.2 * Math.sin(t / 120 + v) + charge * 0.5);
   g.fillStyle = VIOLET;
   for (let i = 0; i < 16; i++) {
     const a = (i / 16) * Math.PI * 2 + t / 700;
@@ -689,12 +826,72 @@ function animCage(g, it, tx, ty, t, O) {
   g.fillRect(cx + 1, cy - 12, 3, 3);
 }
 
-function animCuve(g, it, tx, ty, t, O) {
+function animCuve(g, it, tx, ty, t, O, effet) {
   const P = O.projeteur(tx + 32, ty);
-  for (let i = 0; i < 3; i++) {
-    const ph = (t / 2200 + i / 3 + (it.variante || 0) * 0.2) % 1;
-    O.pixel(g, P(0.36 + i * 0.08, 0.66, 14 + ph * 48), 'rgba(220,255,225,0.85)', 2, 2);
+  const n = effet ? 6 : 3;
+  for (let i = 0; i < n; i++) {
+    const ph = (t / (effet ? 900 : 2200) + i / n + (it.variante || 0) * 0.2) % 1;
+    O.pixel(g, P(0.32 + (i % 3) * 0.08, 0.66, 14 + ph * 48), 'rgba(220,255,225,0.85)', 2, 2);
   }
+  if (!effet) return;
+  // easter egg : le cerveau a une idée, l'œil regarde partout puis cligne, la main fait coucou
+  const v = (it.variante || 0) % 3;
+  const d = effet.depuis;
+  const [cx, cy] = P(0.42, 0.5, 36);
+  const R = R_(g);
+  if (v === 0) {
+    if (Math.floor(d / 300) % 2) {
+      R(cx - 5, cy - 3, 3, 1, '#ffe0ea');
+      R(cx + 1, cy - 4, 4, 1, '#ffe0ea');
+      R(cx - 2, cy + 1, 5, 1, '#ffe0ea');
+    }
+    if (d > 700) {
+      // bulle de pensée et ampoule allumée
+      const [bx, by] = P(0.42, 0.5, 104);
+      R(bx + 2, by + 12, 2, 2, '#f4f8fc');
+      R(bx + 4, by + 6, 3, 3, '#f4f8fc');
+      O.cadre(g, bx - 9, by - 17, 19, 18, '#15151f', '#f4f8fc');
+      const on = d < 1200 || Math.floor(d / 250) % 3;
+      R(bx - 3, by - 13, 7, 6, on ? '#ffd23f' : '#c9b46a');
+      R(bx - 2, by - 14, 5, 1, on ? '#ffd23f' : '#c9b46a');
+      R(bx - 1, by - 7, 3, 1, on ? '#ffd23f' : '#c9b46a');
+      R(bx - 2, by - 6, 5, 3, '#8d939c');
+      R(bx - 2, by - 12, 1, 2, '#fff8c0');
+      if (on) {
+        R(bx - 8, by - 11, 2, 1, '#ffd23f');
+        R(bx + 7, by - 11, 2, 1, '#ffd23f');
+        R(bx, by - 17, 1, 1, '#ffd23f');
+      }
+    }
+  } else if (v === 1) {
+    const [ox, oy] = [[-2, 0], [2, 0], [0, -2], [0, 0]][Math.min(3, Math.floor(d / 900))];
+    const cligne = (d > 3000 && d < 3200) || (d > 3500 && d < 3700) || d > 4400;
+    if (cligne) {
+      R(cx - 5, cy - 5, 10, 10, '#d89a9a');
+      R(cx - 6, cy - 3, 12, 6, '#d89a9a');
+      R(cx - 5, cy, 10, 1, '#8a4a4a');
+    } else {
+      R(cx - 2 + ox, cy - 2 + oy, 5, 5, '#3a8ad6');
+      R(cx - 1 + ox, cy - 1 + oy, 3, 3, '#15151f');
+      R(cx + ox, cy - 1 + oy, 1, 1, '#ffffff');
+    }
+  } else {
+    const p = Math.floor(d / 240) % 2 ? 2 : -2;
+    const h = Math.floor(d / 480) % 2;
+    main(g, cx, cy - h, p);
+  }
+}
+
+// Main dans sa cuve, doigts penchés de `p` pixels en haut (la main fait coucou).
+function main(g, cx, cy, p) {
+  const peau = '#d8b8a0';
+  const R = R_(g);
+  R(cx - 4, cy - 2, 8, 7, peau);
+  for (let k = 0; k < 4; k++) {
+    const h = k === 0 ? 4 : 7;
+    for (let r = 0; r < h; r++) R(cx - 4 + k * 2 + Math.round((p * (h - 1 - r)) / 6), cy - 9 + (7 - h) + r, 1, 1, peau);
+  }
+  R(cx + 4, cy, 3, 2, peau);
 }
 
 function animPaillasse(g, it, tx, ty, t, O) {
@@ -713,22 +910,110 @@ function animPaillasse(g, it, tx, ty, t, O) {
   }
 }
 
-function animJacob(g, it, tx, ty, t, O) {
+function animJacob(g, it, tx, ty, t, O, effet) {
   const P = O.projeteur(tx + 32, ty);
-  const ph = (t / 1300) % 1;
-  const z = 18 + ph * 38;
-  const ecart = 0.12 + ph * 0.18;
-  const [ax, ay] = P(0.5 - ecart, 0.5, z);
-  const [bx, by] = P(0.5 + ecart, 0.5, z);
-  const n = Math.max(1, Math.round(Math.abs(bx - ax)));
-  for (let i = 0; i <= n; i++) {
-    const x = Math.round(ax + ((bx - ax) * i) / n);
-    const y = Math.round(ay + ((by - ay) * i) / n - Math.sin((i / n) * Math.PI) * 4 + Math.sin(t / 40 + i) * 1.2);
-    g.fillStyle = VIOLET;
-    g.fillRect(x, y - 1, 1, 3);
-    g.fillStyle = '#ffffff';
-    g.fillRect(x, y, 1, 1);
+  // easter egg du levier : pendant la grande décharge, deux arcs qui montent trois fois plus vite
+  const vite = effet && effet.phase === 2;
+  for (const decale of vite ? [0, 0.5] : [0]) {
+    const ph = (t / (vite ? 430 : 1300) + decale) % 1;
+    const z = 18 + ph * 38;
+    const ecart = 0.12 + ph * 0.18;
+    const [ax, ay] = P(0.5 - ecart, 0.5, z);
+    const [bx, by] = P(0.5 + ecart, 0.5, z);
+    const n = Math.max(1, Math.round(Math.abs(bx - ax)));
+    for (let i = 0; i <= n; i++) {
+      const x = Math.round(ax + ((bx - ax) * i) / n);
+      const y = Math.round(ay + ((by - ay) * i) / n - Math.sin((i / n) * Math.PI) * 4 + Math.sin(t / 40 + i) * 1.2);
+      g.fillStyle = VIOLET;
+      g.fillRect(x, y - 1, 1, 3);
+      g.fillStyle = '#ffffff';
+      g.fillRect(x, y, 1, 1);
+    }
   }
+}
+
+// ---------- easter egg du levier : « Il est vivant ! » ----------
+// Trait pixel de (x0, y0) à (x1, y1).
+function segment(g, x0, y0, x1, y1, col) {
+  const n = Math.max(1, Math.round(Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0))));
+  g.fillStyle = col;
+  for (let i = 0; i <= n; i++) g.fillRect(Math.round(x0 + ((x1 - x0) * i) / n), Math.round(y0 + ((y1 - y0) * i) / n), 1, 1);
+}
+
+// Le levier : étincelles aux mâchoires quand on l'abaisse et pendant la décharge, puis la réplique culte.
+function animLevier(g, it, tx, ty, t, O, effet) {
+  if (!effet) return;
+  const P = O.projeteur(tx + 32, ty);
+  const d = effet.depuis;
+  if (d < 1400 || (effet.phase === 2 && Math.floor(d / 160) % 3 === 0)) {
+    for (const y of [0.36, 0.66]) {
+      const [x0, y0] = P(0.36, y, 30);
+      for (let i = 0; i < 6; i++) {
+        const a = i * 1.05 + d / 60;
+        const r = 2 + ((d / 30 + i * 3) % 6);
+        g.fillStyle = i % 2 ? '#fff3a0' : '#ffd23f';
+        g.fillRect(Math.round(x0 + Math.cos(a) * r), Math.round(y0 + Math.sin(a) * r * 0.7 - r * 0.4), 1, 1);
+      }
+    }
+  }
+  if (effet.phase === 3) {
+    const tc = O.texteCanvas(O.enseigne('IL EST VIVANT !', "IT'S ALIVE!"), '#15151f');
+    const [x, y] = P(0.5, 0.5, 84);
+    const w = tc.width * 2 + 10;
+    const h = tc.height * 2 + 8;
+    const bx = Math.round(x - 10);
+    const by = Math.round(y - h - 6);
+    O.cadre(g, bx, by, w, h, '#15151f', '#fff4d6');
+    g.drawImage(tc, bx + 5, by + 4, tc.width * 2, tc.height * 2);
+    g.fillStyle = '#15151f';
+    g.fillRect(bx + 8, by + h, 3, 3);
+    g.fillRect(bx + 8, by + h + 3, 2, 2);
+  }
+}
+
+// Générateur de Van de Graaff : pendant la décharge, des étincelles jaillissent de la sphère.
+function animVanDeGraaff(g, it, tx, ty, t, O, effet) {
+  if (!effet || effet.phase !== 2) return;
+  const P = O.projeteur(tx + 32, ty);
+  const [cx, cy] = P(0.5, 0.5, 62);
+  const k = Math.floor(t / 80);
+  for (let i = 0; i < 4; i++) {
+    const a = (((k * 7 + i * 13) % 20) / 20) * Math.PI * 2;
+    let x = cx + Math.cos(a) * 13;
+    let y = cy + Math.sin(a) * 13;
+    for (let s = 0; s < 5; s++) {
+      const nx = x + Math.cos(a) * 4 + (((k + s + i) % 3) - 1) * 2;
+      const ny = y + Math.sin(a) * 4 + (((k * 2 + s) % 3) - 1) * 2;
+      segment(g, x, y, nx, ny, s % 2 ? '#ffffff' : VIOLET);
+      x = nx;
+      y = ny;
+    }
+  }
+}
+
+// Table d'opération : la décharge frappe les électrodes (2), puis la créature redressée cligne des yeux (3).
+function animTableOp(g, it, tx, ty, t, O, effet) {
+  if (!effet) return;
+  const P = O.projeteur(tx + 32, ty);
+  const d = effet.depuis;
+  if (effet.phase === 2) {
+    const k = Math.floor(t / 60);
+    eclair(g, P, 0.3, 0.3, 56, 0.34, 0.5, 33, k * 31, 1);
+    eclair(g, P, 0.3, 0.7, 56, 0.34, 0.5, 33, k * 43, 2);
+    // le drap tressaute
+    if (k % 2) for (const [x, y] of [[0.6, 0.26], [0.9, 0.74], [1.3, 0.3]]) O.pixel(g, P(x, y, 32), '#ffffff', 2, 1);
+  } else if (effet.phase === 3) {
+    if (Math.floor(d / 500) % 5 === 0) O.quadX(g, P, 0.632, 0.4, 0.6, 54, 57.5, '#7fcf5a');
+    const [x, y] = P(0.5, 0.5, 70);
+    g.drawImage(O.texteCanvas('!', '#ffd23f'), x - 1, y - 8 - (Math.floor(d / 200) % 2));
+  }
+}
+
+// Scialytique : la lampe clignote pendant la décharge.
+function animScialytique(g, it, tx, ty, t, O, effet) {
+  if (!effet || effet.phase !== 2 || Math.floor(t / 90) % 3) return;
+  const P = O.projeteur(tx + 32, ty);
+  O.poly(g, [P(-0.52, 0.78, 66), P(-0.08, 0.78, 66), P(-0.08, 1.22, 66), P(-0.52, 1.22, 66)], '#5a5648');
 }
 
 function animChandelier(g, it, tx, ty, t, O) {
@@ -1003,7 +1288,20 @@ export const MEUBLES = {
 };
 export const ANIMES = {
   srv_baie: animBaie, srv_onduleur: animOnduleur, srv_noc: animNoc, srv_clim: animClim, srv_tesla: animTesla, srv_cuve: animCuve, srv_cage: animCage,
-  srv_paillasse: animPaillasse, srv_jacob: animJacob, srv_chandelier: animChandelier,
+  srv_paillasse: animPaillasse, srv_jacob: animJacob, srv_chandelier: animChandelier, srv_levier: animLevier,
+  srv_vandegraaff: animVanDeGraaff, srv_table_op: animTableOp, srv_scialytique: animScialytique,
+};
+// Easter eggs (web/clics.js) : un clic sur ces meubles lance une petite scène, puis tout revient comme avant.
+export const CLICS = {
+  // datacenter : tous les climatiseurs soufflent une tempête de neige, un pingouin sort de celui qu'on a cliqué
+  srv_clim: { duree: 6000, declenche: ['srv_clim'] },
+  // datacenter : partie de Pong sur les trois écrans de supervision
+  srv_noc: { duree: 8000, declenche: ['srv_noc'] },
+  // labo : « Il est vivant ! » — levier abaissé, les bobines se chargent (1), grande décharge (2), la créature se
+  // redresse sur la table d'opération (3)
+  srv_levier: { duree: 8500, declenche: ['srv_tesla', 'srv_jacob', 'srv_vandegraaff', 'srv_table_op', 'srv_scialytique'], phases: [1000, 4500] },
+  // labo : le cerveau a une idée, l'œil regarde partout et cligne, la main fait coucou
+  srv_cuve: { duree: 5000, declenche: ['srv_cuve'] },
 };
 export const JEUX = {};
 export const MURS = { srv_panneaux: murPanneaux, srv_pierre: murPierre };

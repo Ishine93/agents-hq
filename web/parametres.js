@@ -43,6 +43,8 @@ export const DEPOT_GITHUB = 'https://github.com/Ishine93/agents-hq';
 const LIEN_ICONES = { amitié: '🤝', complicité: '😉', attirance: '💘', couple: '💕', rivalité: '⚔️', conflit: '💢', brouille: '🙅', méfiance: '🤨' };
 
 const champ = (attrs) => h('input', { class: 'champ', ...attrs });
+// Garde-fou Fable (1.0.11) : 'seuil', 'toujours', 'jamais' ou 'off' (réglages d'avant : actif false = 'off')
+const modeFable = (R) => (R.gardeFable && R.gardeFable.mode) || (R.gardeFable && R.gardeFable.actif === false ? 'off' : 'seuil');
 const ligne = (lib, ...contenu) => h('div', { class: 'param-ligne' }, h('label', { class: 'param-lib' }, lib), h('div', { class: 'param-val' }, ...contenu));
 
 export class Parametres {
@@ -235,12 +237,35 @@ export class Parametres {
           } } }),
           ' ', t('Toujours autoriser la création et la modification de fichiers en dehors des dossiers des projets'))),
       h('h4', {}, t('Garde-fou Fable')),
-      ligneI('gen-fable', t('Quota Fable'), [t('Fable a sa propre limite de la semaine. En dessous du seuil, le QG te demande (une fois par plan) s’il faut garder Fable ou passer sur Opus ; sans réponse en 10 min, Opus. Fable épuisé : Opus directement. Le reste du dossier continue pendant ce temps.')],
+      ligneI('gen-fable', t('Quota Fable'), [
+        t('Fable est le modèle le plus fort, mais pour le même travail il remplit ta fenêtre de 5 h environ 6 fois plus vite qu’Opus, et il a sa propre limite de la semaine. Ce réglage dit quand le QG te consulte avant de lancer les tâches que le DG met sur Fable. La carte te donne leur coût et celui sur Opus ; sans réponse en 10 min, elles passent sur Opus. Fable épuisé : Opus directement. Le reste du dossier continue pendant ce temps.'),
+        exempleAide(t('« Ne jamais utiliser Fable » : le DG ne se voit plus proposer Fable pour les tâches (lui-même garde son modèle). Une demande directe garde le modèle que tu choisis.')),
+      ],
         h('label', { class: 'param-case' },
-          h('input', { type: 'checkbox', checked: !(R.gardeFable && R.gardeFable.actif === false), on: { change: (e) => this.reglage({ gardeFable: { actif: e.target.checked } }, e.target.checked ? t('Garde-fou Fable activé.') : t('Garde-fou Fable coupé.')) } }),
-          ' ', t('Avant de lancer des tâches sur Fable, vérifier ce qu’il reste de sa semaine'),
-          ' ', h('select', { class: 'champ', on: { change: (e) => this.reglage({ gardeFable: { resteMin: Number(e.target.value) } }, t('Seuil enregistré.')) } },
+          t('Avant les tâches Fable :'),
+          ' ', h('select', { class: 'champ', on: { change: (e) => this.reglage({ gardeFable: { mode: e.target.value } }, t('Garde-fou Fable enregistré.')) } },
+            [['seuil', t('me demander s’il reste peu de Fable')], ['toujours', t('toujours me demander')], ['jamais', t('ne jamais utiliser Fable')], ['off', t('ne rien vérifier')]]
+              .map(([v, l]) => h('option', { value: v, selected: modeFable(R) === v ? true : null }, l))),
+          ' ', h('select', { class: 'champ', disabled: modeFable(R) === 'seuil' ? null : true, on: { change: (e) => this.reglage({ gardeFable: { resteMin: Number(e.target.value) } }, t('Seuil enregistré.')) } },
             [10, 20, 30, 50, 75].map((n) => h('option', { value: String(n), selected: ((R.gardeFable && R.gardeFable.resteMin) ?? 30) === n ? true : null }, t('demander sous {n} % restants', { n })))))),
+      h('h4', {}, t('Réserve de fenêtre')),
+      ligneI('gen-reserve', t('Garder une part pour moi'), [
+        t('Si tu utilises aussi Claude toi-même (au travail, sur un autre appareil, ou sur un compte d’équipe partagé), le QG peut te laisser une part de ta fenêtre de 5 h aux heures choisies. Quand ta fenêtre atteint la limite, les tâches en cours s’interrompent proprement et rien de neuf ne part. Elles reprennent où elles en étaient à la fin de la plage horaire, ou dès que la fenêtre est remise à zéro. Une notification te prévient à l’arrêt et à la reprise.'),
+        exempleAide(t('30 % de 9 h à 18 h en semaine : à 70 % de ta fenêtre en pleine journée, le QG s’arrête et te laisse les 30 % restants ; à 18 h, il reprend tout seul.')),
+      ], (() => {
+        const rf = R.reserveFenetre || {};
+        const poser = (cle, v) => this.reglage({ reserveFenetre: { [cle]: v } }, t('Réserve de fenêtre enregistrée.'));
+        const heures = (cle, de, a, val) => h('select', { class: 'champ', disabled: rf.actif ? null : true, on: { change: (e) => poser(cle, Number(e.target.value)) } },
+          Array.from({ length: a - de + 1 }, (_, i) => de + i).map((x) => h('option', { value: String(x), selected: val === x ? true : null }, t('{h} h', { h: x }))));
+        return h('label', { class: 'param-case' },
+          h('input', { type: 'checkbox', checked: !!rf.actif, on: { change: (e) => poser('actif', e.target.checked) } }),
+          ' ', t('Garder'), ' ',
+          h('select', { class: 'champ', disabled: rf.actif ? null : true, on: { change: (e) => poser('pct', Number(e.target.value)) } },
+            [10, 20, 30, 40, 50].map((n) => h('option', { value: String(n), selected: (rf.pct ?? 30) === n ? true : null }, n + ' %'))),
+          ' ', t('de ma fenêtre de'), ' ', heures('debut', 0, 23, rf.debut ?? 9), ' ', t('à'), ' ', heures('fin', 1, 24, rf.fin ?? 18), ' ',
+          h('select', { class: 'champ', disabled: rf.actif ? null : true, on: { change: (e) => poser('jours', e.target.value) } },
+            [['semaine', t('en semaine')], ['tous', t('tous les jours')]].map(([v, l]) => h('option', { value: v, selected: (rf.jours || 'semaine') === v ? true : null }, l))));
+      })()),
       h('h4', {}, t('Vérification')),
       ligneI('gen-validation', t('Validation par toi'), [
         t('Décoché : un vérificateur IA relit ces tâches à ta place et le dossier continue sans t’attendre (y compris les tâches qui attendaient déjà ta validation). Le QG te demande toujours ton accord avant de publier, d’envoyer, de supprimer ou d’acheter.'),
@@ -318,21 +343,24 @@ export class Parametres {
     return [
       ...titreI('cout', t('Coût'), [
         t('Règle combien de travail le QG met dans une demande : nombre de tâches, relectures par un autre agent, mémoire des agents, à-côtés. Le modèle et l’effort que le DG choisit pour chaque tâche ne changent jamais, ni ceux du DG. Seule exception : le vérificateur (l’agent qui relit une tâche) peut passer au niveau standard et à un effort plus bas, en Économe ou selon tes valeurs de Personnalisé.'),
+        choixAide(nomNiveau('standard'), t('Comme Claude Code : le DG s’organise librement, et chaque agent peut lancer ses propres sous-agents, des commandes en arrière-plan et des workflows. Sa mémoire est gérée par Claude Code. Ni plafond par tâche, ni accord avant lancement. C’est le choix par défaut.'),
+          t('Les agents travaillent comme toi dans Claude Code, sans règle du QG en plus.'),
+          t('Peut consommer plus qu’Équilibré sur une grosse demande : sous-agents et workflows coûtent en plus, et une longue mémoire coûte à chaque étape. Tes garde-fous de fenêtre et de Fable restent actifs.')),
         choixAide(nomNiveau('econome'), t('Le minimum qui donne un bon résultat.'),
           t('Le moins de tokens : ta fenêtre de 5 h dure plus longtemps.'),
           t('Moins de tâches en même temps, moins de relectures par un autre agent, et l’ambiance du mini-jeu coupée.')),
-        choixAide(nomNiveau('equilibre'), t('Le juste coût : ce qui est utile, sans plus. C’est le choix par défaut.'),
+        choixAide(nomNiveau('equilibre'), t('Le juste coût : ce qui est utile, sans plus.'),
           t('Un bon résultat pour une dépense raisonnable.'),
           t('Sur une demande très délicate, Max relit davantage.')),
         choixAide(nomNiveau('max'), t('La qualité d’abord : plus de tâches, un vérificateur pour tout code modifié, une grande mémoire.'),
           t('Le plus soigné et le plus sûr.'),
           t('Le plus cher : une grosse demande peut prendre une bonne part de ta fenêtre.')),
-        choixAide(nomNiveau(PERSONNALISE), t('Tes propres valeurs, réglées une par une à partir d’un des trois niveaux.'),
+        choixAide(nomNiveau(PERSONNALISE), t('Tes propres valeurs, réglées une par une à partir d’un des niveaux.'),
           t('Exactement le réglage que tu veux.'),
           t('À toi de juger l’effet de chaque valeur : chacune a son « i ».')),
         t('Ce choix vaut pour les nouvelles demandes. Tu peux aussi le changer demande par demande, dans la barre en bas de l’écran, à côté d’Envoyer. Une demande envoyée garde ses valeurs jusqu’au bout, même si tu changes ce réglage ensuite.'),
         t('Choisir un niveau n’efface pas tes valeurs de Personnalisé : tu les retrouves en revenant sur Personnalisé.'),
-        exempleAide(t('tu es en Équilibré et tu prépares une grosse refonte délicate : choisis Max en bas de l’écran pour cette seule demande ; les suivantes repartent en Équilibré.')),
+        exempleAide(t('tu es en Standard et tu veux économiser ta fenêtre sur une petite correction : choisis Économe en bas de l’écran pour cette seule demande ; les suivantes repartent en Standard.')),
       ]),
       cartes,
       h('small', { class: 'meta' }, t('Pour les nouvelles demandes ; modifiable aussi demande par demande, en bas de l’écran. Le modèle et l’effort des agents et du DG ne changent jamais.')),
@@ -1435,12 +1463,16 @@ export class Parametres {
     return [
       ...titreI('bonheur', t('Joy et son stock'), [
         t('Joy fait le tour des étages et raconte blagues et anecdotes aux agents qui attendent. Le stock dépend de la langue des IA.'),
+        t('Les blagues sont écrites directement dans la langue des IA, dans ses genres comiques (en français : « Quel est le comble… », « Monsieur et Madame… ont un fils », Toto, devinettes à jeu de mots), puis notées une à une : seules les bonnes restent.'),
+        [t('Sources et licence :'), t('les anecdotes en français viennent de la rubrique « Le saviez-vous ? » de Wikipédia. Leurs textes sont ceux des contributeurs de Wikipédia, sous licence'), ' ',
+          h('a', { href: 'https://creativecommons.org/licenses/by-sa/4.0/deed.fr', target: '_blank', rel: 'noopener noreferrer' }, 'CC BY-SA 4.0'), ' (',
+          h('a', { href: 'https://fr.wikipedia.org/wiki/Wikip%C3%A9dia:Le_saviez-vous_%3F', target: '_blank', rel: 'noopener noreferrer' }, t('page de la rubrique')), ').'],
         exempleAide(t('un agent attend qu’un collègue finisse : Joy passe le voir et lui raconte une blague, dans une bulle au-dessus de sa tête.')),
       ]),
       h('dl', {},
         h('dt', {}, t('Stock')), h('dd', {}, t('{b} blagues · {f} anecdotes · {a} phrases de pause', { b: tot.blagues || 0, f: tot.faits || 0, a: tot.ambiance || 0 })),
         h('dt', {}, t('Mise à jour')), h('dd', {}, maj + (B.source ? ' (' + B.source + ')' : ''))),
-      ligneI('bonheur-recolte', t('Récolte automatique'), [t('Coché : le stock de Joy se renouvelle tout seul. Décoché : il ne change plus, sauf si tu lances une récolte avec le bouton ci-dessous.')], h('label', { class: 'param-case' }, h('input', { type: 'checkbox', checked: R.recolteAuto !== false, on: { change: (e) => this.reglage({ recolteAuto: e.target.checked }) } }), ' ', t('Toutes les 12 h : blagues gratuites en ligne, plus quelques appels à un modèle léger (Haiku chez Claude, très peu de tokens).'))),
+      ligneI('bonheur-recolte', t('Récolte automatique'), [t('Coché : le stock de Joy se renouvelle tout seul. Décoché : il ne change plus, sauf si tu lances une récolte avec le bouton ci-dessous.')], h('label', { class: 'param-case' }, h('input', { type: 'checkbox', checked: R.recolteAuto !== false, on: { change: (e) => this.reglage({ recolteAuto: e.target.checked }) } }), ' ', t('Toutes les 12 h, jusqu’à ce que le stock soit plein : anecdotes de Wikipédia et blagues gratuites en ligne, plus quelques appels au compte de l’ambiance (chez Claude : Sonnet pour écrire et trier les blagues, Haiku pour le reste ; 6 appels au plus par récolte).'))),
       ligneI('bonheur-duree', t('Durée des bulles'), [t('Le temps que restent affichées les bulles des agents et de Joy, pour avoir le temps de tout lire.')],
         h('select', { class: 'champ', on: { change: (e) => this.reglage({ dureeBulles: Number(e.target.value) }, t('Enregistré.')) } },
           [[1, t('Normale')], [1.5, t('Un peu plus longue (×1,5)')], [2, t('Longue (×2)')], [3, t('Très longue (×3)')]].map(([v, lib]) =>

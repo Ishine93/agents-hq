@@ -5,6 +5,7 @@ import { t, LANGUES_INTERFACE, LANGUES_IA } from './i18n.js';
 import { TYPES_PROJET } from './parametres.js';
 import { infos as infosPlateforme, dicteeSysteme } from './plateforme.js';
 import { ligneI, exempleAide } from './aide.js';
+import { travailDe, nomNiveau, NIVEAU_DEFAUT } from './cout.js';
 
 const ETAPES = ['Bienvenue', 'Comptes IA', 'Tes projets', 'Mode de travail', 'Connecteurs et dictée', 'C’est prêt'];
 
@@ -187,8 +188,25 @@ export class Accueil {
             h('li', {}, t('jamais de git push, de publication ni d’envoi sans ton accord ;')),
             h('li', {}, t('les agents ne peuvent ni modifier le QG, ni lire les identifiants de tes comptes IA ;')),
             h('li', {}, t('un bouton « Arrêt d’urgence » coupe tout instantanément.')))),
+        h('p', {}, t('Combien de travail le QG met-il dans une demande ?')),
+        this.choixCout(),
       ],
     };
+  }
+
+  // Coût des nouvelles demandes (1.0.11) : Standard par défaut, changeable ici, dans Réglages › Coût ou demande par demande.
+  choixCout() {
+    const cout = travailDe(this.store.reglages).cout;
+    const choix = (id, texte) => h('label', { class: 'param-choix' + (cout === id ? ' choisi' : '') },
+      h('input', { type: 'radio', name: 'cout-accueil', checked: cout === id, on: { change: async () => { const r = await this.poster('/api/reglages', { travail: { cout: id } }); if (r) this.store.reglages = { ...this.store.reglages, ...r }; this.rendre(); } } }),
+      h('span', {}, h('b', {}, nomNiveau(id) + (id === NIVEAU_DEFAUT ? ' ' + t('(recommandé)') : '')), h('br'), h('small', {}, texte)));
+    return [
+      choix('standard', t('Comme Claude Code : le DG et les agents s’organisent seuls (sous-agents, workflows), sans plafond ni accord à donner.')),
+      choix('econome', t('Le moins de tokens : ta fenêtre de 5 h dure plus longtemps. Moins d’agents en même temps et moins de relectures.')),
+      choix('equilibre', t('Le juste coût : ce qui est utile, sans plus.')),
+      choix('max', t('La qualité d’abord : plus de tâches, un vérificateur pour tout code modifié. Le plus cher.')),
+      h('p', { class: 'meta' }, t('Tu pourras le changer à tout moment dans Réglages › Coût (Personnalisé y règle chaque valeur), ou pour une seule demande avec la pastille « Coût » à côté d’Envoyer.')),
+    ];
   }
 
   // 5. Connecteurs et dictée
@@ -224,6 +242,7 @@ export class Accueil {
         h('p', { class: 'gros' }, t('Tout est prêt.')),
         h('ul', { class: 'accueil-astuces' },
           h('li', {}, t('Écris ta demande en bas de l’écran (Entrée pour envoyer). Tu peux joindre des captures et dicter.')),
+          h('li', {}, t('Coût des demandes : {niveau}. La pastille « Coût » à côté d’Envoyer le change pour une demande ; Réglages › Coût pour toutes.', { niveau: nomNiveau(travailDe(this.store.reglages).cout) })),
           h('li', {}, t('◀ ▶ ou Page précédente / suivante pour changer d’étage ; la colonne de gauche montre tout l’immeuble.')),
           h('li', {}, t('Clique sur un agent pour voir sa fiche, sa réflexion en direct et son terminal.')),
           h('li', {}, t('⚡ en haut : ta consommation en temps réel et les limites de ton forfait.')),

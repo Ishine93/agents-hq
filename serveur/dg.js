@@ -3,7 +3,8 @@
 // en sortie JSON imposée. Avec plusieurs IA connectées (lot 2 multi-IA), son schéma et sa directive listent les
 // comptes et les modèles que l'on a vraiment ; avec Claude seul, ils ne parlent que de Claude. Les consignes de
 // l'utilisateur (Réglages › Priorités › Consignes au DG) lui sont données avec une IA comme avec plusieurs.
-import { REGLAGES, RACINE, directive, etagesActifs, etage as trouverEtage, fiche, racines } from './config.js';
+import { REGLAGES, RACINE, directive, etagesActifs, etage as trouverEtage, fiche, racines, modeFable } from './config.js';
+import { rapportFableOpus } from './estimation.js';
 import { optionsProfil } from './permissions.js';
 import { executerSession, raisonEchec } from './session.js';
 import { decouverteEnCache } from './decouverte.js';
@@ -64,15 +65,23 @@ function serveurSkillsDg(dossier) {
   return createSdkMcpServer({ name: 'qg', version: '1.0.0', tools: [tool(o.nom, o.description, o.schema, o.executer)] });
 }
 
-// Fable a sa propre limite de la semaine : le DG sait ce qu'il en reste pour ne pas bloquer un dossier.
+// Fable a sa propre limite de la semaine : le DG sait ce qu'il en reste pour ne pas bloquer un dossier, et ce qu'une
+// tâche Fable coûte à la fenêtre de 5 h de l'utilisateur (1.0.11).
 function noteFable(compteId) {
-  if (!modelesPour(compteId).includes('fable')) return [];
+  if (modeFable() === 'jamais' || !modelesPour(compteId).includes('fable')) return [];
+  const fois = Math.round(rapportFableOpus());
+  const cout = `COÛT DE FABLE : une tâche sur Fable remplit la fenêtre de 5 h de l'utilisateur environ ${fois} fois plus vite que la même tâche sur Opus. Pour chaque tâche sur Fable, le champ justification dit en une phrase ce qu'Opus ne saurait pas faire : l'utilisateur la lit au lancement du plan.`;
   const q = quotaFable(compteId);
-  if (!q) return [];
+  if (!q) return [cout];
   const seuil = (REGLAGES.gardeFable && REGLAGES.gardeFable.resteMin) ?? 30;
+  const demande = modeFable() === 'toujours' || (modeFable() === 'seuil' && q.reste < seuil);
   const quand = q.reinit ? new Date(q.reinit).toLocaleString('fr-FR', { weekday: 'long', hour: '2-digit', minute: '2-digit' }) : 'bientôt';
-  return [`QUOTA FABLE : il reste environ ${q.reste} % de la semaine Fable pour ce compte (remise à zéro ${quand}). Fable a sa propre limite : ${q.reste < seuil ? `c'est peu, réserve-le aux tâches qui en ont vraiment besoin (le serveur demandera confirmation à l'utilisateur avant de lancer une tâche Fable, et passe sur Opus si Fable est épuisé).` : `garde-le pour les tâches qui en profitent vraiment.`}`];
+  return [`QUOTA FABLE : il reste environ ${q.reste} % de la semaine Fable pour ce compte (remise à zéro ${quand}). Fable a sa propre limite : ${demande ? `réserve-le aux tâches qui en ont vraiment besoin (le serveur demandera confirmation à l'utilisateur avant de lancer une tâche Fable, et passe sur Opus si Fable est épuisé).` : `garde-le pour les tâches qui en profitent vraiment.`}`, cout];
 }
+
+// Modèles proposés au DG pour les tâches et leurs vérificateurs : sans Fable si l'utilisateur l'a écarté (1.0.11).
+// Le modèle du DG lui-même (modeleDg) ne passe pas par là.
+const pourTaches = (ids) => (modeFable() === 'jamais' ? ids.filter((m) => !/fable/i.test(m)) : ids);
 
 // Alias = dernière version de chaque famille. Les versions précises disponibles pour le compte
 // (Opus 5, Fable 5, Opus 4.x, Sonnet 5…) viennent de la découverte et sont ajoutées à l'énumération.
@@ -149,9 +158,9 @@ export function listeModeles(compteId) {
   const propres = autre ? adaptateurDe(autre).modeles?.(autre) || [] : [];
   if (autre) return propres.map((m) => `${m.id} = ${m.nom}${m.niveau ? ` (niveau ${m.niveau})` : ''}`).join(' ; ');
   const d = decouverteEnCache(compteId);
-  if (!d) return 'haiku (Haiku 5.5), sonnet (Sonnet 5.5), opus (Opus 5.5), fable (Fable 5.1).';
+  if (!d) return modeFable() === 'jamais' ? 'haiku (Haiku 5.5), sonnet (Sonnet 5.5), opus (Opus 5.5).' : 'haiku (Haiku 5.5), sonnet (Sonnet 5.5), opus (Opus 5.5), fable (Fable 5.1).';
   return d.modeles
-    .filter((m) => m.id !== 'default' && m.efforts.length)
+    .filter((m) => m.id !== 'default' && m.efforts.length && pourTaches([m.id]).length)
     .map((m) => `${m.id} = ${m.nom}${m.modeleResolu && m.modeleResolu !== m.id ? ` (${m.modeleResolu})` : ''}`)
     .join(' ; ');
 }
@@ -262,7 +271,7 @@ export function catalogueIa(comptes = comptesDisponibles()) {
   for (const c of comptes) {
     const f = fournisseurDe(c);
     if (!parF.has(f)) parF.set(f, new Set());
-    for (const id of modelesPour(c.id)) parF.get(f).add(id);
+    for (const id of pourTaches(modelesPour(c.id))) parF.get(f).add(id);
   }
   const vus = new Map();
   for (const ids of parF.values()) for (const id of ids) vus.set(id, (vus.get(id) || 0) + 1);
@@ -278,7 +287,7 @@ export function catalogueIa(comptes = comptesDisponibles()) {
  * connecté) sur chaque tâche, et `compte` sur les opérations du plan_delta.
  */
 export function schemaDg(schema, dossier, comptes = comptesDisponibles()) {
-  if (!multiIa(comptes)) return schemaAvecModeles(schema, modelesPour(compteDg(dossier)));
+  if (!multiIa(comptes)) return schemaAvecModeles(schema, pourTaches(modelesPour(compteDg(dossier))));
   const cat = catalogueIa(comptes);
   const copie = schemaAvecModeles(schema, cat.modeles);
   const ia = { type: 'string', enum: ['auto', ...cat.fournisseurs], description: '"auto" : le serveur suit les priorités de l’utilisateur ; sinon le fournisseur imposé' };

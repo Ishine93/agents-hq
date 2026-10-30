@@ -467,7 +467,7 @@ export async function lancer({ prompt, images = [], options = {}, compte, compte
   if (canal) canal.injecter = async () => false;
   if (!demande) {
     sortie.erreur = 'role_non_pris_en_charge';
-    sortie.exception = `un agent ACP ne peut pas tenir le rôle « ${meta.role} » sans demande`;
+    sortie.exception = t('un agent ACP ne peut pas tenir le rôle « {role} » sans demande', { role: meta.role });
     return sortie;
   }
   const { lectureSeule, profil } = profilDemande(demande);
@@ -476,19 +476,19 @@ export async function lancer({ prompt, images = [], options = {}, compte, compte
   const garantie = profilGaranti('acp', profil);
   if (garantie.statut === 'refuse') {
     sortie.erreur = 'profil_refuse';
-    sortie.exception = `profil ${profil} refusé sur un agent ACP : ${garantie.motif}`;
+    sortie.exception = t('profil {profil} refusé sur un agent ACP : {motif}', { profil, motif: garantie.motif });
     return sortie;
   }
   const agent = agentDe(compteObj);
   const cmd = commandeAgent(agent);
   if (!agent || !cmd.present) {
     sortie.erreur = 'binaire_absent';
-    sortie.exception = agent ? `${agent.nomCourt} introuvable sur ce PC (${agent.installation || 'installe l’agent'})` : 'agent ACP inconnu pour ce compte';
+    sortie.exception = agent ? t('{nom} introuvable sur ce PC ({installation})', { nom: agent.nomCourt, installation: agent.installation ? t(agent.installation) : t('installe l’agent') }) : t('agent ACP inconnu pour ce compte');
     return sortie;
   }
   const signal = options.abortController?.signal || null;
   if (signal?.aborted) {
-    sortie.exception = 'interrompue avant le lancement';
+    sortie.exception = t('interrompue avant le lancement');
     return sortie;
   }
   const reprise = options.forkSession ? null : options.resume || null;
@@ -926,7 +926,7 @@ export async function lancer({ prompt, images = [], options = {}, compte, compte
   let lu = null;
   try {
     const init = await rpc.demander('initialize', parametresInit(), { delaiMs: 60000 });
-    if (Number(init?.protocolVersion) !== 1) throw new Error(`version ACP non prise en charge : ${init?.protocolVersion}`);
+    if (Number(init?.protocolVersion) !== 1) throw new Error(t('version ACP non prise en charge : {version}', { version: init?.protocolVersion }));
     const caps = init?.agentCapabilities || {};
     retenir(compteObj.id, { reprise: !!caps.loadSession, images: !!caps.promptCapabilities?.image, mcpHttp: !!caps.mcpCapabilities?.http });
 
@@ -942,7 +942,7 @@ export async function lancer({ prompt, images = [], options = {}, compte, compte
         if (n === 'qg' || !/^[A-Za-z0-9_-]+$/.test(n) || !def || typeof def !== 'object') continue;
         if (def.url && caps.mcpCapabilities?.http) mcpServers.push({ type: 'http', name: n, url: String(def.url), headers: Object.entries(def.headers || {}).map(([name, value]) => ({ name, value: String(value) })) });
         else if (def.command) mcpServers.push({ name: n, command: String(def.command), args: (def.args || []).map(String), env: Object.entries(def.env || {}).map(([name, value]) => ({ name, value: String(value) })) });
-        else sortie.avertissements.push(`serveur MCP ${n} ignoré : l'agent ne prend pas le MCP HTTP`);
+        else sortie.avertissements.push(t(`serveur MCP {nom} ignoré : l'agent ne prend pas le MCP HTTP`, { nom: n }));
       }
     }
 
@@ -957,15 +957,15 @@ export async function lancer({ prompt, images = [], options = {}, compte, compte
         reprisReussie = true;
       } catch (e) {
         if (e.fermeture) throw e;
-        sortie.avertissements.push(`reprise impossible (${String(e.message).slice(0, 200)}) : nouvelle session`);
+        sortie.avertissements.push(t('reprise impossible ({raison}) : nouvelle session', { raison: String(e.message).slice(0, 200) }));
       } finally {
         rejeu = false;
       }
-    } else if (reprise) sortie.avertissements.push("reprise non proposée par l'agent : nouvelle session");
+    } else if (reprise) sortie.avertissements.push(t(`reprise non proposée par l'agent : nouvelle session`));
     if (!sessionId) {
       infos = await nouvelleSession(rpc, init, { compte: compteObj, agent, cwd, mcpServers });
       sessionId = infos?.sessionId;
-      if (!sessionId) throw new Error("l'agent n'a pas donné d'identifiant de session");
+      if (!sessionId) throw new Error(t(`l'agent n'a pas donné d'identifiant de session`));
     }
     sortie.sessionId = sessionId;
     const s = lireSession(infos);
@@ -980,12 +980,12 @@ export async function lancer({ prompt, images = [], options = {}, compte, compte
         s.modeCourant = mode;
       } catch (e) {
         if (e.fermeture) throw e;
-        sortie.avertissements.push(`mode ${mode} refusé par l'agent`);
+        sortie.avertissements.push(t(`mode {mode} refusé par l'agent`, { mode }));
       }
     }
     if (modeDangereux(s.modeCourant)) {
       sortie.erreur = 'profil_refuse';
-      throw new Error(`mode « ${s.modeCourant} » de l'agent : il agirait sans demander, le QG refuse`);
+      throw new Error(t(`mode « {mode} » de l'agent : il agirait sans demander, le QG refuse`, { mode: s.modeCourant }));
     }
 
     // modèle et effort choisis par le QG (jamais en dessous de la demande ; inconnu → défaut de l'agent)
@@ -997,7 +997,7 @@ export async function lancer({ prompt, images = [], options = {}, compte, compte
         s.modeleCourant = modele;
       } catch (e) {
         if (e.fermeture) throw e;
-        sortie.avertissements.push(`modèle ${modele} refusé par l'agent`);
+        sortie.avertissements.push(t(`modèle {modele} refusé par l'agent`, { modele }));
       }
     }
     const effort = s.options.effort ? convertirEffort(compteObj, s.modeleCourant || modele, options.effort || demande.effort || null) : null;
@@ -1006,7 +1006,7 @@ export async function lancer({ prompt, images = [], options = {}, compte, compte
         await rpc.demander('session/set_config_option', { sessionId, configId: s.options.effort, value: effort }, { delaiMs: 30000 });
       } catch (e) {
         if (e.fermeture) throw e;
-        sortie.avertissements.push(`effort ${effort} refusé par l'agent`);
+        sortie.avertissements.push(t(`effort {effort} refusé par l'agent`, { effort }));
       }
     }
     sortie.modeleReel = s.modeleCourant || null;
@@ -1029,7 +1029,7 @@ export async function lancer({ prompt, images = [], options = {}, compte, compte
       } catch (e) {
         fermerPhase();
         if (signal?.aborted) {
-          sortie.exception = 'session interrompue';
+          sortie.exception = t('session interrompue');
           break;
         }
         throw e;
@@ -1049,7 +1049,7 @@ export async function lancer({ prompt, images = [], options = {}, compte, compte
         if (!sortie.contexte) sortie.contexte = n(u.totalTokens ?? u.total_tokens) || null;
       }
       if (signal?.aborted) {
-        sortie.exception = 'session interrompue';
+        sortie.exception = t('session interrompue');
         break;
       }
       if (complement) {
@@ -1059,15 +1059,15 @@ export async function lancer({ prompt, images = [], options = {}, compte, compte
       }
       const raison = r?.stopReason;
       if (raison === 'refusal') {
-        noterErreur("l'agent a refusé de continuer (refusal)");
+        noterErreur(t(`l'agent a refusé de continuer`));
         break;
       }
       if (raison === 'max_tokens' || raison === 'max_turn_requests') {
-        noterErreur(`l'agent s'est arrêté avant la fin (${raison})`);
+        noterErreur(t(`l'agent s'est arrêté avant la fin ({raison})`, { raison }));
         break;
       }
       if (raison === 'cancelled') {
-        noterErreur("l'agent a annulé le tour");
+        noterErreur(t(`l'agent a annulé le tour`));
         break;
       }
       if (schema) {
@@ -1088,7 +1088,7 @@ export async function lancer({ prompt, images = [], options = {}, compte, compte
       sortie.result = { type: 'result', subtype: 'success', is_error: false, result: dernierMessage, structured_output: structure, usage: usageTour, session_id: sessionId };
     }
   } catch (e) {
-    if (signal?.aborted) sortie.exception = 'session interrompue';
+    if (signal?.aborted) sortie.exception = t('session interrompue');
     else {
       noterErreur(String(e?.message || e));
       if (e?.auth) sortie.erreur = 'authentication_failed';

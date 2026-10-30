@@ -5,6 +5,7 @@
 // (session/request_permission, fs/*, terminal/*), auxquelles surRequete répond.
 import { spawn } from 'node:child_process';
 import * as plateforme from '../plateforme.js';
+import { t } from '../i18n.js';
 
 export class ErreurRpc extends Error {
   constructor(code, message, data = undefined) {
@@ -104,7 +105,8 @@ export function connecterAgent({ commande, env, cwd, surRequete = async () => { 
     processus.on('close', (code, sig) => {
       if (reste.trim()) traiter(reste);
       ferme = true;
-      const raison = new ErreurRpc(ERREUR_INTERNE, erreurLancement ? `agent impossible à lancer : ${erreurLancement.message}` : `l'agent s'est arrêté (code ${code})${stderr.trim() ? ' : ' + stderr.trim().slice(-600) : ''}`);
+      // message montré dans le site (échec de la tâche) : traduit ; la fin de stderr reste telle quelle
+      const raison = new ErreurRpc(ERREUR_INTERNE, erreurLancement ? t('agent impossible à lancer : {erreur}', { erreur: erreurLancement.message }) : t(`l'agent s'est arrêté (code {code})`, { code }) + (stderr.trim() ? ' : ' + stderr.trim().slice(-600) : ''));
       raison.fermeture = true;
       for (const [, a] of enAttente) {
         clearTimeout(a.minuteur);
@@ -117,17 +119,17 @@ export function connecterAgent({ commande, env, cwd, surRequete = async () => { 
 
   const demander = (method, params = {}, { delaiMs = 0 } = {}) =>
     new Promise((resolve, reject) => {
-      if (ferme) return reject(Object.assign(new ErreurRpc(ERREUR_INTERNE, "l'agent est arrêté"), { fermeture: true }));
+      if (ferme) return reject(Object.assign(new ErreurRpc(ERREUR_INTERNE, t(`l'agent est arrêté`)), { fermeture: true }));
       const id = ++prochainId;
       const minuteur = delaiMs > 0 ? setTimeout(() => {
         enAttente.delete(id);
-        reject(Object.assign(new ErreurRpc(ERREUR_INTERNE, `pas de réponse de l'agent à ${method} après ${Math.round(delaiMs / 1000)} s`), { delai: true }));
+        reject(Object.assign(new ErreurRpc(ERREUR_INTERNE, t(`pas de réponse de l'agent à {methode} après {n} s`, { methode: method, n: Math.round(delaiMs / 1000) })), { delai: true }));
       }, delaiMs) : null;
       enAttente.set(id, { resolve, reject, minuteur });
       if (!ecrire({ jsonrpc: '2.0', id, method, params })) {
         clearTimeout(minuteur);
         enAttente.delete(id);
-        reject(Object.assign(new ErreurRpc(ERREUR_INTERNE, "l'agent est arrêté"), { fermeture: true }));
+        reject(Object.assign(new ErreurRpc(ERREUR_INTERNE, t(`l'agent est arrêté`)), { fermeture: true }));
       }
     });
   const notifier = (method, params = {}) => ecrire({ jsonrpc: '2.0', method, params });

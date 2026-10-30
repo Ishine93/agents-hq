@@ -23,20 +23,20 @@ const AIDE = {
   fr: {
     cout: 'pour les nouvelles demandes',
     base: 'niveau dont partent les valeurs de « personnalise »',
-    compactionAgents: 'mémoire d’un agent avant qu’il se résume, en tokens',
+    compactionAgents: 'mémoire d’un agent avant qu’il se résume, en tokens ; null = celle de Claude Code',
     compactionVerif: 'la même chose pour un vérificateur',
     compactionDg: 'la même chose pour le DG',
     maxCompactions: 'au-delà, la tâche s’arrête et le DG la redécoupe ; null = aucune limite',
     maxTaches: 'tâches au plus dans le plan d’une demande',
-    decoupage: 'chantier = une tâche par chantier ; parallele = seulement le travail indépendant à part ; actuel = étude, code et mesure séparés',
-    agentDirect: 'quand le DG confie tout à un seul agent, sans plan',
-    verifDefaut: 'qui relit : self = l’agent lui-même avec des commandes ; risque = un vérificateur si le code est sensible ; code = un vérificateur pour tout code',
+    decoupage: 'chantier = une tâche par chantier ; parallele = seulement le travail indépendant à part ; actuel = étude, code et mesure séparés ; libre = au choix du DG',
+    agentDirect: 'quand le DG confie tout à un seul agent, sans plan ; libre = quand c’est le plus simple',
+    verifDefaut: 'qui relit : self = l’agent lui-même avec des commandes ; risque = un vérificateur si le code est sensible ; code = un vérificateur pour tout code ; libre = au choix du DG',
     verifNiveau: 'null = le modèle choisi par le DG ; standard = le niveau standard de la même IA',
     verifEffort: 'null = l’effort choisi par le DG',
     verifMaxTurns: 'tours au plus d’un vérificateur',
     maxRework: 'corrections au plus après un refus du vérificateur',
     perimetre: 'strict = seulement la demande ; complements = ses tests et sa doc courte ; bonus = propositions en plus, à ton accord',
-    exploration: 'petit assistant de recherche des agents (Claude)',
+    exploration: 'petit assistant de recherche des agents (Claude) ; autonome = sous-agents, arrière-plan et workflows de Claude Code',
     seuilAccordFenetre: 'accord demandé si l’estimation dépasse ce % de ta fenêtre de 5 h ; null = jamais',
     plafondTacheFacteur: 'limite de dépense d’une tâche, en × son estimation ; null = aucune',
     ambiance: 'null = selon le mini-jeu ; false = bavardages et Joy coupés',
@@ -45,20 +45,20 @@ const AIDE = {
   en: {
     cout: 'for new requests',
     base: 'level the “personnalise” values start from',
-    compactionAgents: 'how much an agent remembers before it summarizes, in tokens',
+    compactionAgents: 'how much an agent remembers before it summarizes, in tokens; null = Claude Code’s own',
     compactionVerif: 'the same for a verifier',
     compactionDg: 'the same for the director',
     maxCompactions: 'beyond this, the task stops and the director splits it; null = no limit',
     maxTaches: 'at most this many tasks in a request’s plan',
-    decoupage: 'chantier = one task per workstream; parallele = only independent work apart; actuel = study, code and measurement apart',
-    agentDirect: 'when the director gives everything to a single agent, with no plan',
-    verifDefaut: 'who reviews: self = the agent itself with commands; risque = a verifier for sensitive code; code = a verifier for all code',
+    decoupage: 'chantier = one task per workstream; parallele = only independent work apart; actuel = study, code and measurement apart; libre = the director decides',
+    agentDirect: 'when the director gives everything to a single agent, with no plan; libre = when it is simplest',
+    verifDefaut: 'who reviews: self = the agent itself with commands; risque = a verifier for sensitive code; code = a verifier for all code; libre = the director decides',
     verifNiveau: 'null = the model the director chose; standard = the standard level of the same AI',
     verifEffort: 'null = the effort the director chose',
     verifMaxTurns: 'at most this many verifier turns',
     maxRework: 'at most this many fixes after a verifier rejects',
     perimetre: 'strict = only the request; complements = its tests and short doc; bonus = extra proposals, with your approval',
-    exploration: 'small search assistant for agents (Claude)',
+    exploration: 'small search assistant for agents (Claude); autonome = Claude Code sub-agents, background commands and workflows',
     seuilAccordFenetre: 'approval asked when the estimate exceeds this % of your 5-hour window; null = never',
     plafondTacheFacteur: 'spending limit of a task, in × its estimate; null = none',
     ambiance: 'null = per the mini-game; false = chatter and Joy off',
@@ -135,7 +135,7 @@ export function fabriquerFichier({ travail = travailReglages(), consignes = cons
   return lignes.join('\n') + '\n';
 }
 
-/** Le texte avec les valeurs d'origine (Équilibré, sans valeur changée) ; les consignes restent celles du moment. */
+/** Le texte avec les valeurs d'origine (Standard, sans valeur changée) ; les consignes restent celles du moment. */
 export const fichierParDefaut = (opts = {}) => fabriquerFichier({ ...opts, travail: { cout: NIVEAU_DEFAUT, base: NIVEAU_DEFAUT, personnalise: {} } });
 
 // Valeur écrite dans le fichier → valeur du réglage, ou { erreur }.

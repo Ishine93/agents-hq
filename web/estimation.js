@@ -1,7 +1,7 @@
 // Lot C : textes de l'estimation d'un plan et des mesures d'une tâche (le calcul est fait par le serveur,
 // serveur/estimation.js). Estimation en $ (équivalent API) ou en jetons selon le compte, % de la fenêtre de
 // 5 h seulement là où les limites du compte sont lisibles.
-import { t, locale } from './i18n.js';
+import { t, locale, langueCourante } from './i18n.js';
 
 const nombre = (v, dec = 0) => Number(v).toLocaleString(locale(), { maximumFractionDigits: dec });
 
@@ -16,9 +16,22 @@ export function montant(v, unite) {
 export function texteEstimation(e) {
   if (!e) return '';
   if (!e.estimable || e.total == null) return t('non estimable pour ce compte');
-  const m = '≈ ' + montant(e.total, e.unite);
-  if (e.pct == null) return m;
-  return m + ' · ' + t('≈ {pct} % de ta fenêtre de {fenetre} (il en reste {reste} %)', { pct: nombre(e.pct), fenetre: e.fenetre, reste: nombre(e.reste) });
+  const morceaux = ['≈ ' + montant(e.total, e.unite)];
+  if (e.pct != null && !(e.attentes > 0)) morceaux.push(t('≈ {pct} % de ta fenêtre de {fenetre} (il en reste {reste} %)', { pct: nombre(e.pct), fenetre: e.fenetre, reste: nombre(e.reste) }));
+  // plus que ce qui reste (1.0.11) : en fenêtres, avec les attentes et l'heure de la dernière reprise
+  if (e.pct != null && e.attentes > 0) {
+    const n = Math.round(e.pct / 10) / 10;
+    const un = langueCourante() === 'en' ? n === 1 : n < 2;
+    morceaux.push(t('≈ {fenetres} de {fenetre} (il en reste {reste} %)', { fenetres: t(un ? '{n} fenêtre' : '{n} fenêtres', { n: nombre(n, 1) }), fenetre: e.fenetre, reste: nombre(e.reste) }));
+    if (e.reprise) {
+      const d = new Date(e.reprise);
+      const h = d.toDateString() === new Date().toDateString() ? d.toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' }) : d.toLocaleString(locale(), { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+      morceaux.push(t(e.attentes > 1 ? '{n} attentes, dernière reprise vers {heure}' : '1 attente, reprise vers {heure}', { n: e.attentes, heure: h }));
+    }
+  }
+  // part de Fable (1.0.11)
+  if (e.fable) morceaux.push(t('dont Fable ≈ {montant} ({refs})', { montant: montant(e.fable.valeur, e.unite), refs: e.fable.refs.join(', ') }));
+  return morceaux.join(' · ');
 }
 
 /** Écart du réel à l'estimé, en % (null sans estimation ou sans réel). */

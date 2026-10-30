@@ -312,7 +312,10 @@ function banquette(it, typeTheme, etat, O) {
 }
 
 // Batterie compacte : grosse caisse (peau tournée vers nous), caisse claire, tom, charleston et cymbale, tabouret.
+// Easter egg (etat.effet) : les baguettes ne sont plus posées (elles jouent toutes seules, ANIMES) et, au coup final,
+// la cymbale part en vrille (dessinée par l'animation).
 function batterie(it, typeTheme, etat, O) {
+  const ef = etat.effet;
   return O.spriteTuile(56, (g, P) => {
     // tabouret derrière
     O.prisme(g, P, 0.46, 0.1, 0.5, 0.14, 0, 12, '#3a3a44');
@@ -330,9 +333,9 @@ function batterie(it, typeTheme, etat, O) {
     disqueZ(O, g, P, 0.86, 0.31, 0.12, 34, '#c9a227');
     disqueZ(O, g, P, 0.86, 0.31, 0.12, 36, '#e8c547');
     O.prisme(g, P, 0.14, 0.62, 0.16, 0.64, 0, 44, '#8a9098');
-    disqueZ(O, g, P, 0.15, 0.63, 0.16, 44, '#e8c547', 0.12);
+    if (ef !== 2) disqueZ(O, g, P, 0.15, 0.63, 0.16, 44, '#e8c547', 0.12);
     // baguettes posées
-    O.prisme(g, P, 0.4, 0.46, 0.66, 0.48, 30, 31, '#e0b070');
+    if (!ef) O.prisme(g, P, 0.4, 0.46, 0.66, 0.48, 30, 31, '#e0b070');
   });
 }
 
@@ -430,6 +433,7 @@ function barreaux(it, typeTheme, etat, O) {
 // Lit de camp (2 × 1, tête en x = 0) : cadre en tube, toile kaki, couverture grise, oreiller plat.
 function litCamp(it, typeTheme, etat, O) {
   const couv = ['#6d7066', '#5f6b5a', '#77706a'][(it.variante || 0) % 3];
+  if (etat.effet === 2) return litCampReleve(couv, O);
   return O.spriteBloc(2, 1, 30, (g, P) => {
     const tube = '#6e747c';
     for (const x of [0.1, 1.86]) {
@@ -444,6 +448,35 @@ function litCamp(it, typeTheme, etat, O) {
     O.prisme(g, P, 0.62, 0.14, 1.9, 0.86, 13, 16, couv);
     O.quadY(g, P, 0.86, 0.66, 1.86, 13.5, 14.5, O.nuance(couv, -0.25));
     O.quadZ(g, P, 16.3, 0.62, 0.14, 0.72, 0.86, O.nuance(couv, 0.25));
+  });
+}
+
+// Easter egg du lit de camp : le lit relevé contre le mur (on voit la toile et les pieds), et dessous le trou d'un
+// tunnel creusé à la cuillère, bordé de béton cassé et de terre (le détenu qui en sort est dans ANIMES).
+function litCampReleve(couv, O) {
+  return O.spriteBloc(2, 1, 40, (g, P) => {
+    const tube = '#6e747c';
+    // le lit debout : toile tendue face à nous, cadre en tube, pieds qui dépassent vers nous
+    O.prisme(g, P, 0.06, 0.02, 1.94, 0.12, 0, 27, '#7a7a5a');
+    for (const z of [7, 14, 21]) O.quadY(g, P, 0.12, 0.1, 1.9, z, z + 1, '#666648');
+    O.prisme(g, P, 0.06, 0.12, 1.94, 0.15, 0, 2.5, tube);
+    O.prisme(g, P, 0.06, 0.12, 1.94, 0.15, 24.5, 27, tube);
+    O.prisme(g, P, 0.06, 0.12, 0.1, 0.15, 0, 27, tube);
+    O.prisme(g, P, 1.9, 0.12, 1.94, 0.15, 0, 27, tube);
+    for (const x of [0.1, 1.86]) for (const z of [2, 22]) O.prisme(g, P, x, 0.15, x + 0.04, 0.36, z, z + 2.5, tube);
+    O.quadZ(g, P, 27.3, 0.62, 0.02, 1.9, 0.08, couv);
+    // le trou : béton cassé, terre retournée, fond noir
+    disqueZ(O, g, P, 1, 0.58, 0.5, 0.2, '#6b4a2e', 0.34);
+    disqueZ(O, g, P, 1, 0.58, 0.4, 0.4, '#3a2616', 0.26);
+    disqueZ(O, g, P, 1, 0.6, 0.3, 0.6, '#140c08', 0.19);
+    const rnd = O.aleatoire(31);
+    for (let i = 0; i < 9; i++) {
+      const a = (i / 9) * Math.PI * 2 + rnd() * 0.4;
+      const u = 1 + Math.cos(a) * 0.5;
+      const v = 0.58 + Math.sin(a) * 0.33;
+      const r = 0.04 + rnd() * 0.04;
+      O.prisme(g, P, u - r, v - r, u + r, v + r, 0, 2 + rnd() * 3, i % 3 ? '#9a958a' : '#7a5236');
+    }
   });
 }
 
@@ -735,7 +768,8 @@ function serviettes(it, typeTheme, etat, O) {
     }
     O.prisme(g, P, 0.24, 0.24, 0.76, 0.64, 30, 35, '#f6f4ee');
     O.prisme(g, P, 0.24, 0.24, 0.76, 0.64, 35, 39, '#f6f4ee');
-    // canard
+    // canard (pendant l'easter egg, il est parti plonger : c'est l'animation qui le dessine)
+    if (etat.effet) return;
     O.prisme(g, P, 0.4, 0.36, 0.62, 0.56, 39, 44, '#ffd23f');
     O.prisme(g, P, 0.42, 0.38, 0.54, 0.5, 44, 49, '#ffd23f');
     O.prisme(g, P, 0.54, 0.42, 0.62, 0.48, 45, 47, '#ef7d22');
@@ -873,21 +907,46 @@ function litKing(it, typeTheme, etat, O) {
   });
 }
 
+// Poses des bras de la statue : ligne brisée [écart vers l'extérieur depuis l'épaule (cases), hauteur (px)].
+const POSES_STATUE = {
+  V: [[0, 52], [0.132, 70]],
+  muscle: [[0, 53], [0.14, 53], [0.14, 65]],
+  haut: [[0, 53], [0.05, 77]],
+  hanche: [[0, 53], [0.11, 47], [0.03, 41]],
+};
+// Easter egg : la statue s'anime et enchaîne les poses (phase → [bras gauche, bras droit]), puis revient au V.
+const DANSE_STATUE = [null, ['V', 'V'], ['muscle', 'muscle'], ['haut', 'hanche'], ['hanche', 'haut'], ['muscle', 'muscle'], ['haut', 'hanche'], ['V', 'V']];
+function brasStatue(O, g, P, cote, pose, or) {
+  const pts = POSES_STATUE[pose];
+  const prisme = (a, z, l, h) => {
+    const u = cote < 0 ? 0.34 - a : 0.61 + a;
+    O.prisme(g, P, u - l, 0.5 - 0.04 - l, u + 0.05 + l, 0.5 + 0.04 + l, z, z + h, or);
+  };
+  for (let s = 0; s < pts.length - 1; s++) {
+    const [a0, z0] = pts[s];
+    const [a1, z1] = pts[s + 1];
+    const n = Math.max(2, Math.ceil(Math.max(Math.abs(a1 - a0) / 0.012, Math.abs(z1 - z0) / 1.5)));
+    for (let i = 0; i <= n; i++) prisme(a0 + ((a1 - a0) * i) / n, z0 + ((z1 - z0) * i) / n, 0, 2);
+  }
+  // le poing
+  const [a, z] = pts[pts.length - 1];
+  prisme(a, z - 1, 0.01, 3);
+}
+
 // Statue dorée d'un agent triomphant, sur son socle de marbre.
 function statue(it, typeTheme, etat, O) {
+  const [gauche, droite] = DANSE_STATUE[etat.effet || 0] || ['V', 'V'];
   return O.spriteTuile(84, (g, P) => {
     O.prisme(g, P, 0.22, 0.22, 0.78, 0.78, 0, 22, '#ece6da');
     O.quadY(g, P, 0.78, 0.3, 0.7, 8, 14, '#c9a227');
     O.prisme(g, P, 0.18, 0.18, 0.82, 0.82, 22, 25, '#d8d0c0');
     const or = '#d4a927';
-    // jambes, buste, bras levés en V, tête ronde
+    // jambes, buste, bras (levés en V hors easter egg), tête ronde
     O.prisme(g, P, 0.4, 0.44, 0.47, 0.56, 25, 40, or);
     O.prisme(g, P, 0.53, 0.44, 0.6, 0.56, 25, 40, or);
     O.prisme(g, P, 0.37, 0.4, 0.63, 0.6, 40, 56, or);
-    for (let i = 0; i < 12; i++) {
-      O.prisme(g, P, 0.34 - i * 0.012, 0.46, 0.39 - i * 0.012, 0.54, 52 + i * 1.5, 54 + i * 1.5, or);
-      O.prisme(g, P, 0.61 + i * 0.012, 0.46, 0.66 + i * 0.012, 0.54, 52 + i * 1.5, 54 + i * 1.5, or);
-    }
+    brasStatue(O, g, P, -1, gauche, or);
+    brasStatue(O, g, P, 1, droite, or);
     const [cx, cy] = P(0.5, 0.5, 63);
     boule(g, Math.round(cx), Math.round(cy), 5, '#e8c547');
     O.pixel(g, P(0.62, 0.5, 46), '#fff3c4', 1, 6);
@@ -955,6 +1014,529 @@ export const MEUBLES = {
   iso_depot: depot,
 };
 
+// ---------- easter eggs (web/clics.js) ----------
+// Un clic sur certains meubles lance une petite scène de quelques secondes, puis tout revient comme avant :
+// - studio : la batterie joue toute seule (« BA-DUM TSS ! ») ; la platine du coin pause fait descendre la boule à
+//   facettes et les enceintes battent la mesure ;
+// - cellule : sous un lit de camp, un détenu sort d'un tunnel (« Mauvais tunnel ! ») et l'alarme du portique tourne ;
+//   le WC-lavabo part en geyser jusqu'au plafond ;
+// - suite : le canard en plastique plonge dans le jacuzzi ; la statue dorée s'anime et prend la pose.
+const borne = (x) => Math.max(0, Math.min(1, x));
+const lisse = (x) => {
+  const u = borne(x);
+  return u * u * (3 - 2 * u);
+};
+
+// Bulle d'onomatopée, la pointe en (x, y) ; le texte suit la langue du site (O.enseigne, comme les enseignes).
+// `ech` : texte ×1 ou ×2 ; `gauche` : la bulle s'ouvre vers la gauche de la pointe.
+function bulle(g, O, x, y, fr, en, col, ech = 1, gauche = false) {
+  const tc = O.texteCanvas(O.enseigne(fr, en), col);
+  const w = tc.width * ech + 10;
+  const h = tc.height * ech + 6;
+  const bx = Math.round(gauche ? x - w + 6 : x - 6);
+  const by = Math.round(y - h - 5);
+  O.cadre(g, bx, by, w, h, '#15151f', '#fff8e6');
+  g.drawImage(tc, bx + 5, by + 3, tc.width * ech, tc.height * ech);
+  const px = Math.round(gauche ? x - 3 : x);
+  rect(g, px, by + h, 3, 3, '#15151f');
+  rect(g, px + (gauche ? 2 : -1), by + h + 3, 2, 2, '#15151f');
+}
+// Étincelle en croix.
+function etincelle(g, x, y, col, grande) {
+  const l = grande ? 2 : 1;
+  rect(g, x, y - l, 1, l * 2 + 1, col);
+  rect(g, x - l, y, l * 2 + 1, 1, col);
+}
+// Croche, le bas de la tête en (x, y).
+function note(g, x, y, col) {
+  rect(g, x, y - 2, 3, 2, col);
+  rect(g, x + 2, y - 8, 1, 7, col);
+  rect(g, x + 3, y - 8, 2, 1, col);
+  rect(g, x + 4, y - 7, 1, 2, col);
+}
+// Petit nuage de poussière qui s'étale (s de 0 à 1) autour de (u, v) ; `rx` l'étire le long de x.
+function poussiere(g, O, P, u, v, s, n, rx = 1) {
+  const col = 'rgba(214,206,186,' + (0.85 * (1 - borne(s))).toFixed(2) + ')';
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * Math.PI * 2 + i;
+    const r = 0.15 + borne(s) * 0.45;
+    O.pixel(g, P(u + Math.cos(a) * r * rx, v + Math.sin(a) * r * 0.5, 2 + s * 6 + (i % 3) * 2), col, 3, 2);
+  }
+}
+
+// Studio : la batterie fantôme. Les baguettes jouent toutes seules un roulement qui accélère (phase 1), puis
+// frappent la cymbale (phase 2) : « BA-DUM TSS ! », la cymbale oscille, les baguettes sautent et retombent posées.
+function animeBatterie(g, it, tx, ty, t, O, effet) {
+  if (!effet) return;
+  const P = O.projeteur(tx + 32, ty);
+  const d = effet.depuis;
+  const choc = (x, y) => {
+    for (const [dx, dy] of [[-6, -2], [5, -2], [-5, 2], [4, 2], [0, -6]]) rect(g, x + dx, y + dy, 2, 1, '#fff3c4');
+  };
+  // une baguette de 16 px cernée de sombre : son milieu en (x, y), inclinée de l'angle a (radians, à l'écran),
+  // le bout clair du côté des i négatifs
+  const baguette = (x, y, a) => {
+    for (let i = -8; i < 8; i++) rect(g, x + Math.cos(a) * i - 0.5, y + Math.sin(a) * i - 0.5, 2, 2, '#2a1a0e');
+    for (let i = -8; i < 8; i++) rect(g, x + Math.cos(a) * i, y + Math.sin(a) * i, 1, 1, i < -6 ? '#fff4d6' : '#e8b878');
+  };
+  if (effet.phase === 1) {
+    // roulement sur le tom et le charleston : un coup toutes les 150 ms au début, toutes les 70 ms à la fin
+    const n = d / 150 + ((1 / 70 - 1 / 150) * d * d) / (2 * 1800);
+    [P(0.48, 0.5, 30.5), P(0.86, 0.31, 36.5)].forEach(([x, y], i) => {
+      const h = Math.abs(Math.sin(Math.PI * (n + i * 0.5)));
+      const s = i ? 1 : -1;
+      // le bout frappe la peau, le manche part vers le haut, côté extérieur
+      const a = s > 0 ? -0.6 : Math.PI + 0.6;
+      baguette(x + Math.cos(a) * 8, y - h * 12 + Math.sin(a) * 8, a);
+      if (h < 0.3) choc(Math.round(x), Math.round(y));
+    });
+    if (d > 300) {
+      const [bx, by] = P(0.15, 0.63, 50);
+      bulle(g, O, bx - 2, by - 4, 'BRRRRR…', 'BRRRRR…', '#a8232a', 1, true);
+    }
+    // la grosse caisse marque les temps
+    if (Math.floor(n) % 2 === 0) {
+      const [x, y] = P(0.5, 0.75, 13);
+      for (const [dx, dy] of [[-17, -3], [-18, 1], [15, -3], [16, 1]]) rect(g, x + dx, y + dy, 3, 1, '#fff3c4');
+    }
+    return;
+  }
+  // coup final : la cymbale oscille de moins en moins
+  const d2 = d - 1800;
+  const pente = 7 * Math.exp(-d2 / 650) * Math.cos(d2 / 45);
+  for (const [z, col] of [[43, '#9a7a1a'], [44, '#e8c547']]) {
+    const pts = [];
+    for (let i = 0; i < 20; i++) {
+      const a = (i / 20) * Math.PI * 2;
+      pts.push(P(0.15 + Math.cos(a) * 0.16, 0.63 + Math.sin(a) * 0.12, z + (Math.cos(a) - Math.sin(a)) * pente * 0.5));
+    }
+    O.poly(g, pts, col);
+  }
+  O.pixel(g, P(0.15, 0.63, 45), '#9a7a1a', 2, 1);
+  const [cx, cy] = P(0.15, 0.63, 46);
+  if (d2 < 450) {
+    // éclat du choc
+    const l = 6 + d2 / 30;
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2;
+      for (let s = l * 0.5; s < l; s += 1.5) rect(g, cx + Math.cos(a) * s, cy + Math.sin(a) * s * 0.6, 1, 1, '#fff3c4');
+    }
+  }
+  // les baguettes sautent en tournoyant et retombent posées sur le tom
+  const s = borne(d2 / 1200);
+  const [ex, ey] = P(0.53, 0.47, 31);
+  for (const k of [-1, 1]) {
+    const x = cx + (ex - cx) * s + k * 3 * (1 - s);
+    const y = cy + (ey - cy) * s - Math.sin(Math.PI * s) * 34 + k * (1 - s) * 2;
+    baguette(x, y, 0.46 + (1 - s) * Math.PI * 4 * (k > 0 ? 1 : -1));
+  }
+  bulle(g, O, cx - 2, cy - 10, 'BA-DUM TSS !', 'BA-DUM TSS!', '#a8232a', 1, true);
+}
+
+// Studio : la platine du coin pause. Une boule à facettes descend du plafond (phase 1), tourne en semant des taches
+// de couleur au sol (phase 2), puis remonte (phase 3) ; le disque tourne plus vite et des notes s'envolent.
+function animePlatine(g, it, tx, ty, t, O, effet) {
+  const P = O.projeteur(tx + 32, ty);
+  const a = (t / (effet ? 110 : 400)) % (Math.PI * 2);
+  for (let i = 0; i < 3; i++) O.pixel(g, P(0.46 + Math.cos(a) * (0.12 + i * 0.04), 0.5 + Math.sin(a) * (0.12 + i * 0.04), 26), '#5a5a66', 1, 1);
+  if (!effet) return;
+  const d = effet.depuis;
+  const COUL = [[255, 79, 216], [61, 242, 255], [255, 225, 77], [125, 255, 106]];
+  for (let i = 0; i < 3; i++) {
+    const u = (d / 1400 + i / 3) % 1;
+    const [x, y] = P(0.46, 0.5, 30 + u * 34);
+    note(g, x - 3 + i * 3 + Math.round(Math.sin(u * 6 + i) * 4), y, 'rgb(' + COUL[i].join(',') + ')');
+  }
+  // la boule, au-dessus du coin salon (en cases depuis la platine) : les taches restent dans le coin pause
+  const cu = 1.5;
+  const cv = 2.5;
+  const haut = O.HW + 30;
+  const bas = 60;
+  let zb = bas;
+  if (effet.phase === 1) zb = haut - (haut - bas) * lisse(d / 1500);
+  else if (effet.phase === 3) zb = bas + (haut - bas) * lisse((d - 7600) / 1400);
+  const [bx, by] = P(cu, cv, zb);
+  if (effet.phase === 2) {
+    const lum = Math.min(1, (d - 1500) / 400, (7600 - d) / 400);
+    // reflets sur le mur gauche, entre la platine et le fond du coin (rien n'est posé devant à cette hauteur)
+    for (let i = 0; i < 14; i++) {
+      const v = 1.1 + ((i * 0.377 + t / 2600) % 1) * 2.8;
+      const z = 30 + ((i * 23) % 50);
+      O.pixel(g, P(0, v, z), i % 3 ? 'rgba(255,255,255,' + (0.8 * lum).toFixed(2) + ')' : 'rgba(' + COUL[i % 4].join(',') + ',' + (0.9 * lum).toFixed(2) + ')', 2, 2);
+    }
+    // taches de couleur au sol, et leurs rayons
+    for (let i = 0; i < 8; i++) {
+      const an = t / 800 + (i * Math.PI) / 4;
+      const r = i % 2 ? 1 : 0.5;
+      const u = cu + Math.cos(an) * r * 1.1;
+      const v = cv + Math.sin(an) * r;
+      const col = 'rgba(' + COUL[i % 4].join(',') + ',';
+      disqueZ(O, g, P, u, v, 0.26, 0.5, col + (0.5 * lum).toFixed(2) + ')', 0.26);
+      const [sx, sy] = P(u, v, 0.5);
+      for (let k = 4; k < 40; k += 2) rect(g, bx + ((sx - bx) * k) / 40, by + ((sy - by) * k) / 40, 1, 1, col + (0.45 * lum).toFixed(2) + ')');
+    }
+  }
+  rect(g, bx, by - (haut + 20 - zb), 1, haut + 20 - zb - 8, '#8a9098');
+  boule(g, Math.round(bx), Math.round(by), 9, '#9aa0a8');
+  for (let j = -8; j <= 8; j += 2) {
+    for (let i = -8; i <= 8; i += 2) {
+      if (i * i + j * j > 60) continue;
+      const k = (((i + j) / 2 + Math.floor(t / 110)) % 4 + 4) % 4;
+      rect(g, bx + i, by + j, 1, 1, ['#ffffff', '#d8dde2', '#5a6068', '#c8cdd3'][k]);
+    }
+  }
+  if (effet.phase === 2 && Math.floor(t / 180) % 2) etincelle(g, bx - 5, by - 5, '#ffffff', true);
+}
+
+// Studio : les enceintes pendant la boum (déclenchées par la platine) : les membranes battent, des ondes partent.
+function animeEnceinte(g, it, tx, ty, t, O, effet) {
+  if (!effet || effet.phase !== 2) return;
+  const P = O.projeteur(tx + 32, ty);
+  const d = effet.depuis;
+  const temps = (d % 470) / 470;
+  if (temps < 0.25) {
+    hautParleur(O, g, P, 0.7, 0.5, 14, 0.17);
+    hautParleur(O, g, P, 0.7, 0.5, 31, 0.17);
+  }
+  for (let k = 0; k < 2; k++) {
+    const w = (temps + k * 0.5) % 1;
+    const col = 'rgba(255,255,255,' + (0.7 * (1 - w)).toFixed(2) + ')';
+    for (const zc of [14, 31]) {
+      for (let i = 0; i < 16; i++) {
+        const a = (i / 16) * Math.PI * 2;
+        O.pixel(g, P(0.5 + Math.cos(a) * (0.17 + w * 0.12), 0.74 + w * 0.5, zc + Math.sin(a) * (5 + w * 4)), col, 1, 1);
+      }
+    }
+  }
+  const u = (d / 1300) % 1;
+  const [x, y] = P(0.5, 0.5, 58 + u * 22);
+  note(g, x - 2 + Math.round(Math.sin(u * 7) * 3), y, u < 0.8 ? '#ffe14d' : '#8a7a2a');
+}
+
+// Cellule : détenu en tenue rayée qui sort d'un trou. (x, y) : le centre du trou à l'écran ; `sortie` de 0 (caché)
+// à 1 ; `regard` -1, 0 ou 1 ; `bouche` ouverte quand il parle. La cuillère qui a creusé le tunnel est levée.
+function bagnard(g, x, y, sortie, regard, bouche) {
+  x = Math.round(x);
+  y = Math.round(y);
+  const b = y + 1 + Math.round((1 - sortie) * 34); // sous le buste
+  const blocs = [];
+  const B = (x0, y0, w, h, col) => blocs.push([x0, y0, w, h, col]);
+  const raye = (k) => (Math.floor(k / 2) % 2 ? '#2a2a30' : '#f2f2f2');
+  for (let k = 0; k < 13; k++) B(x - 6, b - 13 + k, 13, 1, raye(k));
+  for (let k = 0; k < 9; k++) B(x + 7, b - 22 + k, 2, 1, raye(k));
+  B(x + 7, b - 25, 3, 3, '#d9a066');
+  B(x + 8, b - 31, 1, 6, '#c8cdd3');
+  B(x + 7, b - 33, 3, 2, '#e4e8ec');
+  B(x - 9, b - 3, 3, 2, '#d9a066');
+  B(x - 4, b - 21, 9, 8, '#d9a066');
+  for (let k = 0; k < 3; k++) B(x - 4, b - 24 + k, 9, 1, k === 1 ? '#f2f2f2' : '#2a2a30');
+  g.save();
+  g.beginPath();
+  g.rect(x - 40, y - 80, 80, 81);
+  g.clip();
+  for (const [x0, y0, w, h] of blocs) rect(g, x0 - 1, y0 - 1, w + 2, h + 2, '#15151f');
+  for (const [x0, y0, w, h, col] of blocs) rect(g, x0, y0, w, h, col);
+  rect(g, x - 2 + regard, b - 19, 1, 2, '#15151f');
+  rect(g, x + 2 + regard, b - 19, 1, 2, '#15151f');
+  rect(g, x - 3, b - 15, 7, 1, '#b07a4a');
+  if (bouche) rect(g, x + regard, b - 16, 2, 2, '#5a1a1a');
+  g.restore();
+}
+
+// Cellule : le lit de camp. Ça cogne par en dessous (phase 1), le lit se relève sur un tunnel d'où sort un détenu :
+// il regarde à gauche, à droite… « Mauvais tunnel ! » et il replonge (phase 2) ; le lit retombe (phase 3).
+function animeLitCamp(g, it, tx, ty, t, O, effet) {
+  if (!effet) return;
+  const P = O.projeteur(tx + 32, ty);
+  const d = effet.depuis;
+  if (effet.phase === 1) {
+    // ça cogne sous le lit : « TOC TOC », le lit tressaute, de la poussière sort
+    const v = Math.round(Math.sin(d / 28) * 2);
+    for (const u of [0.55, 1.45]) {
+      const [x, y] = P(u, 0.5, 22);
+      for (let k = 0; k < 3; k++) rect(g, x - 4 + k * 4 + v, y - 2 - (k % 2) * 3, 2, 1, '#f2ead2');
+    }
+    poussiere(g, O, P, 1, 0.95, (d % 600) / 600, 8, 1.8);
+    if (d > 150) {
+      const [x, y] = P(1, 0.5, 26);
+      bulle(g, O, x + 4, y - 4, 'TOC TOC !', 'KNOCK KNOCK!', '#15151f');
+    }
+    return;
+  }
+  if (effet.phase === 3) {
+    poussiere(g, O, P, 1, 0.6, (d - 6800) / 700, 12, 2);
+    return;
+  }
+  const d2 = d - 1200;
+  // mottes de terre projetées hors du trou
+  if (d2 < 1300) {
+    const rnd = O.aleatoire(77);
+    for (let i = 0; i < 12; i++) {
+      const t0 = rnd() * 700;
+      const vu = (rnd() - 0.5) * 0.0018;
+      const vv = (rnd() - 0.3) * 0.0012;
+      const vz = 0.15 + rnd() * 0.1;
+      const tau = d2 - t0;
+      const z = vz * tau - 0.0006 * tau * tau;
+      if (tau < 0 || z < 0) continue;
+      O.pixel(g, P(1 + vu * tau, 0.6 + vv * tau, z), i % 3 ? '#6b4a2e' : '#9a958a', 2, 2);
+    }
+  }
+  const sortie = d2 < 900 ? 0 : d2 < 1400 ? lisse((d2 - 900) / 500) : d2 < 4500 ? 1 : 1 - lisse((d2 - 4500) / 500);
+  const [hx, hy] = P(1, 0.6, 0);
+  if (sortie > 0) bagnard(g, hx, hy, sortie, d2 < 2000 ? -1 : d2 < 2800 ? 1 : 0, d2 >= 2900 && d2 < 4500);
+  if (d2 >= 2900 && d2 < 4500) bulle(g, O, hx + 12, hy - 30, 'MAUVAIS TUNNEL !', 'WRONG TUNNEL!', '#15151f');
+}
+
+// Cellule : l'alarme du portique pendant l'évasion (déclenchée par le lit de camp) : gyrophare rouge qui tourne.
+function animePortique(g, it, tx, ty, t, O, effet) {
+  const P = O.projeteur(tx + 32, ty);
+  if (effet && effet.phase === 2 && effet.depuis > 2500) {
+    const [x, y] = P(0.5, 0.5, 67);
+    const a = effet.depuis / 160;
+    g.fillStyle = 'rgba(255,40,40,0.34)';
+    for (const b of [a, a + Math.PI]) {
+      g.beginPath();
+      g.moveTo(x + 1, y + 1);
+      g.lineTo(x + 1 + Math.cos(b - 0.22) * 48, y + 1 + Math.sin(b - 0.22) * 24);
+      g.lineTo(x + 1 + Math.cos(b + 0.22) * 48, y + 1 + Math.sin(b + 0.22) * 24);
+      g.closePath();
+      g.fill();
+    }
+    const allume = Math.floor(effet.depuis / 100) % 2;
+    if (allume) rect(g, x - 2, y - 2, 7, 6, 'rgba(255,60,60,0.45)');
+    O.pixel(g, P(0.5, 0.5, 66), allume ? '#ff3b3b' : '#ffd0d0', 3, 2);
+    return;
+  }
+  const sonne = (t % 7000) < 900;
+  O.pixel(g, P(0.5, 0.5, 66), sonne ? (Math.floor(t / 120) % 2 ? '#ff3b3b' : '#7a1010') : '#3dff7a', 3, 2);
+}
+
+// Cellule : le WC-lavabo. La chasse tourbillonne et gargouille (phase 1), puis part en geyser jusqu'au plafond, en
+// arrosant tout autour, avec une flaque qui s'étale (phase 2) ; le jet retombe et la flaque sèche (phase 3).
+function animeWc(g, it, tx, ty, t, O, effet) {
+  const P = O.projeteur(tx + 32, ty);
+  if (!effet) {
+    // goutte qui tombe du robinet
+    const ph = (t % 1800) / 1800;
+    if (ph < 0.5) O.pixel(g, P(0.5, 0.16, 44 - ph * 7), '#9fd3e8', 1, 1);
+    return;
+  }
+  const d = effet.depuis;
+  const f = effet.phase === 1 ? 0 : effet.phase === 2 ? borne((d - 1200) / 1500) : 1 - borne((d - 4600) / 900);
+  if (f > 0) {
+    disqueZ(O, g, P, 0.5, 1.02, 0.42 * f, 0.3, 'rgba(120,190,220,0.55)', 0.26 * f);
+    disqueZ(O, g, P, 0.42, 0.98, 0.18 * f, 0.4, 'rgba(220,245,255,0.5)', 0.1 * f);
+  }
+  if (effet.phase === 1) {
+    for (let i = 0; i < 10; i++) {
+      const a = d / (80 - i * 3) + i * 0.63;
+      const r = 0.04 + (i % 3) * 0.04;
+      O.pixel(g, P(0.5 + Math.cos(a) * r, 0.66 + Math.sin(a) * r, 14.5), i % 2 ? '#e8fbff' : '#9fd3e8', 1, 1);
+    }
+    if (d > 500) {
+      const v = Math.round(Math.sin(d / 22) * 1.5);
+      const [x, y] = P(0.5, 0.72, 8);
+      for (const s of [-1, 1]) for (let k = 0; k < 2; k++) rect(g, x + s * (12 + k * 3) + v, y - 6 + k * 5, 3, 1, '#e8f4fa');
+      const [bx, by] = P(0.5, 0.5, 66);
+      bulle(g, O, bx - 4, by, 'GLOU GLOU…', 'GLUG GLUG…', '#2f6fde', 1, true);
+    }
+    return;
+  }
+  // le jet, de la cuvette au plafond (le haut des murs)
+  const hMax = O.HW + 8; // à l'écran, le haut du jet touche le haut du mur du fond
+  const h = effet.phase === 2 ? hMax * lisse((d - 1200) / 260) : hMax * (1 - lisse((d - 4600) / 600));
+  const [bx, by] = P(0.5, 0.66, 14);
+  if (h > 2) {
+    const top = Math.round(by - h);
+    const hh = Math.round(h);
+    // colonne d'eau aux bords qui ondulent, reflets qui montent
+    for (let yy = 0; yy < hh; yy++) {
+      const l = 4 + Math.round(Math.sin((yy + d / 12) / 3) * 1);
+      rect(g, bx - l - 1, top + yy, l * 2 + 3, 1, '#15151f');
+    }
+    for (let yy = 0; yy < hh; yy++) {
+      const l = 4 + Math.round(Math.sin((yy + d / 12) / 3) * 1);
+      rect(g, bx - l, top + yy, l * 2 + 1, 1, '#2f8fd0');
+      rect(g, bx - l + 1, top + yy, 2, 1, '#bfefff');
+    }
+    for (let k = 0; k < 7; k++) rect(g, bx - 2 + (k % 3) * 2, by - ((d / 3 + k * 13) % hh), 2, 3, '#ffffff');
+    // l'eau s'écrase au plafond et s'étale en rideau
+    if (effet.phase === 2 && h > hMax * 0.9) {
+      const l = 8 + Math.min(14, (d - 1460) / 50);
+      for (let i = -l; i <= l; i += 2) {
+        rect(g, bx + i, top - 2 + Math.abs(Math.sin(d / 70 + i)) * 2, 2, 3, Math.abs(i) % 4 ? '#5fb8dc' : '#ffffff');
+        if (Math.abs(i) > 4 && (i + Math.floor(d / 90)) % 3 === 0) rect(g, bx + i, top + 2 + ((d / 4 + i * 7) % 18), 1, 2, '#9fe6f0');
+      }
+    }
+  }
+  if (effet.phase === 2) {
+    // gouttes qui retombent tout autour
+    const rnd = O.aleatoire(99);
+    for (let i = 0; i < 24; i++) {
+      const per = 700 + rnd() * 300;
+      const tau = (d - 1200 + rnd() * per) % per;
+      const au = (rnd() - 0.5) * 0.0018;
+      const av = rnd() * 0.0016;
+      const z = 14 + hMax - 0.00022 * tau * tau;
+      if (d - 1200 > tau && z > 0) O.pixel(g, P(0.5 + au * tau, 0.66 + av * tau, z), i % 4 ? '#5fb8dc' : '#ffffff', 2, 2);
+    }
+    if (d < 3600) bulle(g, O, bx - 12, by - hMax * 0.45, 'PSCHHH !', 'WHOOSH!', '#2f6fde', 2, true);
+  }
+}
+
+// Suite : trajet du canard en plastique (en cases de l'étage) à l'instant d de l'easter egg. Il saute de ses
+// serviettes (src) dans le jacuzzi (jac, 2 × 2), tourne dans le tourbillon, puis revient d'un bond.
+const R_NAGE = 0.4;
+function angleCanard(d) {
+  return 2.6 + ((0.006 * 4800) / Math.PI) * (1 - Math.cos(Math.PI * borne((d - 1100) / 4800)));
+}
+function trajetCanard(d, src, jac) {
+  const A = { x: src.x + 0.51, y: src.y + 0.46, z: 39 };
+  if (d < 250) return { ...A, dir: -1, ecrase: true, ou: 'serviettes' };
+  if (d >= 6650) return { ...A, dir: 1, ecrase: d < 6800, ou: 'serviettes' };
+  if (!jac) return { ou: 'jacuzzi' }; // vu des serviettes : il est parti, c'est le jacuzzi qui le dessine
+  const nage = (dd) => {
+    const a = angleCanard(dd);
+    return { x: jac.x + 1 + Math.cos(a) * R_NAGE, y: jac.y + 1 + Math.sin(a) * R_NAGE, z: 18 + Math.sin(dd / 140) * 0.8, a };
+  };
+  const saut = (p0, p1, s) => ({
+    x: p0.x + (p1.x - p0.x) * s,
+    y: p0.y + (p1.y - p0.y) * s,
+    z: p0.z + (p1.z - p0.z) * s + 150 * s * (1 - s),
+    dir: p1.x - p0.x - (p1.y - p0.y) >= 0 ? 1 : -1,
+    ou: 'jacuzzi',
+  });
+  if (d < 1100) return saut(A, nage(1100), (d - 250) / 850);
+  if (d < 5900) {
+    const n = nage(d);
+    return { ...n, dir: -Math.sin(n.a) - Math.cos(n.a) >= 0 ? 1 : -1, ou: 'jacuzzi' };
+  }
+  return saut(nage(5900), A, (d - 5900) / 750);
+}
+// Canard en plastique à l'écran, le bas au milieu en (x, y), tourné vers la droite (dir 1) ou la gauche (-1).
+function canard(g, x, y, dir, ecrase) {
+  x = Math.round(x);
+  y = Math.round(y);
+  const e = ecrase ? 1 : 0;
+  const blocs = [];
+  const B = (dx, dy, w, h, col) => blocs.push([dir > 0 ? x + dx : x - dx - w + 1, y + dy, w, h, col]);
+  B(-5, -5 + e, 11, 5 - e, '#ffd23f');
+  B(-6, -7 + e, 2, 2, '#ffd23f');
+  B(0, -10 + e * 2, 6, 5, '#ffd23f');
+  B(6, -8 + e * 2, 3, 2, '#ef7d22');
+  for (const [x0, y0, w, h] of blocs) rect(g, x0 - 1, y0 - 1, w + 2, h + 2, '#15151f');
+  for (const [x0, y0, w, h, col] of blocs) rect(g, x0, y0, w, h, col);
+  const C = (dx, dy, w, h, col) => rect(g, dir > 0 ? x + dx : x - dx - w + 1, y + dy, w, h, col);
+  C(-5, -1, 11, 1, '#e0a81e');
+  C(-2, -4 + e, 5, 2, '#e0a81e');
+  C(3, -9 + e * 2, 1, 1, '#15151f');
+  C(1, -10 + e * 2, 2, 1, '#fff3a8');
+}
+
+// Suite : les serviettes dessinent le canard quand il est chez lui (il prend son élan, puis il atterrit).
+function animeServiettes(g, it, tx, ty, t, O, effet) {
+  if (!effet) return;
+  const p = trajetCanard(effet.depuis, it, null);
+  if (p.ou !== 'serviettes') return;
+  const P = O.projeteur(tx + 32, ty);
+  const [x, y] = P(p.x - it.x, p.y - it.y, p.z);
+  canard(g, x, y, p.dir, p.ecrase);
+}
+
+// Suite : le jacuzzi, ses bulles, et pendant l'easter egg des serviettes : le canard, l'éclaboussure, le tourbillon.
+function animeJacuzzi(g, it, tx, ty, t, O, effet) {
+  const P = O.projeteur(tx + 32, ty);
+  const turbo = effet && effet.depuis > 1100 && effet.depuis < 5900 ? 2 : 1;
+  for (let i = 0; i < 9 * turbo; i++) {
+    const ph = ((t / (900 / turbo) + i * 0.37) % 1 + 1) % 1;
+    const a = i * 2.4 + Math.floor(t / 900 + i * 0.37) * 1.7;
+    const r = 0.15 + ((i * 0.23) % 0.5);
+    const u = 1 + Math.cos(a) * r;
+    const v = 1 + Math.sin(a) * r;
+    O.pixel(g, P(u, v, 19 + ph * 2), ph < 0.8 ? '#e8fbff' : '#9fe6f0', ph < 0.5 ? 1 : 2, 1);
+  }
+  // vapeur
+  const ph = (t / 2400) % 1;
+  O.pixel(g, P(0.8 + ph * 0.2, 0.9, 24 + ph * 18), 'rgba(255,255,255,' + (0.45 * (1 - ph)).toFixed(2) + ')', 3, 2);
+  if (!effet || !effet.source) return;
+  const d = effet.depuis;
+  const loc = (p) => P(p.x - it.x, p.y - it.y, p.z);
+  if (d > 1100 && d < 5900) {
+    // tourbillon des buses à fond
+    const a0 = angleCanard(d) * 1.2;
+    for (let k = 0; k < 14; k++) {
+      const r = 0.12 + (k % 7) * 0.085;
+      const a = a0 + k * 0.9 + r * 3;
+      O.pixel(g, P(1 + Math.cos(a) * r, 1 + Math.sin(a) * r, 18.8), k % 2 ? 'rgba(255,255,255,0.85)' : '#9fe6f0', 2, 1);
+    }
+  }
+  if (d >= 1100 && d < 1800) {
+    // plouf : un rond dans l'eau et des gouttes
+    const s = (d - 1100) / 700;
+    const a1 = angleCanard(1100);
+    const u = 1 + Math.cos(a1) * R_NAGE;
+    const v = 1 + Math.sin(a1) * R_NAGE;
+    const col = 'rgba(255,255,255,' + (1 - s).toFixed(2) + ')';
+    for (let i = 0; i < 16; i++) {
+      const a = (i / 16) * Math.PI * 2;
+      O.pixel(g, P(u + Math.cos(a) * (0.08 + s * 0.28), v + Math.sin(a) * (0.08 + s * 0.28), 18.7), col, 1, 1);
+    }
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2;
+      O.pixel(g, P(u + Math.cos(a) * s * 0.35, v + Math.sin(a) * s * 0.35, 19 + Math.sin(Math.PI * s) * 16), '#bfefff', 2, 2);
+    }
+  }
+  const p = trajetCanard(d, effet.source, it);
+  if (p.ou !== 'jacuzzi') return;
+  const [x, y] = loc(p);
+  canard(g, x, y, p.dir, false);
+  if (d >= 1150 && d < 2700) bulle(g, O, x + 6, y - 12, 'COIN !', 'QUACK!', '#c9a227');
+}
+
+// Suite : la statue dorée. Un projecteur s'allume, elle tremble (phase 1), puis enchaîne les poses de culturiste et
+// de disco (dessinées par MEUBLES selon la phase) dans une pluie d'étincelles, et finit par « TA-DA ! ».
+function animeStatue(g, it, tx, ty, t, O, effet) {
+  if (!effet) return;
+  const P = O.projeteur(tx + 32, ty);
+  const d = effet.depuis;
+  const lum = Math.min(1, d / 300, (effet.duree - d) / 300);
+  const [sx, sy] = P(0.5, 0.5, 24);
+  const [hx, hy] = P(0.5, 0.5, 130);
+  g.fillStyle = 'rgba(255,236,160,' + (0.16 * lum).toFixed(3) + ')';
+  g.beginPath();
+  g.moveTo(hx - 3, hy);
+  g.lineTo(hx + 3, hy);
+  g.lineTo(sx + 24, sy);
+  g.lineTo(sx - 24, sy);
+  g.closePath();
+  g.fill();
+  if (effet.phase === 1) {
+    const v = Math.round(Math.sin(d / 25) * 1.5);
+    for (const s of [-1, 1]) {
+      const [x, y] = P(0.5, 0.5, 58);
+      for (let k = 0; k < 3; k++) rect(g, x + s * (13 + k * 3) + v, y - 8 + k * 6, 3, 1, '#fff3c4');
+    }
+    return;
+  }
+  const rnd = O.aleatoire(13);
+  const n = effet.phase === 7 ? 14 : 8;
+  for (let i = 0; i < n; i++) {
+    const per = 500 + rnd() * 400;
+    const ph = ((d + rnd() * per) % per) / per;
+    const [x, y] = P(0.5 + (rnd() - 0.5) * 1.1, 0.5 + (rnd() - 0.5) * 1.1, 28 + rnd() * 56);
+    if (ph < 0.6) etincelle(g, Math.round(x), Math.round(y), i % 3 ? '#fff3c4' : '#ffd23f', ph > 0.2 && ph < 0.4);
+  }
+  if (effet.phase < 7) {
+    const u = (d / 900) % 1;
+    const [x, y] = P(0.5, 0.5, 72 + u * 20);
+    note(g, x + 10 + Math.round(Math.sin(u * 6) * 3), y, u < 0.8 ? '#ffe14d' : '#8a7a2a');
+  } else {
+    const [x, y] = P(0.5, 0.5, 74);
+    bulle(g, O, x + 8, y - 2, 'TA-DA !', 'TA-DA!', '#a8232a', 2);
+  }
+}
+
 export const ANIMES = {
   // vumètre de la table de mixage, voyant rouge du micro
   iso_console(g, it, tx, ty, t, O) {
@@ -968,27 +1550,10 @@ export const ANIMES = {
       for (let k = 0; k < n; k++) O.pixel(g, P(0.16 + i * 0.12, 0.13, 26.5 + k * 0.5 + k), k > 5 ? '#ff3b3b' : k > 3 ? '#ffe14d' : '#3dff7a', 2, 1);
     }
   },
-  // reflet qui tourne sur le disque
-  iso_platine(g, it, tx, ty, t, O) {
-    const P = O.projeteur(tx + 32, ty);
-    const a = (t / 400) % (Math.PI * 2);
-    for (let i = 0; i < 3; i++) O.pixel(g, P(0.46 + Math.cos(a) * (0.12 + i * 0.04), 0.5 + Math.sin(a) * (0.12 + i * 0.04), 26), '#5a5a66', 1, 1);
-  },
-  // bulles du jacuzzi : elles montent de la buse et éclatent en surface
-  iso_jacuzzi(g, it, tx, ty, t, O) {
-    const P = O.projeteur(tx + 32, ty);
-    for (let i = 0; i < 9; i++) {
-      const ph = ((t / 900 + i * 0.37) % 1 + 1) % 1;
-      const a = i * 2.4 + Math.floor(t / 900 + i * 0.37) * 1.7;
-      const r = 0.15 + ((i * 0.23) % 0.5);
-      const u = 1 + Math.cos(a) * r;
-      const v = 1 + Math.sin(a) * r;
-      O.pixel(g, P(u, v, 19 + ph * 2), ph < 0.8 ? '#e8fbff' : '#9fe6f0', ph < 0.5 ? 1 : 2, 1);
-    }
-    // vapeur
-    const ph = (t / 2400) % 1;
-    O.pixel(g, P(0.8 + ph * 0.2, 0.9, 24 + ph * 18), 'rgba(255,255,255,' + (0.45 * (1 - ph)).toFixed(2) + ')', 3, 2);
-  },
+  // reflet qui tourne sur le disque (easter egg : la boule à facettes)
+  iso_platine: animePlatine,
+  // bulles du jacuzzi : elles montent de la buse et éclatent en surface (easter egg : le canard plonge)
+  iso_jacuzzi: animeJacuzzi,
   // flammes des bougies du dîner aux chandelles
   iso_table_ronde(g, it, tx, ty, t, O) {
     const P = O.projeteur(tx + 32, ty);
@@ -999,18 +1564,26 @@ export const ANIMES = {
       });
     } else if (Math.floor(t / 230) % 3) O.pixel(g, P(0.5, 0.48, 31), '#ffe9a0', 1, 2);
   },
-  // voyant du portique : vert, rouge quand ça sonne
-  iso_portique(g, it, tx, ty, t, O) {
-    const P = O.projeteur(tx + 32, ty);
-    const sonne = (t % 7000) < 900;
-    O.pixel(g, P(0.5, 0.5, 66), sonne ? (Math.floor(t / 120) % 2 ? '#ff3b3b' : '#7a1010') : '#3dff7a', 3, 2);
-  },
-  // goutte qui tombe du robinet du lavabo-WC
-  iso_wc_inox(g, it, tx, ty, t, O) {
-    const P = O.projeteur(tx + 32, ty);
-    const ph = (t % 1800) / 1800;
-    if (ph < 0.5) O.pixel(g, P(0.5, 0.16, 44 - ph * 7), '#9fd3e8', 1, 1);
-  },
+  // voyant du portique : vert, rouge quand ça sonne (easter egg : gyrophare pendant l'évasion)
+  iso_portique: animePortique,
+  // goutte qui tombe du robinet du lavabo-WC (easter egg : le geyser)
+  iso_wc_inox: animeWc,
+  // easter eggs : batterie fantôme, enceintes de la boum, tunnel sous le lit, canard, statue qui danse
+  iso_batterie: animeBatterie,
+  iso_enceinte: animeEnceinte,
+  iso_lit_camp: animeLitCamp,
+  iso_serviettes: animeServiettes,
+  iso_statue: animeStatue,
+};
+
+// Easter eggs (web/clics.js) : durée, meubles animés en même temps, découpage en phases.
+export const CLICS = {
+  iso_batterie: { duree: 3800, phases: [1800] },
+  iso_platine: { duree: 9000, declenche: ['iso_enceinte'], phases: [1500, 7600] },
+  iso_lit_camp: { duree: 7500, declenche: ['iso_portique'], phases: [1200, 6800] },
+  iso_wc_inox: { duree: 5500, phases: [1200, 4600] },
+  iso_serviettes: { duree: 7000, declenche: ['iso_jacuzzi'], phases: [1100, 5900] },
+  iso_statue: { duree: 5800, phases: [800, 1600, 2400, 3200, 4000, 4800] },
 };
 
 export const JEUX = {};
@@ -1020,6 +1593,7 @@ export const THEMES = {
   'isoloir-studio': {
     sols: { def: ['moquette', '#382a3e'], lobby: ['marbre', '#3d3644'], cabine: ['iso_chevrons', '#7a5236'], pause: ['iso_chevrons', '#6a462e'], salon: ['moquette', '#34263a'] },
     mur: 'iso_mousse', dalle: '#1a141c', bureau: '#6e4a33', chaise: '#8a5a3a', canape: '#6a2b4f', canapeEquipe: '#2c6262', table: '#4d3626',
+    cloison: { cadre: '#3a2a20', verre: 'rgba(160,175,225,0.26)' },
   },
   // Cellule de prison : béton, parpaings, lino de cantine, mobilier d'acier, chaises orange.
   'isoloir-cellule': {

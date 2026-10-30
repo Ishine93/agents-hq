@@ -8,15 +8,17 @@
 // - bureau-pirate : le pont d'un bateau pirate (mât, canons, barre, table des cartes, cambuse au tonneau de rhum).
 import { W, H, HW, s, grilles, zonesDe, DECOR_THEME } from './outils.js';
 
-// Chantier d'un plan : meubles, cloisons vitrées, et arêtes bloquantes dessinées par un meuble (panneaux de box,
-// rambardes) : ce meuble « passage » se pose sur le bord nord ('n', entre y-1 et y) ou ouest ('o', entre x-1 et x)
-// de sa case, et l'arête correspondante bloque le passage comme une cloison.
+// Chantier d'un plan : meubles, cloisons (vitrées, ou pleines avec `panneau`), et arêtes bloquantes dessinées par
+// un meuble (rambardes du bateau) : ce meuble « passage » se pose sur le bord nord ('n', entre y-1 et y) ou ouest
+// ('o', entre x-1 et x) de sa case, et l'arête correspondante bloque le passage comme une cloison.
 function chantier() {
   const meubles = [];
   const cloisons = [];
   const bords = [];
   const m = (type, x, y, o = {}) => meubles.push({ type, x, y, ...o });
   const c = (x, y, cote) => cloisons.push({ x, y, cote });
+  // cloison pleine sur le bord nord ou ouest de la case (même repère que `bord`)
+  const panneau = (x, y, b, o = {}) => cloisons.push(b === 'n' ? { x, y: y - 1, cote: 's', plein: true, ...o } : { x: x - 1, y, cote: 'e', plein: true, ...o });
   const bord = (type, x, y, b, o = {}) => {
     m(type, x, y, { bord: b, passage: true, ...o });
     bords.push(b === 'n' ? x + ',' + (y - 1) + ',s' : x - 1 + ',' + y + ',e');
@@ -26,8 +28,11 @@ function chantier() {
     for (const a of bords) g.aretes.add(a);
     return g;
   };
-  return { meubles, cloisons, m, c, bord, fin };
+  return { meubles, cloisons, m, c, bord, panneau, fin };
 }
+
+// Tissu des panneaux de box selon le thème du projet : du gris des années 90, teinté du thème.
+const TISSU_BOX = { etudes: '#929882', roblox: '#6e89b6', unreal: '#737486', atelier3d: '#989895', bac: '#b4a152' };
 
 // Objets du thème de l'étage (blocs Roblox, écrans de rendu…) posés sur les cases données.
 function objetsTheme(m, theme, cases) {
@@ -63,11 +68,11 @@ function zoneBox(x, y) {
 }
 
 function carteBox(theme) {
-  const { meubles, cloisons, m, c, bord, fin } = chantier();
+  const { meubles, cloisons, m, c, panneau, fin } = chantier();
   const zones = zonesDe(zoneBox);
 
-  // --- panneaux des box (posés en premier : derrière les meubles de leur case) ---
-  const P = (x, y, b) => bord('box_panneau', x, y, b);
+  // --- panneaux des box : cloisons pleines en tissu, cadre beige ---
+  const P = (x, y, b) => panneau(x, y, b, { couleur: TISSU_BOX[theme] || '#8d8a80', cadre: '#cfcbc0', hauteur: 33 });
   for (const x of [3, 5, 7, 9]) {
     P(x, 6, 'n'); // dos de la rangée du haut (entrée à côté, en x + 1)
     P(x, 10, 'n'); // devant de la rangée du bas
@@ -386,7 +391,7 @@ function cartePirate(theme) {
 
   // --- poupe : arrivée ---
   m('pirate_tonneau', 0, 0, { variante: 0 });
-  m('pirate_cordage', 2, 0);
+  m('pirate_cordage', 2, 0, { sol: true }); // rouleau de cordage à plat sur le pont : on marche dessus
 
   // --- postes à la bande, face à la mer ---
   for (let x = 3; x <= 6; x++) {
@@ -399,7 +404,7 @@ function cartePirate(theme) {
 
   // --- grand mât et poste machine à son pied ---
   m('pirate_mat', 8, 3);
-  m('pirate_cordage', 9, 4, { variante: 1 });
+  m('pirate_cordage', 9, 4, { variante: 1, sol: true });
   m('poste_machine', 4, 3, { part: 'g', theme });
   m('poste_machine', 5, 3, { part: 'd', theme });
   m('chaise', 4, 4, { dir: 'ne' });

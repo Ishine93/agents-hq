@@ -2,15 +2,37 @@
 // Coordonnées « art » : 1 unité = 1 pixel du pixel art (avant zoom de la caméra).
 import {
   creerCanvas, poly, projeteur, prisme, quadY, quadX, quadZ, pixel, contourner, nuance, melange,
-  hacher, aleatoire, modele, CONTOUR,
+  hacher, aleatoire, modele, CONTOUR, prismeVerre, transparence, lireCouleur, VERRE,
 } from './sprites.js';
 import { W, H, HW } from './carte.js';
 import { texteCanvas, tronquer, mesurer, dessinerTexte } from './police.js';
 import { langueCourante } from './i18n.js';
-import { MEUBLES as MEUBLES_DECORS, ANIMES as ANIMES_DECORS, JEUX as JEUX_DECORS, THEMES as THEMES_DECORS, SOLS as SOLS_DECORS, MURS as MURS_DECORS, DECORS_MURS } from './meubles/index.js';
+import { MEUBLES as MEUBLES_DECORS, ANIMES as ANIMES_DECORS, JEUX as JEUX_DECORS, THEMES as THEMES_DECORS, SOLS as SOLS_DECORS, MURS as MURS_DECORS, DECORS_MURS, CLICS as CLICS_DECORS } from './meubles/index.js';
 
 /** Ce meuble d'un décor au choix a-t-il une animation (web/meubles/) ? */
 export const animeDecor = (type) => !!ANIMES_DECORS[type];
+
+// Easter eggs des plans d'origine (meubles dessinés ici) ; ceux des décors au choix viennent de web/meubles/.
+// Contrat et logique : web/clics.js. Le dessin des effets d'origine est dans animerClicBase, plus bas.
+const CLICS_BASE = {
+  liege: { duree: 4200 }, // bureau d'études : un courant d'air emporte les post-it, qui reviennent
+  imprimante3d: { duree: 6500, phases: [4500] }, // atelier 3D : impression d'un canard, qui saute de joie
+  ecran_rendu: { duree: 6000, phases: [4200], declenche: ['ecran_rendu'] }, // Unreal : shaders bloqués à 99 %… puis boum
+  bloc_roblox: { duree: 2600, declenche: ['bloc_roblox2'] }, // Roblox : les blocs sautent, « OOF ! » et des pièces
+  bloc_roblox2: { duree: 2600, declenche: ['bloc_roblox'] },
+  cone: { duree: 3200, declenche: ['cone', 'barriere'] }, // bac : la ola des plots, la barrière clignote
+  barriere: { duree: 3200, declenche: ['cone'] },
+  globe: { duree: 4500, declenche: ['trophee'] }, // Direction : le globe s'emballe, un avion en fait le tour
+  jukebox: { duree: 5200 }, // salle de pause : mode disco
+  lampadaire: { duree: 6600 }, // salle de repos : on compte les moutons
+  accueil: { duree: 2600, declenche: ['accueil'] }, // hall : « DING ! Bienvenue au QG ! »
+  baie: { duree: 6500, phases: [2600, 4200], declenche: ['baie'] }, // sous-sol : panne, fumée, redémarrage
+};
+// Meubles qui quittent leur place pendant leur effet (ils sautent) : leur dessin fixe disparaît, l'animation le
+// redessine en l'air.
+const SAUTEURS = new Set(['bloc_roblox', 'bloc_roblox2', 'cone']);
+/** Meubles cliquables (easter eggs) : type -> { duree, declenche?, phases? }. */
+export const CLICS = { ...CLICS_BASE, ...CLICS_DECORS };
 
 // Texte d'une enseigne peinte, en français ou en anglais. La langue est lue quand les murs sont peints :
 // construireCouche (non mise en cache) repeint tout à chaque changement d'étage.
@@ -40,6 +62,7 @@ const THEMES = {
     sols: { def: ['moquette', '#272b42'], bureau1: ['moquette', '#30355a'], bureau2: ['moquette', '#30355a'], machine: ['moquette', '#1d2034'],
       pause: ['moquette', '#1f3b42'], reunion: ['moquette', '#35294d'], dg: ['moquette', '#1b2c58'] },
     mur: 'neon', dalle: '#14162a', bureau: '#3b4058', chaise: '#1f2230', canape: '#3b3570', canapeEquipe: '#1f6f8a', table: '#2f3346',
+    cloison: { cadre: '#3a3f5a' },
   },
   atelier3d: {
     sols: { def: ['beton', '#b6b1a6'], bureau1: ['beton', '#c5c0b5'], bureau2: ['beton', '#c5c0b5'], machine: ['beton', '#a39d90'],
@@ -60,6 +83,7 @@ const THEMES = {
     sols: { def: ['parquet', '#a96b3b'], bureau1: ['parquet', '#b27647'], bureau2: ['parquet', '#b27647'], machine: ['parquet', '#9a6036'],
       pause: ['moquette', '#22325e'], reunion: ['parquet', '#8a5530'], dg: ['parquet', '#7a4a2a'], lobby: ['marbre', '#ece6da'] },
     mur: 'boiseries', dalle: '#4a2a14', bureau: '#7a4a2a', chaise: '#5a2a1a', canape: '#6b1f2a', canapeEquipe: '#2a4a6b', table: '#6e3f20',
+    cloison: { cadre: '#5b3418' },
   },
   hall: {
     sols: { def: ['marbre', '#ebebf0'], bureau1: ['marbre', '#e4e6ee'], bureau2: ['marbre', '#e4e6ee'], machine: ['marbre', '#dfe2ea'],
@@ -123,7 +147,10 @@ function tuile(typeTheme, zone, x, y) {
   const [motif, base] = T.sols[zone] || T.sols.def;
   const parite = (x + y) & 1;
   const variante = hacher(x * 31 + y * 17 + 7) % 4;
-  const cle = typeTheme + '|' + motif + '|' + base + '|' + parite + '|' + variante + '|' + (motif === 'parquet' ? parite : '');
+  // un motif d'une famille qui dépend de la case (SOLS[motif].parPosition) a une tuile par case ; les autres
+  // sont partagées entre toutes les cases de même parité et variante (le cache reste petit)
+  const parPosition = !!(SOLS_DECORS[motif] && SOLS_DECORS[motif].parPosition);
+  const cle = typeTheme + '|' + motif + '|' + base + '|' + parite + '|' + variante + '|' + (motif === 'parquet' ? parite : '') + (parPosition ? '|' + x + ',' + y : '');
   let c = cacheTuiles.get(cle);
   if (c) return c;
   c = creerCanvas(64, 32);
@@ -801,6 +828,15 @@ export function construireCouche(carte, etage) {
     poly(g, [P0(sl.x0 + 0.08, sl.y0 + 0.08), P0(sl.x1 - 0.1, sl.y0 + 0.08), P0(sl.x1 - 0.1, sl.y1 - 0.12), P0(sl.x0 + 0.08, sl.y1 - 0.12)], coul[0]);
     poly(g, [P0(sl.x0 + 0.22, sl.y0 + 0.22), P0(sl.x1 - 0.24, sl.y0 + 0.22), P0(sl.x1 - 0.24, sl.y1 - 0.26), P0(sl.x0 + 0.22, sl.y1 - 0.26)], coul[1]);
   }
+  // meubles plats posés au sol (tapis, marquages : couche « sol » d'un meuble, ou meuble `sol: true` du plan) :
+  // peints avec le sol, donc toujours sous les avatars et les autres meubles
+  for (const it of carte.meubles || []) {
+    if (!it.sol && !MEUBLES_DECORS[it.type]) continue;
+    const s = spriteMeuble(it, look, {});
+    if (!s.sol) continue;
+    const [tx, ty] = coinTuile(it.x, it.y);
+    g.drawImage(s.sol.c, tx + s.sol.dx, ty + s.sol.dy);
+  }
   // dalle du plancher (épaisseur visible devant)
   poly(g, [P0(0, H, 0), P0(W, H, 0), P0(W, H, -10), P0(0, H, -10)], T.dalle);
   poly(g, [P0(W, 0, 0), P0(W, H, 0), P0(W, H, -10), P0(W, 0, -10)], nuance(T.dalle, -0.25));
@@ -836,7 +872,7 @@ function outils() {
       spriteTuile, spriteBloc, pieds, plante, livres, livresX, ecranContenu, litFait, theme, cadre, fenetre, affiche,
       plaqueEtage, enseigneQG, etoile, guirlande, texteDouble, enseigne, texteCanvas, mesurer, tronquer, dessinerTexte,
       creerCanvas, poly, projeteur, prisme, quadY, quadX, quadZ, pixel, contourner, nuance, melange, hacher, aleatoire, modele,
-      CONTOUR, HW, W, H, BOIS_LIT, DRAP, COUVERTURES,
+      CONTOUR, HW, W, H, BOIS_LIT, DRAP, COUVERTURES, prismeVerre, transparence, lireCouleur, VERRE, phylactere, grillePixels,
     };
   }
   return OUTILS;
@@ -1000,6 +1036,11 @@ export function spriteMeuble(it, typeTheme, etat = {}) {
   const cle = it.type + '|' + typeTheme + '|' + it.x + ',' + it.y + '|' + JSON.stringify(etat);
   let s = cacheMeubles.get(cle);
   if (s) return s;
+  if (etat.effet && SAUTEURS.has(it.type)) {
+    s = { c: imageVide(), dx: 0, dy: 0 };
+    cacheMeubles.set(cle, s);
+    return s;
+  }
   const T = theme(typeTheme);
   const rnd = aleatoire(hacher(cle));
   const conn = it.conn || {};
@@ -1287,7 +1328,7 @@ export function spriteMeuble(it, typeTheme, etat = {}) {
         prisme(g, P, 0.15, 0.15, 0.85, 0.2, 38, 41, '#1d1d22');
         prisme(g, P, 0.15, 0.8, 0.85, 0.85, 38, 41, '#1d1d22');
         prisme(g, P, 0.22, 0.22, 0.78, 0.78, 9, 11, '#9aa0a8');
-        prisme(g, P, 0.4, 0.4, 0.6, 0.6, 11, 17, '#f06a2a');
+        if (!etat.effet) prisme(g, P, 0.4, 0.4, 0.6, 0.6, 11, 17, '#f06a2a'); // (pendant l'easter egg : le canard)
         prisme(g, P, 0.2, 0.46, 0.8, 0.54, 30, 32, '#5b6170');
       });
       break;
@@ -1308,7 +1349,7 @@ export function spriteMeuble(it, typeTheme, etat = {}) {
         prisme(g, P, 0.06, 0.46, 0.94, 0.52, 14, 50, '#7c5532');
         quadY(g, P, 0.52, 0.1, 0.9, 17, 47, '#b07a45');
         const cols = ['#ffffff', '#fff3a0', '#ffd1dc', '#c8f2ff'];
-        for (let i = 0; i < 6; i++) {
+        for (let i = 0; i < (etat.effet ? 0 : 6); i++) {
           const x = 0.12 + rnd() * 0.6;
           const z = 19 + rnd() * 18;
           quadY(g, P, 0.52, x, x + 0.14, z, z + 9, cols[i % 4]);
@@ -1355,6 +1396,7 @@ export function spriteMeuble(it, typeTheme, etat = {}) {
       s = spriteTuile(52, (g, P) => {
         prisme(g, P, 0.34, 0.34, 0.66, 0.66, 0, 3, '#5b3418');
         prisme(g, P, 0.47, 0.47, 0.53, 0.53, 3, 16, '#c9a227');
+        if (etat.effet) return; // le globe qui tourne est dessiné par l'easter egg
         const [cx, cy] = P(0.5, 0.5, 30);
         for (let y = -10; y <= 10; y++) {
           const w = Math.round(Math.sqrt(100 - y * y));
@@ -1664,13 +1706,29 @@ export function spriteMeuble(it, typeTheme, etat = {}) {
         ? MEUBLES_DECORS[it.type](it, typeTheme, etat, outils())
         : spriteTuile(20, (g, P) => prisme(g, P, 0.3, 0.3, 0.7, 0.7, 0, 10, '#ff00ff'));
   }
+  // meuble plat (`sol: true` dans le plan) : tout son dessin passe dans la couche du sol (construireCouche) ;
+  // un sprite sans image principale (seulement une couche `sol`) reçoit une image vide
+  if (it.sol && s && !s.sol) s = { c: imageVide(), dx: 0, dy: 0, sol: s };
+  else if (s && !s.c) s = { ...s, c: imageVide(), dx: 0, dy: 0 };
   if (cacheMeubles.size > 3000) cacheMeubles.clear();
   cacheMeubles.set(cle, s);
   return s;
 }
 
-// Petites animations par-dessus les sprites (LED, buse d'imprimante, vapeur).
-export function animerMeuble(g, it, tx, ty, t) {
+let VIDE = null;
+function imageVide() {
+  if (!VIDE) VIDE = creerCanvas(1, 1);
+  return VIDE;
+}
+
+// Petites animations par-dessus les sprites (LED, buse d'imprimante, vapeur). `effet` : easter egg en cours sur ce
+// meuble (web/clics.js, effetDe), ou null.
+export function animerMeuble(g, it, tx, ty, t, effet = null) {
+  animerHabituel(g, it, tx, ty, t, effet);
+  // l'easter egg d'un meuble d'origine se dessine par-dessus son animation habituelle
+  if (effet && !ANIMES_DECORS[it.type]) animerClicBase(g, it, tx, ty, t, effet);
+}
+function animerHabituel(g, it, tx, ty, t, effet) {
   const P = projeteur(tx + 32, ty);
   if (it.type === 'baie') {
     for (let z = 6, k = 0; z < 60; z += 6, k++) {
@@ -1707,7 +1765,7 @@ export function animerMeuble(g, it, tx, ty, t) {
     const tir = (t / 320) % 1;
     pixel(g, P(sx + 0.03, 0.6, 39 + tir * 9), '#ffe14d', 1, 1);
   } else if (ANIMES_DECORS[it.type]) {
-    ANIMES_DECORS[it.type](g, it, tx, ty, t, outils());
+    ANIMES_DECORS[it.type](g, it, tx, ty, t, outils(), effet);
   } else if (it.type === 'jukebox') {
     const cols = ['#ff5fa2', '#3df2ff', '#ffe14d', '#7dff6a'];
     const k = Math.floor(t / 420);
@@ -1717,6 +1775,326 @@ export function animerMeuble(g, it, tx, ty, t) {
     const u = (t / 1600) % 1;
     pixel(g, P(0.62 + u * 0.3, 0.4, 52 + u * 18), u < 0.85 ? '#ffe14d' : '#7a6a2a', 2, 2);
     pixel(g, P(0.66 + u * 0.3, 0.4, 56 + u * 18), u < 0.85 ? '#ffe14d' : '#7a6a2a', 1, 4);
+  }
+}
+
+// ---------- easter eggs (meubles cliquables) ----------
+// Masque d'opacité d'un sprite (lu une fois) : on ne clique que sur les pixels dessinés, pas sur le vide autour.
+const masques = new WeakMap();
+function opaque(c, x, y) {
+  if (x < 0 || y < 0 || x >= c.width || y >= c.height) return false;
+  let m = masques.get(c);
+  if (!m) {
+    const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+    m = new Uint8Array(c.width * c.height);
+    for (let i = 0; i < m.length; i++) m[i] = d[i * 4 + 3] > 40 ? 1 : 0;
+    masques.set(c, m);
+  }
+  return m[Math.floor(y) * c.width + Math.floor(x)] === 1;
+}
+function toucheSprite(s, tx, ty, ax, ay) {
+  if (!s || !s.c) return false;
+  return opaque(s.c, ax - (tx + s.dx), ay - (ty + s.dy));
+}
+
+/** Meuble cliquable (easter egg) sous le point (ax, ay) en coordonnées art, le plus en avant d'abord ; ou null. */
+export function meubleCliquable(carte, ax, ay) {
+  if (!carte) return null;
+  const look = carte.look || carte.type;
+  const liste = carte.meubles.filter((it) => CLICS[it.type]);
+  liste.sort((a, b) => b.x + b.y + (b.w || 1) + (b.h || 1) - (a.x + a.y + (a.w || 1) + (a.h || 1)));
+  for (const it of liste) {
+    const s = spriteMeuble(it, look, {});
+    const [tx, ty] = coinTuile(it.x, it.y);
+    if ([s, s.avant, s.haut, s.devant, s.sol].some((c) => toucheSprite(c, tx, ty, ax, ay))) return it;
+  }
+  return null;
+}
+
+// Petite bulle de BD centrée sur cx, pointe vers le bas en (cx, bas) : « DING ! », « OOF ! »…
+function phylactere(g, cx, bas, texte, encre = '#15151f', fond = '#fff4d6') {
+  const tc = texteCanvas(texte, encre);
+  const w = tc.width + 8;
+  const h = tc.height + 6;
+  const x = Math.round(cx - w / 2);
+  const y = Math.round(bas - h - 4);
+  cadre(g, x, y, w, h, encre, fond);
+  g.drawImage(tc, x + 4, y + 3);
+  g.fillStyle = encre;
+  g.fillRect(Math.round(cx) - 1, y + h, 3, 2);
+  g.fillRect(Math.round(cx), y + h + 2, 1, 2);
+}
+
+// Petit dessin pixel d'après une grille de lettres (une couleur par lettre, '.' = vide), pieds en (x, y) ; `e` :
+// taille d'un pixel de la grille.
+function grillePixels(g, x, y, lignes, couleurs, e = 1) {
+  const h = lignes.length;
+  const x0 = Math.round(x - (lignes[0].length * e) / 2);
+  const y0 = Math.round(y - h * e);
+  for (let r = 0; r < h; r++) {
+    for (let c = 0; c < lignes[r].length; c++) {
+      const col = couleurs[lignes[r][c]];
+      if (!col) continue;
+      g.fillStyle = col;
+      g.fillRect(x0 + c * e, y0 + r * e, e, e);
+    }
+  }
+}
+const CANARD = [
+  '....kkk....',
+  '...kyyyk...',
+  '...kyeyook.',
+  '...kyyyok..',
+  '.k..kyyk...',
+  'kykkyyyyk..',
+  'kyyyyyyyyk.',
+  'kyyyyyyyyk.',
+  '.kyyyyyyk..',
+  '..kkkkkk...',
+];
+const MOUTON = [
+  '..kkkkkk......',
+  '.kwwwwwwk.kkk.',
+  'kwwwwwwwwkbbbk',
+  'kwwwwwwwwkbebk',
+  'kwwwwwwwwkbbk.',
+  '.kwwwwwwwk.k..',
+  '..kbk..kbk....',
+  '..kbk..kbk....',
+];
+const PALETTE_PIXELS = { k: '#15151f', y: '#f6c21c', o: '#ff8a1f', e: '#15151f', w: '#f4f2ea', b: '#3a3a44' };
+
+// Effets des easter eggs des plans d'origine (CLICS_BASE) : effet = { depuis, duree, progres, phase, clique… }.
+function animerClicBase(g, it, tx, ty, t, effet) {
+  const P = projeteur(tx + 32, ty);
+  const d = effet.depuis;
+  const rnd = aleatoire(hacher(it.type + it.x + ',' + it.y));
+  if (it.type === 'liege') {
+    // le courant d'air : traits blancs, post-it qui s'envolent puis reviennent se piquer
+    const k = d < 2100 ? d / 2100 : Math.max(0, (4200 - d) / 2100);
+    const e = k * k * (3 - 2 * k);
+    const cols = ['#ffffff', '#fff3a0', '#ffd1dc', '#c8f2ff'];
+    for (let i = 0; i < 6; i++) {
+      const [x0, y0] = P(0.18 + (i % 3) * 0.22, 0.52, 22 + Math.floor(i / 3) * 12);
+      const x = x0 + e * (30 + i * 9) + Math.sin(d / 120 + i) * 3 * e;
+      const y = y0 - e * (26 + (i % 3) * 10) + Math.cos(d / 150 + i) * 2 * e;
+      g.fillStyle = CONTOUR;
+      g.fillRect(Math.round(x) - 1, Math.round(y) - 1, 7, 6);
+      g.fillStyle = cols[i % 4];
+      g.fillRect(Math.round(x), Math.round(y), 5, 4);
+      pixel(g, [x + 2, y], i % 2 ? '#e3342f' : '#2f6fde');
+    }
+    if (d < 2600) {
+      g.fillStyle = 'rgba(255,255,255,0.75)';
+      for (let i = 0; i < 4; i++) {
+        const [x, y] = P(-0.4, 0.52, 20 + i * 9);
+        const u = (d / 6 + i * 23) % 70;
+        g.fillRect(Math.round(x + u), Math.round(y - u * 0.3), 10, 1);
+      }
+    }
+  } else if (it.type === 'imprimante3d') {
+    // un petit canard sort de l'imprimante couche par couche, puis saute de joie
+    const [x, y] = P(0.5, 0.5, 11);
+    if (effet.phase === 1) {
+      const n = Math.ceil((d / 4500) * CANARD.length);
+      grillePixels(g, x, y, CANARD.slice(CANARD.length - n), PALETTE_PIXELS);
+      const [bx, by] = P(0.5, 0.5, 30);
+      g.fillStyle = '#ff6a1f';
+      g.fillRect(Math.round(bx + Math.sin(d / 70) * 6), by + 2, 2, 2);
+    } else {
+      const u = d - 4500;
+      const saut = Math.abs(Math.sin((u / 500) * Math.PI)) * 14;
+      grillePixels(g, x, y - saut, CANARD, PALETTE_PIXELS);
+      phylactere(g, x + 6, y - 14 - saut, enseigne('COIN COIN !', 'QUACK!'));
+    }
+  } else if (it.type === 'ecran_rendu') {
+    // « Compilation des shaders » : la barre file jusqu'à 99 %… et y reste. Puis l'écran explose en feu d'artifice.
+    if (effet.phase === 1) {
+      quadY(g, P, 0.505, 0.06, 0.94, 21, 53, '#101624');
+      quadY(g, P, 0.505, 0.14, 0.86, 34, 40, '#2b2f38');
+      const k = Math.min(0.99, d / 2600);
+      quadY(g, P, 0.505, 0.14, 0.14 + 0.72 * k, 34, 40, k >= 0.99 && Math.floor(d / 300) % 2 ? '#ffe14d' : '#3d8bff');
+      if (effet.clique) {
+        const [cx, cy] = P(0.5, 0.5, 60);
+        phylactere(g, cx, cy, enseigne('SHADERS : ', 'SHADERS: ') + Math.floor(k * 100) + ' %');
+      }
+    } else {
+      const u = (d - 4200) / 1800;
+      quadY(g, P, 0.505, 0.06, 0.94, 21, 53, `rgba(255,255,255,${Math.max(0, 0.9 - u * 1.5).toFixed(2)})`);
+      const [cx, cy] = P(0.5, 0.5, 38);
+      const cols = ['#ffe14d', '#ff4fd8', '#3df2ff', '#7dff6a', '#ff6a1f'];
+      for (let i = 0; i < 26; i++) {
+        const a = rnd() * Math.PI * 2;
+        const v = 18 + rnd() * 34;
+        g.fillStyle = cols[i % cols.length];
+        g.fillRect(Math.round(cx + Math.cos(a) * v * u), Math.round(cy + Math.sin(a) * v * u * 0.8 + 20 * u * u), 2, 2);
+      }
+      if (effet.clique && u < 0.7) phylactere(g, cx, cy - 22, enseigne('BOUM !', 'BOOM!'));
+    }
+  } else if (it.type === 'bloc_roblox' || it.type === 'bloc_roblox2') {
+    // les blocs rebondissent ; celui qu'on a cliqué fait « OOF ! » et lâche des pièces
+    const amorti = 1 - d / 2600;
+    const saut = Math.abs(Math.sin((d / 650) * Math.PI)) * 18 * amorti;
+    const s = spriteMeuble({ type: it.type, x: it.x, y: it.y }, 'roblox', {});
+    g.drawImage(s.c, Math.round(tx + s.dx), Math.round(ty + s.dy - saut));
+    if (effet.clique) {
+      const [cx, cy] = P(0.5, 0.5, 30);
+      if (d < 1500) phylactere(g, cx, cy - saut - 8, 'OOF!');
+      const u = Math.min(1, d / 1400);
+      for (let i = 0; i < 5 && u < 1; i++) {
+        const x = cx + (i - 2) * 9 * u;
+        const y = cy - 6 - 44 * u + 52 * u * u;
+        g.fillStyle = CONTOUR;
+        g.fillRect(Math.round(x) - 2, Math.round(y) - 2, 5, 5);
+        g.fillStyle = Math.floor(d / 90 + i) % 2 ? '#ffe14d' : '#f6c21c';
+        g.fillRect(Math.round(x) - 1, Math.round(y) - 1, 3, 3);
+      }
+    }
+  } else if (it.type === 'cone') {
+    // la ola : chaque plot saute à son tour (d'après sa place), la barrière clignote
+    const retard = ((it.x + it.y) % 6) * 160;
+    const u = (d - retard) / 700;
+    const saut = u > 0 && u < 2 ? Math.abs(Math.sin(u * Math.PI)) * 16 : 0;
+    const s = spriteMeuble({ type: 'cone', x: it.x, y: it.y }, 'bac', {});
+    g.drawImage(s.c, Math.round(tx + s.dx), Math.round(ty + s.dy - saut));
+    if (effet.clique && d < 2200) {
+      const [cx, cy] = P(0.5, 0.5, 26);
+      phylactere(g, cx, cy - saut, enseigne('BIP BIP !', 'BEEP BEEP!'));
+    }
+  } else if (it.type === 'barriere') {
+    const on = Math.floor(d / 220) % 2;
+    for (const [x, k] of [[0.15, on], [0.85, 1 - on]]) {
+      const [px, py] = P(x, 0.5, 22);
+      if (k) {
+        g.fillStyle = 'rgba(255,176,0,0.35)';
+        g.fillRect(px - 5, py - 6, 11, 10);
+      }
+      g.fillStyle = CONTOUR;
+      g.fillRect(px - 2, py - 3, 5, 4);
+      g.fillStyle = k ? '#ffb000' : '#7a4a00';
+      g.fillRect(px - 1, py - 2, 3, 2);
+    }
+  } else if (it.type === 'globe') {
+    // le globe s'emballe (de plus en plus vite, puis il ralentit) ; un petit avion en fait le tour
+    const [cx, cy] = P(0.5, 0.5, 30);
+    const D = effet.duree;
+    const decal = (d < D / 2 ? (d * d) / D : D / 4 + (d - D / 2) * 2 - ((d - D / 2) * (d - D / 2)) / D) / 40;
+    for (let y = -10; y <= 10; y++) {
+      const w = Math.round(Math.sqrt(100 - y * y));
+      g.fillStyle = '#2f6fde';
+      g.fillRect(cx - w, cy + y, w * 2, 1);
+      for (let x = -w; x < w; x++) {
+        const u = (((x + decal) % 28) + 28) % 28;
+        const terre = (u > 2 && u < 8 && y > -7 && y < 1) || (u > 5 && u < 9 && y >= 1 && y < 6) || (u > 14 && u < 20 && y > -5 && y < -1) || (u > 16 && u < 19 && y >= 2 && y < 6);
+        if (terre) {
+          g.fillStyle = Math.abs(x) > w - 3 ? '#2b8a45' : '#3aa655';
+          g.fillRect(cx + x, cy + y, 1, 1);
+        }
+      }
+    }
+    g.fillStyle = 'rgba(255,255,255,0.35)';
+    g.fillRect(cx - 6, cy - 7, 4, 2);
+    const a = d / 380;
+    const ax = Math.round(cx + Math.cos(a) * 16);
+    const ay = Math.round(cy + Math.sin(a) * 6 - 2);
+    if (Math.sin(a) > -0.3) {
+      g.fillStyle = CONTOUR;
+      g.fillRect(ax - 3, ay - 2, 7, 4);
+      g.fillStyle = '#ffffff';
+      g.fillRect(ax - 2, ay, 5, 1);
+      g.fillRect(ax, ay - 1, 1, 3);
+      g.fillStyle = '#e3342f';
+      g.fillRect(ax + (Math.cos(a + Math.PI / 2) > 0 ? 2 : -2), ay, 1, 1);
+    }
+  } else if (it.type === 'trophee') {
+    // le trophée brille : étincelles autour de la coupe
+    const [cx, cy] = P(0.5, 0.5, 36);
+    for (let i = 0; i < 6; i++) {
+      const ph = (d / 500 + i / 6) % 1;
+      const a = i * 1.7;
+      const r = 8 + ph * 10;
+      const x = Math.round(cx + Math.cos(a) * r);
+      const y = Math.round(cy + Math.sin(a) * r * 0.7 - ph * 6);
+      g.fillStyle = ph < 0.5 ? '#ffffff' : '#f4d35e';
+      g.fillRect(x, y - 1, 1, 3);
+      g.fillRect(x - 1, y, 3, 1);
+    }
+  } else if (it.type === 'jukebox') {
+    // mode disco : taches de couleur qui tournent au sol, notes qui jaillissent
+    const cols = ['rgba(255,79,216,0.45)', 'rgba(61,242,255,0.45)', 'rgba(255,225,77,0.45)', 'rgba(125,255,106,0.45)'];
+    for (let i = 0; i < 8; i++) {
+      const a = d / 700 + (i / 8) * Math.PI * 2;
+      const r = 1.1 + (i % 2) * 0.6;
+      const u = 0.5 + Math.cos(a) * r;
+      const v = 0.6 + Math.sin(a) * r;
+      poly(g, [P(u - 0.22, v), P(u, v - 0.22), P(u + 0.22, v), P(u, v + 0.22)], cols[i % 4]);
+    }
+    for (let i = 0; i < 6; i++) {
+      const u = (d / 1200 + i / 6) % 1;
+      const [x, y] = P(0.5 + Math.cos(i * 2.1) * u * 0.9, 0.4 + Math.sin(i * 2.1) * u * 0.6, 50 + u * 30);
+      g.fillStyle = ['#ff5fa2', '#3df2ff', '#ffe14d', '#7dff6a'][i % 4];
+      g.fillRect(Math.round(x), Math.round(y), 2, 2);
+      g.fillRect(Math.round(x) + 1, Math.round(y) - 4, 1, 4);
+      g.fillRect(Math.round(x) + 2, Math.round(y) - 4, 2, 1);
+    }
+  } else if (it.type === 'lampadaire') {
+    // on compte les moutons : trois moutons sautent par-dessus le lampadaire, le compte s'affiche
+    for (let i = 0; i < 3; i++) {
+      const u = (d - i * 1700) / 2200;
+      if (u < 0 || u > 1) continue;
+      const [x, y] = P(-0.9 + u * 2.8, -0.4 + u * 1.8, Math.sin(u * Math.PI) * 74);
+      grillePixels(g, x, y, MOUTON, PALETTE_PIXELS, 2);
+      if (u > 0.45) phylactere(g, x, y - 20, String(i + 1), '#3a3e66', '#e4e2ee');
+    }
+    if (d > 5600) {
+      const [x, y] = P(0.5, 0.5, 68);
+      g.drawImage(texteCanvas('z Z z', '#e4e2ee'), x + 6, y - 8 - Math.round((d - 5600) / 100));
+    }
+  } else if (it.type === 'accueil') {
+    // la sonnette de l'accueil : « DING ! », puis un mot d'accueil
+    if (!effet.clique) return;
+    const [cx, cy] = P(0.5, 0.5, 29);
+    g.fillStyle = CONTOUR;
+    g.fillRect(cx - 4, cy - 5, 9, 6);
+    g.fillStyle = '#f4d35e';
+    g.fillRect(cx - 3, cy - 4, 7, 3);
+    g.fillStyle = '#c9a227';
+    g.fillRect(cx - 4, cy - 1, 9, 1);
+    g.fillRect(cx, cy - 6, 1, 1);
+    if (d < 900) {
+      g.fillStyle = '#ffffff';
+      const r = 6 + (d / 900) * 8;
+      for (const s of [-1, 1]) {
+        g.fillRect(Math.round(cx + s * r), cy - 6, 1, 3);
+        g.fillRect(Math.round(cx + s * (r + 3)), cy - 8, 1, 4);
+      }
+      phylactere(g, cx, cy - 10, 'DING !');
+    } else phylactere(g, cx, cy - 10, enseigne('Bienvenue au QG !', 'Welcome to HQ!'));
+  } else if (it.type === 'baie') {
+    // panne : toutes les diodes en rouge, puis de la fumée, puis le redémarrage (vert, de bas en haut)
+    const rouge = Math.floor(d / 200) % 2;
+    for (let z = 6, k = 0; z < 60; z += 6, k++) {
+      for (let j = 0; j < 4; j++) {
+        let col;
+        if (effet.phase < 3) col = rouge ? '#ff3030' : '#5a1010';
+        else col = (d - 4200) / 1600 > k / 9 ? '#3dff7a' : '#14421f';
+        pixel(g, P(0.24 + j * 0.06, 0.8, z + 2), col, 1, 1);
+      }
+    }
+    if (effet.phase === 2) {
+      for (let i = 0; i < 5; i++) {
+        const u = ((d - 2600) / 1600 + i / 5) % 1;
+        const [x, y] = P(0.4 + (i % 3) * 0.12, 0.5, 64 + u * 30);
+        const r = 2 + Math.round(u * 4);
+        g.fillStyle = `rgba(120,120,130,${(0.8 - u * 0.7).toFixed(2)})`;
+        g.fillRect(Math.round(x) - r, Math.round(y) - r, r * 2, r * 2);
+      }
+    }
+    if (effet.clique) {
+      const [cx, cy] = P(0.5, 0.5, 66);
+      const txt = effet.phase === 1 ? enseigne('ERREUR 418', 'ERROR 418') : effet.phase === 2 ? '...' : 'OK !';
+      phylactere(g, cx, cy - (effet.phase === 2 ? 20 : 0), txt, effet.phase === 3 ? '#1f6b2d' : '#a8232a');
+    }
   }
 }
 
@@ -1909,24 +2287,43 @@ export function ledsService(g, tx, ty, t, etat, flash = 0) {
   }
 }
 
-// ---------- cloisons vitrées ----------
+// ---------- cloisons (vitrées, ou pleines) ----------
+// `cl` : la cloison du plan { x, y, cote, plein?, couleur?, cadre?, hauteur? } : `plein` pour une cloison opaque
+// (panneau de box, mur de plâtre…), `couleur` du vitrage ou du panneau, `cadre` du cadre, `hauteur` en pixels (34).
+// Un thème peut fixer ses couleurs : THEMES[look].cloison = { cadre, verre, plein }.
 const cacheCloisons = new Map();
-export function spriteCloison(cote, typeTheme) {
-  const cle = cote + typeTheme;
+export function spriteCloison(cote, typeTheme, cl = {}) {
+  const TC = theme(typeTheme).cloison || {};
+  const plein = !!cl.plein;
+  const cadreCol = cl.cadre || TC.cadre || '#7c8594';
+  const fond = cl.couleur || (plein ? TC.plein || '#d9d4c7' : TC.verre || 'rgba(170,220,255,0.30)');
+  const Hc = cl.hauteur || 34;
+  const cle = [cote, typeTheme, plein ? 'plein' : 'verre', cadreCol, fond, Hc].join('|');
   let s = cacheCloisons.get(cle);
   if (s) return s;
-  const cadreCol = typeTheme === 'direction' ? '#5b3418' : typeTheme === 'unreal' ? '#3a3f5a' : '#7c8594';
-  const Hc = 34;
   s = spriteTuile(Hc + 6, (g, P) => {
-    if (cote === 's') {
-      quadY(g, P, 1, 0, 1, 3, Hc - 2, 'rgba(170,220,255,0.30)');
+    if (plein) {
+      // panneau plein : socle, panneau au grain discret, chapeau et montants du cadre (sur l'arête de la case)
+      const Q = cote === 's' ? (u, v, z) => P(u, 1 + v, z) : (u, v, z) => P(1 + v, u, z);
+      const Pr = cote === 's'
+        ? (u0, v0, u1, v1, z0, z1, c) => prisme(g, P, u0, 1 + v0, u1, 1 + v1, z0, z1, c)
+        : (u0, v0, u1, v1, z0, z1, c) => prisme(g, P, 1 + v0, u0, 1 + v1, u1, z0, z1, c);
+      const rnd = aleatoire(hacher(cle));
+      Pr(0, -0.04, 1, 0.04, 0, 3, nuance(cadreCol, -0.25));
+      Pr(0, -0.03, 1, 0.03, 3, Hc - 2, fond);
+      for (let i = 0; i < 18; i++) pixel(g, Q(0.08 + rnd() * 0.84, 0.03, 5 + rnd() * (Hc - 10)), nuance(fond, rnd() < 0.5 ? -0.1 : 0.08));
+      Pr(0, -0.04, 1, 0.04, Hc - 2, Hc, cadreCol);
+      Pr(0, -0.045, 0.05, 0.045, 0, Hc + 1, cadreCol);
+      Pr(0.95, -0.045, 1, 0.045, 0, Hc + 1, cadreCol);
+    } else if (cote === 's') {
+      quadY(g, P, 1, 0, 1, 3, Hc - 2, fond);
       quadY(g, P, 1, 0.15, 0.3, 8, Hc - 6, 'rgba(255,255,255,0.35)');
       prisme(g, P, 0, 0.97, 1, 1.03, 0, 3, cadreCol);
       prisme(g, P, 0, 0.97, 1, 1.03, Hc - 2, Hc, cadreCol);
       prisme(g, P, 0, 0.96, 0.05, 1.04, 0, Hc, cadreCol);
       prisme(g, P, 0.95, 0.96, 1, 1.04, 0, Hc, cadreCol);
     } else {
-      quadX(g, P, 1, 0, 1, 3, Hc - 2, 'rgba(170,220,255,0.24)');
+      quadX(g, P, 1, 0, 1, 3, Hc - 2, transparence(fond, 0.8));
       quadX(g, P, 1, 0.6, 0.75, 8, Hc - 6, 'rgba(255,255,255,0.3)');
       prisme(g, P, 0.97, 0, 1.03, 1, 0, 3, cadreCol);
       prisme(g, P, 0.97, 0, 1.03, 1, Hc - 2, Hc, cadreCol);

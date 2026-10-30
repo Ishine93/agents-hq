@@ -1,10 +1,20 @@
 // Sortie structurée des IA autres que Claude (Codex, agents ACP) : le SDK Claude valide lui-même la sortie ;
-// ailleurs, le QG lit le JSON final, le vérifie contre le schéma demandé et, s'il est invalide, relance une fois
-// la même conversation avec la liste des erreurs. Validateur maison (aucune dépendance) : il couvre ce que les
-// schémas du QG utilisent (type, properties, required, additionalProperties, items, enum, const, bornes,
-// anyOf/oneOf/allOf, $ref local). Un outil MCP « rendre_resultat » peut aussi recevoir la sortie (agents ACP).
+// ailleurs, le QG lit le JSON final, le vérifie contre le schéma demandé et, s'il est invalide, relance la même
+// conversation avec la liste des erreurs (une fois pour un agent ACP, autant que Claude Code pour Codex).
+// Validateur maison (aucune dépendance) : il couvre ce que les schémas du QG utilisent (type, properties,
+// required, additionalProperties, items, enum, const, bornes, anyOf/oneOf/allOf, $ref local). Un outil MCP
+// « rendre_resultat » peut aussi recevoir la sortie (agents ACP).
 
 export const RELANCES_STRUCTURE = 1;
+
+// Claude Code relance lui-même sa sortie structurée, dans la même conversation et avec les erreurs du schéma :
+// au plus MAX_STRUCTURED_OUTPUT_RETRIES essais, 5 par défaut. Le QG ne touche pas à cette variable (la session
+// Claude l'hérite telle quelle). Codex a le même budget : sa première réponse, puis 4 relances au plus.
+export const ESSAIS_STRUCTURE_CLAUDE = 5;
+export function relancesCommeClaude(env = process.env) {
+  const n = Number(env.MAX_STRUCTURED_OUTPUT_RETRIES);
+  return (Number.isInteger(n) && n >= 1 ? n : ESSAIS_STRUCTURE_CLAUDE) - 1;
+}
 const ERREURS_MAX = 12;
 
 const typeDe = (v) => (v === null ? 'null' : Array.isArray(v) ? 'array' : Number.isInteger(v) ? 'integer' : typeof v);

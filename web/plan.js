@@ -320,7 +320,10 @@ export class PlanDossier {
     } else if (t && t.motifFile) agent = t.motifFile;
     const pa = el('div', 'pc-agent', agent);
     b.append(haut, titre, badges, pa);
-    b.title = (t ? tr('Ouvrir la fiche de {nom} ({ref})', { nom, ref: pt.ref }) : tr('{ref} : pas encore lancée', { ref: pt.ref })) + (t && t.verif && t.verif.ajustement ? '\n' + t.verif.ajustement : '');
+    const raison = (t && t.raisonModele) || pt.raisonModele;
+    b.title = (t ? tr('Ouvrir la fiche de {nom} ({ref})', { nom, ref: pt.ref }) : tr('{ref} : pas encore lancée', { ref: pt.ref }))
+      + (raison ? '\n' + tr('Pourquoi {modele} : {raison}', { modele: M.nom, raison }) : '')
+      + (t && t.verif && t.verif.ajustement ? '\n' + t.verif.ajustement : '');
     b.addEventListener('click', () => {
       if (!t) {
         this.ui.toast('info', tr('{ref} n’a pas encore de fiche.', { ref: pt.ref }));

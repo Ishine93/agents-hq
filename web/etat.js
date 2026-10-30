@@ -4,8 +4,7 @@ import { noterReflexion, noterTraduction, chargerReflexions } from './reflexions
 
 export const TERMINAUX = new Set(['done', 'failed', 'cancelled', 'skipped']);
 export const PAS_DEMARREE = new Set(['planned', 'waiting', 'ready', 'queued', 'briefing']);
-export const EN_COURS = new Set(['briefing', 'running', 'permission', 'verifying', 'rework']);
-export const DOSSIER_ACTIF = new Set(['planification', 'clarification', 'en_cours']);
+export const DOSSIER_ACTIF = new Set(['programme', 'planification', 'clarification', 'en_cours']);
 
 const LIBELLES_ETAT = {
   planned: 'planifiée', waiting: 'en attente', ready: 'prête', queued: 'en file', briefing: 'briefing', running: 'au travail',
@@ -13,10 +12,12 @@ const LIBELLES_ETAT = {
   cancelled: 'annulée', skipped: 'sautée', interrupted: 'interrompue',
 };
 const LIBELLES_DOSSIER = {
-  planification: 'planification', clarification: 'question du DG', en_cours: 'en cours', termine: 'terminé', annule: 'annulé', echec: 'échec',
+  programme: 'programmé', planification: 'planification', clarification: 'question du DG', en_cours: 'en cours', termine: 'terminé', annule: 'annulé', echec: 'échec',
 };
 export const libelleEtat = (e) => tr(LIBELLES_ETAT[e] || e || '?');
 export const libelleDossier = (e) => tr(LIBELLES_DOSSIER[e] || e || '?');
+// Moteur d'une image demandée par un agent (délégation) : abonnement ChatGPT ou API Images facturée.
+export const libelleMoteurImage = (m) => (m === 'api' ? tr('API Images, facturée') : tr('abonnement ChatGPT'));
 
 export class Etat {
   constructor() {
@@ -61,6 +62,10 @@ export class Etat {
     this.terminaux = new Map(); // tache -> [commande]
     this.modifications = new Map(); // tache -> [fichier écrit avec son diff] (reçus en direct ou relus à la demande)
     this.actionsService = [];
+    // 1.0.11 : image demandée par un agent (outil generer_image) et dernière compaction, par tâche (en direct
+    // seulement : un rechargement de la page les oublie, le fil garde l'image et la fiche le nombre de compactions)
+    this.delegations = new Map(); // tache -> { statut: en_cours|ok|echec, moteur, compte, chemin, cout, t }
+    this.compactions = new Map(); // tache -> { t, declencheur, avant }
     // v1.5 : pensées en direct, happiness manager
     this.pensees = new Map(); // cible ('dg' ou id de tâche) -> dernière pensée
     this.reflexions = new Map(); // cible -> derniers blocs de réflexion complets (web/reflexions.js)
@@ -78,7 +83,7 @@ export class Etat {
     if (!id) return;
     const taches = new Set([...this.taches.values()].filter((t) => t.dossier === id).map((t) => t.id));
     for (const tid of taches) {
-      for (const m of [this.taches, this.verifs, this.outils, this.fileDepuis, this.transitions, this.terminaux, this.modifications, this.pensees, this.reflexions]) m.delete(tid);
+      for (const m of [this.taches, this.verifs, this.outils, this.fileDepuis, this.transitions, this.terminaux, this.modifications, this.pensees, this.reflexions, this.delegations, this.compactions]) m.delete(tid);
     }
     for (const [k, p] of this.permissions) if (taches.has(p.tache)) this.permissions.delete(k);
     for (const [k, x] of this.decisions) if (taches.has(x.tache)) this.decisions.delete(k);
@@ -291,6 +296,8 @@ export class Etat {
         break;
       case 'verification':
       case 'modification':
+      case 'delegation':
+      case 'compaction':
         parTache(ev.tache);
         break;
       case 'permission':
@@ -410,6 +417,22 @@ export class Etat {
         if (ta) ta.mesures = ev.mesures || null;
         break;
       }
+      case 'compaction':
+        // la conversation de l'agent a été résumée (contexte plein) : l'heure et la taille d'avant, sur sa fiche
+        if (ev.tache) this.compactions.set(ev.tache, { t, declencheur: ev.declencheur || 'auto', avant: ev.avant || 0 });
+        break;
+      case 'delegation':
+        // image demandée par l'agent (en cours, faite, ratée) : sur sa fiche ; l'image faite arrive aussi dans le fil
+        if (ev.tache) this.delegations.set(ev.tache, { statut: ev.statut, moteur: ev.moteur || null, compte: ev.compte || null, chemin: ev.chemin || '', cout: ev.cout ?? null, t });
+        break;
+      // sans état ici : l'interface s'en sert (ui.js › surEvenement)
+      case 'priorites': // Réglages › Priorités changés (ici ou dans un autre onglet)
+      case 'maj': // nouvelle version trouvée par le serveur (il regarde toutes les 3 h)
+        break;
+      // ignoré exprès : une ligne de npm par événement pendant l'installation d'un agent ; Réglages › Comptes IA
+      // relit déjà les prérequis toutes les 4 s, et l'événement `comptes` de la fin redessine la page
+      case 'prerequis':
+        return;
       case 'passation':
         this.passations.push({ de: ev.de || [], a: ev.a, t });
         if (this.passations.length > 50) this.passations.shift();
@@ -734,6 +757,17 @@ export class Etat {
           : tr('{tache} descend au sous-sol allumer {service}', { tache: ref(ev.tache), service: ev.service });
       case 'commande':
         return ev.commande.enCours ? ref(ev.tache) + ' $ ' + String(ev.commande.commande || '').slice(0, 120) : null;
+      case 'compaction':
+        return tr('{tache} : conversation résumée pour faire de la place ({n} k tokens avant)', { tache: ref(ev.tache), n: Math.round((ev.avant || 0) / 1000) });
+      case 'delegation': {
+        const fichier = ev.chemin || tr('image');
+        if (ev.statut === 'en_cours') return tr('{tache} crée une image ({moteur}) : {fichier}', { tache: ref(ev.tache), moteur: libelleMoteurImage(ev.moteur), fichier });
+        if (ev.statut === 'ok') return tr('{tache} : image créée ({fichier})', { tache: ref(ev.tache), fichier });
+        return tr('{tache} : image pas créée ({fichier})', { tache: ref(ev.tache), fichier });
+      }
+      case 'priorites':
+        return tr('Réglages › Priorités mis à jour');
+      case 'maj':
       case 'service_log':
       case 'notification_resolue':
       case 'message':

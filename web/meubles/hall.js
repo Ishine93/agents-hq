@@ -28,17 +28,6 @@ function cylindre(O, g, P, cx, cy, r, z0, z1, col, dessus = null) {
   }
 }
 
-// Volume de verre : O.prisme ne sait pas assombrir une couleur rgba, on pose donc les faces une à une (le fond
-// d'abord, on voit à travers).
-function prismeVerre(O, g, P, x0, y0, x1, y1, z0, z1, a = 0.25) {
-  const c = (k) => `rgba(170,220,255,${Math.min(1, a * k).toFixed(2)})`;
-  O.quadY(g, P, y0, x0, x1, z0, z1, c(0.6));
-  O.quadX(g, P, x0, y0, y1, z0, z1, c(0.6));
-  O.quadY(g, P, y1, x0, x1, z0, z1, c(1));
-  O.quadX(g, P, x1, y0, y1, z0, z1, c(1.3));
-  O.quadZ(g, P, z1, x0, y0, x1, y1, c(1.6));
-}
-
 // Trait épais entre deux points 3D (os, cordes, montants fins).
 function trait(O, g, P, a, b, col, ep = 2) {
   const p0 = P(...a);
@@ -184,7 +173,7 @@ function comptoir(it, look, etat, O) {
     }
     if (bois && p === 'g') {
       // billetterie : guichet vitré
-      prismeVerre(O, g, P, 0.1, 0.62, 0.9, 0.68, 31, 54, 0.35);
+      O.prismeVerre(g, P, 0.1, 0.62, 0.9, 0.68, 31, 54, 'rgba(170,220,255,0.35)');
       O.prisme(g, P, 0.08, 0.6, 0.92, 0.7, 54, 57, '#6b3a1f');
       O.quadY(g, P, 0.7, 0.3, 0.7, 50, 56, '#f4d35e');
     }
@@ -238,12 +227,19 @@ function tambour(it, look, etat, O) {
   });
 }
 
-function animeTambour(g, it, tx, ty, t, O) {
-  // quatre battants de verre qui tournent lentement autour de l'axe
+function animeTambour(g, it, tx, ty, t, O, effet) {
+  // quatre battants de verre qui tournent lentement autour de l'axe ; easter egg : la porte s'emballe (de plus en plus
+  // vite, puis elle ralentit) et un pigeon étourdi en est éjecté dans le hall
   const P = O.projeteur(tx + 32, ty);
   const r = 0.82;
+  let elan = 0;
+  if (effet) {
+    const D = effet.duree;
+    const d = effet.depuis;
+    elan = (d < D / 2 ? (d * d) / D : D / 4 + (d - D / 2) * 2 - ((d - D / 2) * (d - D / 2)) / D) / 90;
+  }
   for (let k = 0; k < 4; k++) {
-    const a = t / 2600 + (k * Math.PI) / 2;
+    const a = t / 2600 + elan + (k * Math.PI) / 2;
     const s = Math.sin(a);
     if (s <= 0.02) continue;
     const x = 1 + r * Math.cos(a);
@@ -253,6 +249,48 @@ function animeTambour(g, it, tx, ty, t, O) {
     const [x1, y1] = P(x, y, 70);
     g.fillStyle = '#9aa3ad';
     g.fillRect(Math.round(x0), Math.round(y1), 1, Math.round(y0 - y1));
+  }
+  if (!effet) return;
+  const d = effet.depuis;
+  // traits de vitesse
+  if (d > 600 && d < effet.duree - 800) {
+    g.fillStyle = 'rgba(255,255,255,0.7)';
+    for (let i = 0; i < 4; i++) {
+      const [x, y] = P(1 + Math.cos(d / 60 + i * 1.6) * 0.95, 0.3, 14 + i * 16);
+      g.fillRect(Math.round(x) - 4, Math.round(y), 8, 1);
+    }
+  }
+  // le pigeon : éjecté vers le hall (+y), il tourne sur lui-même, atterrit et titube
+  const u = (d - 1800) / 2600;
+  if (u < 0 || u > 1) return;
+  const vol = Math.min(1, u / 0.45);
+  const [x, y] = P(1 + vol * 0.6, 0.6 + vol * 2.2, 30 * Math.sin(Math.min(1, vol) * Math.PI) + (vol < 1 ? 0 : 0));
+  const titube = vol >= 1 ? Math.round(Math.sin(d / 90) * 2) : 0;
+  const px = Math.round(x) + titube;
+  const py = Math.round(y);
+  g.fillStyle = '#15151f';
+  g.fillRect(px - 5, py - 9, 11, 8);
+  g.fillRect(px + 3, py - 12, 5, 5);
+  g.fillStyle = '#9aa3ad';
+  g.fillRect(px - 4, py - 8, 9, 6);
+  g.fillStyle = '#6a7380';
+  g.fillRect(px - 3, py - 7, 5, 2);
+  g.fillStyle = '#7d8a9a';
+  g.fillRect(px + 4, py - 11, 3, 3);
+  g.fillStyle = '#5bbf8a';
+  g.fillRect(px + 3, py - 8, 2, 1);
+  g.fillStyle = '#ff9a1f';
+  g.fillRect(px + 7, py - 10, 2, 1);
+  g.fillRect(px - 1, py - 1, 1, 2);
+  g.fillRect(px + 2, py - 1, 1, 2);
+  if (vol >= 1) {
+    // étoiles d'étourdissement
+    for (let i = 0; i < 3; i++) {
+      const a = d / 200 + (i * Math.PI * 2) / 3;
+      g.fillStyle = '#ffe14d';
+      g.fillRect(Math.round(px + 5 + Math.cos(a) * 6), Math.round(py - 15 + Math.sin(a) * 2), 2, 2);
+    }
+    O.phylactere(g, px, py - 18, O.enseigne('Rrrou ?!', 'Coo?!'));
   }
 }
 
@@ -418,9 +456,46 @@ function bassin(it, look, etat, O) {
   });
 }
 
-function animeBassin(g, it, tx, ty, t, O) {
-  // reflets qui glissent sur l'eau, ronds dans l'eau de temps en temps
+function animeBassin(g, it, tx, ty, t, O, effet) {
+  // reflets qui glissent sur l'eau, ronds dans l'eau de temps en temps ; easter egg : une carpe koï saute d'une case
+  // du bassin à l'autre, éclaboussures au départ et à l'arrivée
   const P = O.projeteur(tx + 32, ty);
+  if (effet && effet.clique) {
+    const d = effet.depuis;
+    // saut d'une case et demie vers l'intérieur du bassin (il fait 4 cases : g, m, m, d)
+    const sens = it.part === 'g' ? 1 : it.part === 'd' ? -1 : it.x % 2 ? 1 : -1;
+    const u = Math.min(1, Math.max(0, (d - 300) / 1400));
+    for (const [x0, d0] of [[0.5, 300], [0.5 + sens * 1.5, 1700]]) {
+      const v = (d - d0) / 700;
+      if (v < 0 || v > 1) continue;
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * Math.PI;
+        const [x, y] = P(x0 + Math.cos(a) * 0.25 * v, 0.5, 10 + Math.sin(a) * 18 * v * (1 - v) * 2);
+        g.fillStyle = 'rgba(200,240,255,0.9)';
+        g.fillRect(Math.round(x), Math.round(y), 2, 2);
+      }
+    }
+    if (u > 0 && u < 1) {
+      const [x, y] = P(0.5 + sens * 1.5 * u, 0.5, 12 + Math.sin(u * Math.PI) * 46);
+      const pente = Math.cos(u * Math.PI);
+      const px = Math.round(x);
+      const py = Math.round(y);
+      g.fillStyle = '#15151f';
+      g.fillRect(px - 7, py - 3, 15, 6);
+      g.fillStyle = '#ff7a2a';
+      g.fillRect(px - 6, py - 2, 13, 4);
+      g.fillStyle = '#f4f2ea';
+      g.fillRect(px - 2 * sens, py - 2, 4, 2);
+      g.fillStyle = '#ff7a2a';
+      g.fillRect(px - 9 * sens - (sens < 0 ? 2 : 0), py - 2 - Math.round(pente * 2), 3, 4);
+      g.fillStyle = '#15151f';
+      g.fillRect(px + 5 * sens, py - 1, 1, 1);
+    }
+    if (d > 1900 && d < 3400) {
+      const [cx, cy] = P(0.5 + sens * 1.5, 0.5, 30);
+      O.phylactere(g, cx, cy, O.enseigne('PLOUF !', 'SPLASH!'), '#1f5f7a', '#eaf6ff');
+    }
+  }
   const u = ((t / 3000 + (it.x % 3) * 0.33) % 1) * 0.8 + 0.1;
   O.pixel(g, P(u, 0.4, 10.4), 'rgba(200,240,255,0.8)', 3, 1);
   O.pixel(g, P((u + 0.4) % 0.9 + 0.05, 0.62, 10.4), 'rgba(200,240,255,0.6)', 2, 1);
@@ -472,7 +547,7 @@ function tableVerre(it, look, etat, O) {
   return O.spriteTuile(30, (g, P) => {
     O.prisme(g, P, 0.3, 0.3, 0.7, 0.7, 0, 2, '#c3cad3');
     O.prisme(g, P, 0.46, 0.46, 0.54, 0.54, 2, 10, '#c3cad3');
-    prismeVerre(O, g, P, 0.14, 0.14, 0.86, 0.86, 10, 12, 0.5);
+    O.prismeVerre(g, P, 0.14, 0.14, 0.86, 0.86, 10, 12, 'rgba(170,220,255,0.5)');
     O.quadZ(g, P, 12.1, 0.3, 0.3, 0.55, 0.5, '#15151f');
     O.quadZ(g, P, 12.2, 0.33, 0.33, 0.52, 0.47, '#f4f2ea');
     O.prisme(g, P, 0.62, 0.58, 0.74, 0.7, 12, 18, '#ffffff');
@@ -575,7 +650,7 @@ function vitrine(it, look, etat, O) {
       for (const u of [0.62, 0.7]) O.prisme(g, P, u, 0.62, u + 0.04, 0.66, 25, 30, '#efe6cf');
     }
     // cloche de verre
-    prismeVerre(O, g, P, 0.18, 0.18, 0.82, 0.82, 25, 54, 0.22);
+    O.prismeVerre(g, P, 0.18, 0.18, 0.82, 0.82, 25, 54, 'rgba(170,220,255,0.22)');
     O.quadY(g, P, 0.82, 0.22, 0.3, 30, 50, REFLET);
     O.prisme(g, P, 0.16, 0.16, 0.84, 0.84, 54, 56, '#5a3418');
   });
@@ -673,9 +748,11 @@ function trex(it, look, etat, O) {
     // crâne : mâchoires et dents
     const crane = [[3.15, 78], [3.35, 88], [3.6, 88], [3.95, 80], [3.98, 76], [3.4, 74], [3.2, 72]];
     O.poly(g, crane.map(([u, z]) => P(u, 1, z)), os);
-    const machoire = [[3.25, 72], [3.9, 72], [3.88, 68], [3.3, 66]];
+    // easter egg : la mâchoire s'ouvre grand pendant le rugissement (etat.effet)
+    const machoire = etat.effet ? [[3.25, 71], [3.85, 58], [3.8, 54], [3.28, 65]] : [[3.25, 72], [3.9, 72], [3.88, 68], [3.3, 66]];
     O.poly(g, machoire.map(([u, z]) => P(u, 1, z)), ombre);
     for (let k = 0; k < 6; k++) O.pixel(g, P(3.38 + k * 0.09, 1, 73.5), '#ffffff', 1, 2);
+    if (etat.effet) for (let k = 0; k < 5; k++) O.pixel(g, P(3.36 + k * 0.1, 1, 68 - k * 2.4), '#ffffff', 1, 2);
     O.pixel(g, P(3.45, 1, 84), '#15151f', 3, 3);
     O.pixel(g, P(3.68, 1, 82), '#3a3d46', 4, 2);
     O.pixel(g, P(3.88, 1, 80), '#3a3d46', 1, 1);
@@ -710,9 +787,13 @@ function solMarbre(g, col, { parite, variante, rnd }, O) {
   if (variante === 3) O.pixel(g, [24, 12], 'rgba(255,255,255,0.5)', 6, 1);
 }
 
-// Rosace de marbre de 3 × 3 cases : étoile des vents, anneaux de laiton et de marbre vert.
-function solRosace(i, j) {
-  return (g, col, ctx, O) => {
+// Rosace de marbre de 3 × 3 cases (étoile des vents, anneaux de laiton et de marbre vert) au milieu du grand hall :
+// zone 'rosace' de web/plans/hall.js, de la case (6, 6) à (8, 8). Le motif dépend de la case (parPosition).
+const ROSACE_COIN = [6, 6];
+function solRosace(g, col, ctx, O) {
+  {
+    const i = ctx.x - ROSACE_COIN[0];
+    const j = ctx.y - ROSACE_COIN[1];
     const img = g.getImageData(0, 0, 64, 32);
     const d = img.data;
     const coul = (hex) => [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)];
@@ -753,7 +834,47 @@ function solRosace(i, j) {
       }
     }
     g.putImageData(img, 0, 0);
-  };
+  }
+}
+solRosace.parPosition = true;
+
+// Tapis posés au sol (couche « sol » : sous les avatars). `bornes` : [x0, y0, x1, y1] dans le bloc w × h du meuble.
+// Variantes : 'paillasson' (gris, « QG » tissé), 'persan' (rouge, bordure et médaillon), 'gris' (bord clair).
+function tapis(it, look, etat, O) {
+  const w = it.w || 1;
+  const h = it.h || 1;
+  const [x0, y0, x1, y1] = it.bornes || [0.1, 0.1, w - 0.1, h - 0.1];
+  const v = it.variante || 'gris';
+  const C = { paillasson: ['#3a3d46', '#4f545f', '#c9a227'], persan: ['#7a2a2a', '#a8423a', '#e0b45a'], gris: ['#c9ccd2', '#dfe2e6', '#aeb4bd'], musee: ['#5a1f1f', '#7a2a2a', '#c9a227'] }[v] || ['#7a2a2a', '#a8423a', '#e0b45a'];
+  const sol = O.spriteBloc(w, h, 2, (g, P) => {
+    const q = (a, c) => O.quadZ(g, P, 0.3, x0 + a, y0 + a, x1 - a, y1 - a, c);
+    q(0, C[0]);
+    q(0.12, C[1]);
+    if (v === 'persan') {
+      // bordure dorée, médaillon et franges
+      q(0.22, C[2]);
+      q(0.28, C[0]);
+      q(0.36, C[1]);
+      const cx = (x0 + x1) / 2;
+      const cy = (y0 + y1) / 2;
+      O.poly(g, [P(cx - 0.6, cy, 0.4), P(cx, cy - 0.6, 0.4), P(cx + 0.6, cy, 0.4), P(cx, cy + 0.6, 0.4)], C[2]);
+      O.poly(g, [P(cx - 0.4, cy, 0.5), P(cx, cy - 0.4, 0.5), P(cx + 0.4, cy, 0.5), P(cx, cy + 0.4, 0.5)], C[0]);
+      O.poly(g, [P(cx - 0.15, cy, 0.6), P(cx, cy - 0.15, 0.6), P(cx + 0.15, cy, 0.6), P(cx, cy + 0.15, 0.6)], C[2]);
+      for (let u = x0 + 0.08; u < x1 - 0.04; u += 0.12) {
+        O.pixel(g, P(u, y0 - 0.06, 0), '#e8dcc0', 1, 2);
+        O.pixel(g, P(u, y1 + 0.02, 0), '#e8dcc0', 1, 2);
+      }
+    } else if (v === 'paillasson') {
+      // « QG » tissé au milieu
+      const t = O.texteCanvas('QG', C[2]);
+      const [cx, cy] = P((x0 + x1) / 2, (y0 + y1) / 2, 0.4);
+      g.drawImage(t, Math.round(cx - t.width / 2), Math.round(cy - t.height / 2));
+    } else {
+      q(0.3, C[2]);
+      q(0.36, C[1]);
+    }
+  });
+  return { c: null, dx: 0, dy: 0, sol };
 }
 
 function solDalle(g, col, { parite, variante }, O) {
@@ -1065,35 +1186,139 @@ export const MEUBLES = {
   hall_banc: banc,
   hall_oeuf: oeuf,
   hall_trex: trex,
+  hall_tapis: tapis,
 };
 
-export const ANIMES = { hall_tambour: animeTambour, hall_bassin: animeBassin };
+// Easter egg du hall au dinosaure : un clic sur le T. rex le fait rugir (mâchoire ouverte, « ROAAAR », la salle
+// tremble) et les vitrines vibrent.
+function animeTrex(g, it, tx, ty, t, O, effet) {
+  if (!effet) return;
+  const P = O.projeteur(tx + 32, ty);
+  const d = effet.depuis;
+  // tremblement : traits de vibration autour du crâne et poussière qui tombe du plafond
+  const [cx, cy] = P(3.6, 1, 10 + 74 * 1.35);
+  const v = Math.sin(d / 40) * 2;
+  g.fillStyle = '#efe6cf';
+  for (let k = 0; k < 3; k++) {
+    g.fillRect(Math.round(cx + 26 + k * 4 + v), cy - 10 + k * 6, 4, 1);
+    g.fillRect(Math.round(cx - 28 - k * 4 - v), cy - 8 + k * 6, 4, 1);
+  }
+  const rnd = O.aleatoire(7);
+  g.fillStyle = 'rgba(200,190,170,0.8)';
+  for (let k = 0; k < 18; k++) {
+    const x = cx - 120 + rnd() * 220;
+    const y = cy - 70 + ((d / 9 + rnd() * 160) % 160);
+    g.fillRect(Math.round(x), Math.round(y), 1, 2);
+  }
+  // « ROAAAR ! » qui grossit, dans une bulle
+  if (d < 3800) {
+    const txt = 'ROAAAR !';
+    const tc = O.texteCanvas(txt, '#a8232a');
+    const ech = d < 300 ? 1 : 2;
+    const w = tc.width * ech + 10;
+    const h = tc.height * ech + 8;
+    const x = Math.round(cx + 14 + v);
+    const y = Math.round(cy - 46);
+    O.cadre(g, x, y, w, h, '#15151f', '#fff4d6');
+    g.drawImage(tc, x + 5, y + 4, tc.width * ech, tc.height * ech);
+    g.fillStyle = '#15151f';
+    g.fillRect(x + 4, y + h, 3, 4);
+    g.fillRect(x + 2, y + h + 3, 2, 2);
+  }
+}
+
+// Les vitrines du hall au dinosaure tremblent quand le T. rex rugit.
+function animeVitrine(g, it, tx, ty, t, O, effet) {
+  if (!effet) return;
+  const P = O.projeteur(tx + 32, ty);
+  const v = Math.round(Math.sin(effet.depuis / 35) * 2);
+  g.fillStyle = 'rgba(255,255,255,0.8)';
+  for (const z of [36, 44, 52]) {
+    const [x, y] = P(0.86, 0.5, z);
+    g.fillRect(x + 4 + v, y, 3, 1);
+    const [x2, y2] = P(0.5, 0.86, z);
+    g.fillRect(x2 - 7 - v, y2, 3, 1);
+  }
+}
+
+// Hall au dinosaure : un œuf du nid tremble, se fend, et un bébé dinosaure en sort la tête.
+function animeOeuf(g, it, tx, ty, t, O, effet) {
+  if (!effet) return;
+  const P = O.projeteur(tx + 32, ty);
+  const d = effet.depuis;
+  const [x, y] = P(0.48, 0.6, 30);
+  const tremble = effet.phase === 1 ? Math.round(Math.sin(d / 45) * 1.5) : 0;
+  if (effet.phase === 1) {
+    // l'œuf du devant tremble, puis se fend
+    g.fillStyle = '#15151f';
+    g.fillRect(x - 4 + tremble, y - 12, 9, 12);
+    g.fillStyle = '#e8dcc0';
+    g.fillRect(x - 3 + tremble, y - 10, 7, 9);
+    g.fillRect(x - 2 + tremble, y - 11, 5, 1);
+    if (d > 900) {
+      g.fillStyle = '#5a4a32';
+      g.fillRect(x - 2 + tremble, y - 7, 2, 1);
+      g.fillRect(x + tremble, y - 6, 2, 1);
+      g.fillRect(x + 2 + tremble, y - 7, 1, 1);
+    }
+  } else {
+    // coquille ouverte et tête de bébé dino qui regarde à droite et à gauche
+    const regard = Math.floor(d / 500) % 2 ? 1 : -1;
+    g.fillStyle = '#15151f';
+    g.fillRect(x - 4, y - 7, 9, 7);
+    g.fillStyle = '#e8dcc0';
+    g.fillRect(x - 3, y - 6, 7, 5);
+    g.fillStyle = '#15151f';
+    g.fillRect(x - 4, y - 17, 9, 11);
+    g.fillStyle = '#5fbf4a';
+    g.fillRect(x - 3, y - 16, 7, 10);
+    g.fillRect(x - 3 + (regard > 0 ? 4 : -2), y - 14, 3, 3);
+    g.fillStyle = '#ffffff';
+    g.fillRect(x - 1 + regard, y - 15, 2, 2);
+    g.fillStyle = '#15151f';
+    g.fillRect(x + (regard > 0 ? 1 : -1), y - 14, 1, 1);
+    g.fillStyle = '#e8dcc0';
+    g.fillRect(x - 3, y - 18, 3, 2);
+    g.fillRect(x + 2, y - 18, 2, 1);
+    O.phylactere(g, x, y - 20, O.enseigne('Piou !', 'Peep!'));
+  }
+}
+
+export const ANIMES = { hall_tambour: animeTambour, hall_bassin: animeBassin, hall_trex: animeTrex, hall_vitrine: animeVitrine, hall_oeuf: animeOeuf };
+
+// Easter eggs (web/clics.js).
+export const CLICS = {
+  hall_trex: { duree: 4500, declenche: ['hall_vitrine'] }, // hall au dinosaure : le T. rex rugit, les vitrines tremblent
+  hall_oeuf: { duree: 5000, phases: [2200] }, // un œuf éclot : bébé dinosaure
+  hall_tambour: { duree: 5200 }, // grand hall : la porte tambour s'emballe, un pigeon est éjecté
+  hall_bassin: { duree: 3600, declenche: ['hall_bassin'] }, // tour de verre : une carpe koï saute dans le bassin
+};
 
 export const JEUX = {};
 
-const ROSACE = {};
-for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) ROSACE['r' + i + j] = ['hall_rosace' + i + j, '#e8e1d2'];
 
 export const THEMES = {
   // Grand hall : marbre crème, rosace, boiseries, laiton, cuir.
   'hall-grand': {
-    sols: { def: ['hall_marbre', '#e8e1d2'], lobby: ['hall_marbre', '#c9c4bb'], accueil: ['parquet', '#8f5a32'], ...ROSACE },
+    sols: { def: ['hall_marbre', '#e8e1d2'], lobby: ['hall_marbre', '#c9c4bb'], accueil: ['parquet', '#8f5a32'], rosace: ['hall_rosace', '#e8e1d2'] },
     mur: 'hall_pierre', dalle: '#5a5048', bureau: '#e8e1d2', chaise: '#2b2f36', canape: '#6b3a2a', canapeEquipe: '#6b3a2a', table: '#d9d2c4',
+    cloison: { cadre: '#c9a227' },
   },
   // Tour de verre : dalles blanches, aluminium, cuir blanc.
   'hall-verre': {
     sols: { def: ['hall_dalle', '#eceef0'], lobby: ['hall_dalle', '#dde0e4'], accueil: ['hall_dalle', '#f4f5f6'] },
     mur: 'hall_facade', dalle: '#3a3f48', bureau: '#f4f5f6', chaise: '#f4f5f6', canape: '#f0ede6', canapeEquipe: '#f0ede6', table: '#cfd5df',
+    cloison: { cadre: '#c3cad3', verre: 'rgba(205,235,255,0.22)' },
   },
   // Hall au dinosaure : terrazzo, murs vert muséum, bois sombre et laiton.
   'hall-dino': {
     sols: { def: ['hall_terrazzo', '#d8cfbf'], lobby: ['hall_terrazzo', '#c6bcaa'], accueil: ['parquet', '#7a4a2a'], trace: ['hall_trace', '#d8cfbf'] },
     mur: 'hall_musee', dalle: '#3a2f25', bureau: '#7a4a2a', chaise: '#5a2a1a', canape: '#5a2a1a', canapeEquipe: '#5a2a1a', table: '#6e3f20',
+    cloison: { cadre: '#6b3a1f' },
   },
 };
 
-export const SOLS = { hall_marbre: solMarbre, hall_dalle: solDalle, hall_terrazzo: solTerrazzo, hall_trace: solTrace };
-for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) SOLS['hall_rosace' + i + j] = solRosace(i, j);
+export const SOLS = { hall_marbre: solMarbre, hall_dalle: solDalle, hall_terrazzo: solTerrazzo, hall_trace: solTrace, hall_rosace: solRosace };
 
 export const MURS = { hall_pierre: murPierre, hall_facade: murFacade, hall_musee: murMusee };
 

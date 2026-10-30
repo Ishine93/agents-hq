@@ -34,7 +34,7 @@ import { routesNavigateur, etatApp, ouvrirApp } from './navigateur.js';
 import { majIconeRaccourci } from './raccourci.js';
 import { discuter, definirPersonnalite, oublier, bavarder, demarrerBavardages, utiliserDemo } from './personnages.js';
 import { listeSkills, skillsClaudeCode, lireSkill, existe as existeSkill, idsSkills, creerSkill, modifierSkill, reglerSkill, supprimerSkill, importerFichier, importerClaudeCode } from './skills.js';
-import { surChangement as surConso, consoPublique, demarrerSuiviLimites, surLimitesLues } from './conso.js';
+import { surChangement as surConso, consoPublique, demarrerSuiviLimites, surLimitesLues, limitesDe } from './conso.js';
 import { t as tr } from './i18n.js';
 import { questionTache, questionDg } from './questions.js';
 import { verifierMaj, lancerMaj, majAuLancement, CODE_MISE_A_JOUR, installationDev } from './maj.js';
@@ -358,7 +358,18 @@ async function api(req, res, chemin) {
       const dd = ordo.creerDossierDirect({ texte, etageAffiche: String(corps.etageAffiche || 'hall'), compte: compte?.id || null, modele, effort: effort || null, pieces: corps.pieces || [], skills, skillsExclus, travail });
       return json(res, 200, { id: dd.id });
     }
-    const d = ordo.creerDossier({ texte, etageAffiche: String(corps.etageAffiche || 'hall'), compte: compte?.id || null, compteAgents, dg: cDg && cDg.id !== compte?.id ? { compte: cDg.id } : null, pieces: corps.pieces || [], skills, skillsExclus, travail });
+    // départ programmé (1.0.11) : { a: heure en ms } ou { type: 'reinit' } (remise à zéro de la fenêtre de 5 h du compte des agents)
+    let departA = null;
+    if (corps.depart?.type === 'reinit') {
+      const l = limitesDe(compteAgents || compte?.id);
+      const reinit = l?.fenetres?.five_hour?.reinit;
+      if (!(reinit > Date.now())) return json(res, 409, { erreur: tr('Heure de remise à zéro inconnue pour ce compte : choisis une heure.') });
+      departA = reinit + 60000;
+    } else if (corps.depart?.a != null) {
+      departA = Number(corps.depart.a);
+      if (!Number.isFinite(departA) || departA < Date.now() - 60000 || departA > Date.now() + 7 * 86400e3) return json(res, 400, { erreur: tr('Heure de départ invalide.') });
+    }
+    const d = ordo.creerDossier({ texte, etageAffiche: String(corps.etageAffiche || 'hall'), compte: compte?.id || null, compteAgents, dg: cDg && cDg.id !== compte?.id ? { compte: cDg.id } : null, pieces: corps.pieces || [], skills, skillsExclus, travail, departA });
     return json(res, 200, { id: d.id });
   }
   if (chemin === '/api/bonheur/recolter') {
@@ -428,12 +439,14 @@ async function api(req, res, chemin) {
     const r = await bavarder({ force: true });
     return r ? json(res, 200, r) : json(res, 409, { erreur: tr('Personne à faire bavarder : il faut au moins deux collègues au même étage.') });
   }
-  if ((m = chemin.match(/^\/api\/dossiers\/(D\d+)\/(repondre|completer|annuler|supprimer|retablir|archiver|ressortir)$/))) {
+  if ((m = chemin.match(/^\/api\/dossiers\/(D\d+)\/(repondre|completer|annuler|supprimer|retablir|archiver|ressortir|lancer)$/))) {
     const d = etat.dossiers.get(m[1]);
     if (!d && m[2] === 'retablir') return json(res, 409, { erreur: tr('Trop tard : le dossier {id} est déjà effacé.', { id: m[1] }) });
     if (!d) return json(res, 404, { erreur: tr('dossier inconnu') });
     if (m[2] === 'annuler') ordo.annulerDossier(d);
-    else if (m[2] === 'supprimer') return json(res, 200, { ok: true, ...ordo.supprimerDossier(d) });
+    else if (m[2] === 'lancer') {
+      if (!ordo.lancerMaintenant(d)) return json(res, 409, { erreur: tr("Ce dossier n'est pas programmé.") });
+    } else if (m[2] === 'supprimer') return json(res, 200, { ok: true, ...ordo.supprimerDossier(d) });
     else if (m[2] === 'retablir') {
       if (!ordo.annulerSuppression(d)) return json(res, 409, { erreur: tr('Trop tard : le dossier {id} est déjà effacé.', { id: d.id }) });
     } else if (m[2] === 'archiver') {

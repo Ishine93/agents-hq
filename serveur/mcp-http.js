@@ -23,7 +23,6 @@ export function creerJetonMcp(definitions) {
   return jeton;
 }
 export const revoquerJetonMcp = (jeton) => (jeton ? sessions.delete(jeton) : false);
-export const jetonValide = (jeton) => sessions.has(jeton);
 
 function schemaJson(forme) {
   try {

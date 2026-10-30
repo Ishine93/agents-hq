@@ -7,10 +7,12 @@ import { REGLAGES } from './config.js';
 import { chargerEquivalences, niveauDe, modeleParNiveau } from './ia/fournisseurs.js';
 
 const FICHIER = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'config', 'defauts', 'profils-travail.json');
-export const NIVEAUX = ['econome', 'equilibre', 'max'];
-export const PERSONNALISE = 'personnalise'; // 4e choix : les valeurs de l'utilisateur, à partir d'un des trois niveaux (base)
+// Standard (1.0.11) : comme Claude Code, le défaut des nouvelles installations (une installation d'avant garde son choix,
+// Équilibré si elle n'en avait pas fait : config.js).
+export const NIVEAUX = ['standard', 'econome', 'equilibre', 'max'];
+export const PERSONNALISE = 'personnalise'; // 5e choix : les valeurs de l'utilisateur, à partir d'un des niveaux (base)
 export const COUTS = [...NIVEAUX, PERSONNALISE];
-export const NIVEAU_DEFAUT = 'equilibre';
+export const NIVEAU_DEFAUT = 'standard';
 
 let cache = null;
 export function profilsTravail() {
@@ -20,18 +22,19 @@ export function profilsTravail() {
 
 // Les boutons connus et leurs valeurs permises (pour filtrer « personnalise » et les valeurs inconnues).
 export const ENUMS = {
-  decoupage: ['chantier', 'parallele', 'actuel'],
-  agentDirect: ['jamais', 'petite', 'projet-unique'],
-  verifDefaut: ['self', 'risque', 'code'],
+  decoupage: ['chantier', 'parallele', 'actuel', 'libre'],
+  agentDirect: ['jamais', 'petite', 'projet-unique', 'libre'],
+  verifDefaut: ['self', 'risque', 'code', 'libre'],
   verifNiveau: [null, 'standard'],
   verifEffort: [null, 'low', 'medium', 'high'],
   perimetre: ['strict', 'complements', 'bonus'],
-  exploration: ['interdite', 'permise', 'encouragee'],
+  exploration: ['interdite', 'permise', 'encouragee', 'autonome'],
   ambiance: [null, false],
   gardien: ['non', 'registre', 'relecture'], // gardien du contexte (1.0.10)
 };
 export const NOMBRES = ['compactionAgents', 'compactionVerif', 'compactionDg', 'maxCompactions', 'maxTaches', 'verifMaxTurns', 'maxRework', 'seuilAccordFenetre', 'plafondTacheFacteur'];
-export const PEUT_ETRE_NUL = new Set(['seuilAccordFenetre', 'plafondTacheFacteur', 'maxCompactions']);
+// null : pas de seuil du QG (compaction : celle de Claude Code ; tours du vérificateur : le réglage général du QG)
+export const PEUT_ETRE_NUL = new Set(['seuilAccordFenetre', 'plafondTacheFacteur', 'maxCompactions', 'compactionAgents', 'compactionVerif', 'compactionDg', 'verifMaxTurns']);
 
 function valeurValide(cle, v) {
   if (cle in ENUMS) return ENUMS[cle].includes(v);
@@ -94,8 +97,8 @@ export function profilEffectif(dossier = null, reglages = REGLAGES) {
 }
 
 const NOMS = {
-  fr: { econome: 'Économe', equilibre: 'Équilibré', max: 'Max', personnalise: 'Personnalisé' },
-  en: { econome: 'Thrifty', equilibre: 'Balanced', max: 'Max', personnalise: 'Custom' },
+  fr: { standard: 'Standard', econome: 'Économe', equilibre: 'Équilibré', max: 'Max', personnalise: 'Personnalisé' },
+  en: { standard: 'Standard', econome: 'Thrifty', equilibre: 'Balanced', max: 'Max', personnalise: 'Custom' },
 };
 export const nomNiveau = (cout, langue = 'fr') => (NOMS[langue] || NOMS.fr)[cout] || cout;
 // Nom d'un profil : « Personnalisé (à partir de Économe) » pour Personnalisé, sinon le nom du niveau.
@@ -111,14 +114,17 @@ const TEXTES = {
       chantier: (m) => `- ${m} tâches au plus. Une tâche par chantier : l'analyse et la réalisation d'un même code vont toujours dans la même tâche. Pas de tâche de revue ni de synthèse sans demande.`,
       parallele: (m) => `- ${m} tâches au plus. L'analyse et la réalisation d'un même code vont dans la même tâche : l'agent qui explore garde son contexte pour implémenter. Ne sépare que le travail vraiment parallèle et indépendant (projets différents, sources de bench différentes).`,
       actuel: (m) => `- ${m} tâches au plus. Sépare la production, la vérification ou la mesure, et chaque travail qui dépend d'un autre (par exemple : étude, puis code, puis mesure).`,
+      libre: (m) => `- Découpage libre, comme si tu travaillais seul dans Claude Code : une seule tâche si c'est le plus simple ; plusieurs tâches, parallèles ou dépendantes, quand le travail s'y prête vraiment (${m} au plus). Chaque agent peut aussi lancer ses propres sous-agents et workflows : inutile de tout découper toi-même.`,
     },
     direct: {
       'projet-unique': '- Demande qui touche un seul projet : rends une seule tâche en mode "direct" (la demande de l\'utilisateur, plus le contexte utile), sans vérificateur séparé.',
       petite: '- Petite demande (un projet, un changement localisé) : rends une seule tâche en mode "direct" (la demande de l\'utilisateur, plus le contexte utile), sans vérificateur séparé.',
       jamais: '- Mode "direct" non permis : rends toujours un plan (mode "plan").',
+      libre: '- Mode "direct" permis quand c\'est le plus simple : une seule tâche qui reçoit la demande telle quelle, plus le contexte utile, sans vérificateur séparé.',
     },
     verif: {
       self: '- Vérification : "self" avec des commandes concrètes (tests, build) ; "agent" seulement si risque "high" ou si l\'utilisateur a demandé une relecture (relectureDemandee).',
+      libre: '- Vérification : à toi de juger, comme un développeur seul. Le plus souvent "self" avec des commandes concrètes (tests, build) ; "agent" quand un regard neuf apporte vraiment quelque chose (code partagé ou critique), ou si l\'utilisateur a demandé une relecture (relectureDemandee).',
       risque: '- Vérification : "agent" si la tâche modifie du code partagé ou critique (risque medium ou high) ou si l\'utilisateur a demandé une relecture (relectureDemandee) ; sinon "self" avec des commandes concrètes.',
       code: '- Vérification : "agent" pour toute tâche qui modifie du code ; "self" avec des commandes concrètes pour les autres.',
     },
@@ -142,14 +148,17 @@ const TEXTES = {
       chantier: (m) => `- At most ${m} tasks. One task per workstream: analysis and implementation of the same code always go in the same task. No review or summary task unless asked.`,
       parallele: (m) => `- At most ${m} tasks. Analysis and implementation of the same code go in the same task: the agent that explores keeps its context to implement. Only split truly parallel, independent work (different projects, different bench sources).`,
       actuel: (m) => `- At most ${m} tasks. Keep production, verification or measurement, and each piece of work that depends on another separate (for example: study, then code, then measurement).`,
+      libre: (m) => `- Free split, as if you worked alone in Claude Code: a single task when that is simplest; several tasks, parallel or dependent, when the work really calls for it (at most ${m}). Each agent can also start its own sub-agents and workflows: no need to split everything yourself.`,
     },
     direct: {
       'projet-unique': '- A request that touches a single project: return a single task in "direct" mode (the user\'s request plus useful context), with no separate verifier.',
       petite: '- Small request (one project, a localized change): return a single task in "direct" mode (the user\'s request plus useful context), with no separate verifier.',
       jamais: '- "direct" mode not allowed: always return a plan ("plan" mode).',
+      libre: '- "direct" mode allowed when it is simplest: a single task that gets the request as is, plus useful context, with no separate verifier.',
     },
     verif: {
       self: '- Verification: "self" with concrete commands (tests, build); "agent" only for risk "high" or when the user asked for a review (relectureDemandee).',
+      libre: '- Verification: your call, as a developer working alone. Mostly "self" with concrete commands (tests, build); "agent" when a fresh look really helps (shared or critical code), or when the user asked for a review (relectureDemandee).',
       risque: '- Verification: "agent" if the task changes shared or critical code (risk medium or high) or when the user asked for a review (relectureDemandee); otherwise "self" with concrete commands.',
       code: '- Verification: "agent" for every task that changes code; "self" with concrete commands for the others.',
     },
@@ -226,7 +235,7 @@ export function verificationProfil(tache, profil, { relecture = false, langue = 
   if (v.mode === 'agent') {
     // relecture demandée, approbation ou risque élevé : vérificateur gardé à tous les niveaux
     const garder =
-      profil.verifDefaut === 'code' ||
+      profil.verifDefaut === 'code' || profil.verifDefaut === 'libre' ||
       tache.risque === 'high' || tache.approbation === true || relecture ||
       (profil.verifDefaut === 'risque' && RISQUE_MOYEN.has(tache.risque));
     if (!garder) {
@@ -274,19 +283,28 @@ const TEXTES_EXPLO = {
     prompt: "Tu explores le code pour un autre agent. Tu ne modifies rien. Rends un résumé de 300 mots au plus : chemins, fonctions, numéros de ligne, conventions repérées. Pas de contenu de fichier entier.",
     permise: '\n\nPour une recherche large, confie-la à `explorateur` : il te rend un résumé, et ta conversation reste légère.',
     encouragee: '\n\nPour une recherche large, confie-la systématiquement à `explorateur` : il te rend un résumé, et ta conversation reste légère.',
+    autonome: "\n\nTu travailles comme dans Claude Code. Quand c'est utile, lance tes propres sous-agents (outil Agent) pour explorer ou avancer en parallèle, des commandes en arrière-plan (Bash avec run_in_background, puis Monitor et TaskStop), ou un workflow (outil Workflow) quand le travail gagne vraiment à être réparti entre plusieurs agents : l'utilisateur t'y autorise. Chaque agent en plus coûte : garde-les pour ce qui le mérite.",
   },
   en: {
     description: 'Searches the code and returns a short summary (files, functions, useful lines). Use it for any search that would need reading more than 3 files.',
     prompt: 'You explore the code for another agent. You change nothing. Return a summary of 300 words at most: paths, functions, line numbers, conventions spotted. No whole file contents.',
     permise: '\n\nFor a broad search, hand it to `explorateur`: it returns a summary and your conversation stays light.',
     encouragee: '\n\nFor a broad search, always hand it to `explorateur`: it returns a summary and your conversation stays light.',
+    autonome: '\n\nYou work as in Claude Code. When useful, start your own sub-agents (Agent tool) to explore or move forward in parallel, background commands (Bash with run_in_background, then Monitor and TaskStop), or a workflow (Workflow tool) when the work really benefits from being spread across several agents: the user allows it. Every extra agent costs: keep them for what deserves it.',
   },
 };
 
-/** Options SDK du sous-agent (null si le profil l'interdit ou si la tâche n'édite pas). */
+// Standard (1.0.11) : les sous-agents de Claude Code lui-même, les commandes en arrière-plan et les workflows.
+const OUTILS_AUTONOMES = ['TaskStop', 'Monitor', 'Workflow'];
+
+/**
+ * Options SDK du sous-agent (null si le profil l'interdit ou si la tâche n'édite pas). « autonome » : pas d'explorateur
+ * du QG, mais les outils de Claude Code pour s'organiser seul (outils, en plus de l'outil Agent).
+ */
 export function optionsExploration(profil, profilOutils, langue = REGLAGES.langueIA || 'fr') {
   if (!profil || profil.exploration === 'interdite' || !['edition', 'edition+tests'].includes(profilOutils)) return null;
   const T = TEXTES_EXPLO[langue] || TEXTES_EXPLO.fr;
+  if (profil.exploration === 'autonome') return { agents: undefined, outils: OUTILS_AUTONOMES, append: T.autonome };
   const model = (profil.base || profil.cout) === 'econome' ? 'haiku' : 'sonnet'; // jamais le modèle de la tâche
   const def = { description: T.description, prompt: T.prompt, model, tools: OUTILS_LECTURE, disallowedTools: OUTILS_ECRITURE, maxTurns: 25 };
   return {

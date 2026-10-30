@@ -119,6 +119,28 @@ const PHRASES = {
   jeuPouf: ['Échec et… non, attends.', 'À toi de jouer.', 'Ces poufs sont trop confortables.', 'Je relance les dés.', 'Qui a triché ?'],
   jeuCafe: ['Un petit café ?', 'La machine fait encore des siennes.', 'Plutôt thé ou café ?', 'Il reste des cookies !'],
   jeuRegarde: ['Allez, vas-y !', 'Pas mal !', 'Je prends le gagnant.', 'Oh, presque !'],
+  // décors au choix de la salle de pause (1.0.11) : la plage (anglais : web/i18n/parts/v1011-decors.json)
+  arriveeChateau: ['Je construis le plus beau château !', 'Qui a une pelle ?', 'Un château avant mon tour !'],
+  arriveeTransat: ['Un transat de libre !', 'Je me pose au soleil.', 'Les pieds dans le sable…'],
+  jeuVolley: ['Manchette !', 'Je l’ai !', 'Smash au filet !', 'Point pour nous !', 'Attention, il arrive !', 'Le ballon est dans le sable…'],
+  jeuRaquettes: ['Ne la laisse pas tomber !', 'Trente échanges !', 'Elle part dans l’eau !', 'Joli coup droit !', 'Record battu !'],
+  jeuChateau: ['Encore une tour !', 'Il manque un pont-levis.', 'Attention aux vagues !', 'Passe-moi la pelle !', 'Le plus beau château de la plage.'],
+  jeuPetanque: ['Tu tires ou tu pointes ?', 'Elle est collée au cochonnet !', 'Mesure, mesure !', 'Carreau !', 'C’est ta boule.'],
+  jeuTransat: ['Quel soleil !', 'Passe-moi la crème solaire.', 'Je ne bouge plus d’ici.', 'Encore un chapitre…', 'On entend les vagues.', 'Réveille-moi pour mon tour.'],
+  jeuBar: ['Un cocktail sans alcool !', 'Avec une ombrelle, s’il vous plaît.', 'Il fait soif !', 'Un jus de coco ?', 'Santé !'],
+  jeuGlace: ['Vanille ou fraise ?', 'Elle fond déjà !', 'Deux boules, s’il vous plaît.', 'Une glace à l’eau pour moi.'],
+  // … et la fête foraine
+  arriveeStand: ['Allez, un essai !', 'Je tente ma chance.', 'Un ticket, s’il vous plaît !'],
+  arriveeAutos: ['En voiture !', 'Je prends le volant !', 'Ceinture attachée !'],
+  arriveePhoto: ['Une photo souvenir ?', 'Prends-moi en photo !', 'Je passe la tête !'],
+  jeuPeche: ['J’en ai un !', 'Le jaune, le jaune !', 'Encore raté…', 'Un canard, une peluche !', 'Il a un numéro sous le ventre ?'],
+  jeuAutos: ['Attention, j’arrive !', 'Bim !', 'Tu m’as eu !', 'Pousse-toi !', 'Marche arrière !', 'Encore un tour !'],
+  jeuChamboule: ['Tout est tombé !', 'Il en reste une…', 'En plein milieu !', 'Trois balles, trois chances.'],
+  jeuTir: ['Dans le mille !', 'Encore un canard !', 'Le viseur est faussé…', 'Je veux la grosse peluche !'],
+  jeuForce: ['Hop !', 'Ding ! La cloche !', 'Presque en haut…', 'Regarde-moi ces muscles !', 'C’est truqué, ce truc.'],
+  jeuPhoto: ['Souris !', 'Ne bouge plus…', 'Clic ! Superbe.', 'Un vrai hercule !', 'Encore une, j’ai cligné.'],
+  jeuPince: ['Je l’ai presque !', 'Elle a encore lâché…', 'Le lapin rose, là !', 'Une dernière pièce.'],
+  jeuBarbe: ['J’en ai plein les doigts !', 'Rose ou bleue ?', 'C’est collant !', 'Un nuage en sucre !'],
   // salle de repos
   coucher: ['Une petite sieste…', 'Bonne nuit, tout le monde.', 'Je recharge les batteries.', 'Réveillez-moi s’il y a du travail.'],
   reveil: ['Hop, au boulot !', 'Déjà ? J’arrive !', 'Je reprends du service !', 'Un café et j’y vais.'],
@@ -189,7 +211,9 @@ export function enumerer(noms) {
 }
 
 function listeDe(sorte) {
-  return (enAnglais() && PHRASES_EN[sorte]) || PHRASES[sorte] || [];
+  if (!enAnglais()) return PHRASES[sorte] || [];
+  // une liste sans version anglaise ici (décors 1.0.11) se traduit phrase par phrase avec le dictionnaire
+  return PHRASES_EN[sorte] || (PHRASES[sorte] || []).map((s) => tr(s));
 }
 
 export function phrase(sorte, graine, vars = {}) {

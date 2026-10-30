@@ -7,6 +7,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import * as plateforme from '../plateforme.js';
+import { t } from '../i18n.js';
 
 export const VERSION_CODEX = '0.164.0';
 export const PAQUET_CODEX = `@openai/codex@${VERSION_CODEX}`;
@@ -64,13 +65,13 @@ export function installerCodex({ commande = commandeNpm(), dossier = plateforme.
   publier();
   enCours = new Promise((resolve) => {
     if (!commande) {
-      resolve(echouer('npm introuvable : le Node portable du QG est incomplet (réinstalle le QG).'));
+      resolve(echouer(t('npm introuvable : le Node portable du QG est incomplet (réinstalle le QG).')));
       return;
     }
     try {
       fs.mkdirSync(dossier, { recursive: true });
     } catch (e) {
-      resolve(echouer(`dossier ${dossier} impossible à créer : ${e.message}`));
+      resolve(echouer(t('dossier {dossier} impossible à créer : {erreur}', { dossier, erreur: e.message })));
       return;
     }
     let p;
@@ -82,7 +83,7 @@ export function installerCodex({ commande = commandeNpm(), dossier = plateforme.
         windowsHide: true,
       });
     } catch (e) {
-      resolve(echouer(`npm n'a pas pu démarrer : ${e.message}`));
+      resolve(echouer(t(`npm n'a pas pu démarrer : {erreur}`, { erreur: e.message })));
       return;
     }
     const minuterie = setTimeout(() => {
@@ -107,18 +108,18 @@ export function installerCodex({ commande = commandeNpm(), dossier = plateforme.
     p.stderr.on('data', lire);
     p.on('error', (e) => {
       clearTimeout(minuterie);
-      resolve(echouer(`npm n'a pas pu démarrer : ${e.message}`));
+      resolve(echouer(t(`npm n'a pas pu démarrer : {erreur}`, { erreur: e.message })));
     });
     p.on('close', (code, signal) => {
       clearTimeout(minuterie);
       if (reste.trim()) etat.lignes = [...etat.lignes, reste.trim().slice(0, 300)].slice(-LIGNES_MAX);
       if (code !== 0) {
         const derniere = [...etat.lignes].reverse().find((l) => /err/i.test(l)) || etat.lignes.at(-1) || '';
-        resolve(echouer(signal ? `installation arrêtée (${signal}, délai dépassé ?)` : `npm a échoué (code ${code})${derniere ? ` : ${derniere}` : ''}`));
+        resolve(echouer(signal ? t('installation arrêtée ({signal}, délai dépassé ?)', { signal }) : t('npm a échoué (code {code})', { code }) + (derniere ? ` : ${derniere}` : '')));
         return;
       }
       if (!fs.existsSync(plateforme.codexLanceurRuntime(dossier))) {
-        resolve(echouer('npm a terminé, mais le lanceur de Codex est introuvable dans runtime/codex.'));
+        resolve(echouer(t('npm a terminé, mais le lanceur de Codex est introuvable dans runtime/codex.')));
         return;
       }
       etat = { ...etat, etat: null, erreur: null, fin: Date.now() };

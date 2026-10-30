@@ -38,4 +38,3 @@ export function notificationSysteme(n) {
     console.error('toast', e.message);
   }
 }
-export const toastWindows = notificationSysteme;

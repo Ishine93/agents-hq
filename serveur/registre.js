@@ -10,7 +10,6 @@ import path from 'node:path';
 import { dossierPieces } from './pieces.js';
 import { REGLAGES } from './config.js';
 
-export const GARDIENS = ['non', 'registre', 'relecture'];
 export const cheminRegistre = (dossierId) => path.join(dossierPieces(dossierId), 'registre.md');
 
 const court = (s, n) => {

@@ -1,7 +1,7 @@
 // Interface HTML par-dessus le canvas : barre du bas, vue globale, panneau latéral, cartes de permission,
 // bandeau de pause, alertes. Tout texte venant du serveur passe par textContent (jamais innerHTML).
 import { envoyer, MAQUETTE, rejouerMaquette } from './flux.js';
-import { libelleEtat, libelleDossier, TERMINAUX, DOSSIER_ACTIF, PAS_DEMARREE } from './etat.js';
+import { libelleEtat, libelleDossier, libelleMoteurImage, TERMINAUX, DOSSIER_ACTIF, PAS_DEMARREE } from './etat.js';
 import { modele } from './sprites.js';
 import { Jointes, fichiersImages, vignettes } from './pieces.js';
 import { Visionneuse } from './visionneuse.js';
@@ -23,6 +23,7 @@ import { FilPensees } from './fil-pensees.js';
 import { Lecteur } from './lecteur.js';
 import { Conso } from './conso.js';
 import { Parametres } from './parametres.js';
+import { recevoirPriorites } from './priorites.js';
 import { NotesVersion } from './notes.js';
 import { Accueil } from './accueil.js';
 import { COUTS, PERSONNALISE, nomNiveau, nomTravail, phraseNiveau, travailDe, sansCapacite } from './cout.js';
@@ -267,6 +268,12 @@ export class Interface {
       surTexte: (t) => this.insererTexte(t),
       surErreur: (m) => this.toast('warn', m),
     });
+    // départ de la demande (1.0.11) : maintenant, à la remise à zéro de la fenêtre, ou à une heure
+    $('#depart-demande').addEventListener('change', () => {
+      this.departChoix = $('#depart-demande').value;
+      this.majReglageCout();
+    });
+    $('#depart-heure').addEventListener('change', () => this.majReglageCout());
     $('#cout-demande').addEventListener('change', () => {
       this.coutChoix = $('#cout-demande').value;
       this.majReglageCout();
@@ -866,11 +873,15 @@ export class Interface {
       else {
         const corps = { texte, etageAffiche: this.etageId, compte: this.compte, ...this.choixSkills.pourEnvoi() };
         corps.travail = { cout: this.coutDemande() };
+        const depart = this.departDemande();
+        if (depart) corps.depart = depart;
         const direct = m && m.type === 'direct';
         if (direct) corps.direct = { modele: $('#modele-direct').value, effort: $('#effort-direct').value || null };
         const r = await envoyer('/api/dossiers', avecPieces(corps));
         this.choixSkills.vider(); // les skills choisis valent pour ce dossier-là
         this.coutChoix = null; // le niveau choisi vaut pour cette demande-là
+        if (depart) this.toast('info', tr('Demande programmée : elle partira à l’heure choisie. Tu peux la lancer plus tôt depuis sa carte.'));
+        this.departChoix = null; // le départ aussi
         this.majReglageCout();
         // demande directe : la suite de la conversation part dans ce dossier, comme dans Claude Code
         if (direct && r && r.id) this.mode = { type: 'completer', dossier: r.id, attendu: Date.now() };
@@ -944,8 +955,40 @@ export class Interface {
     return tr('tes valeurs des Réglages, à partir de {niveau}', { niveau: nomNiveau(base) }) + (nb ? ', ' + tr('{n} valeur(s) changée(s)', { n: nb }) : '');
   }
 
+  // Départ choisi pour la prochaine demande (1.0.11) : null (maintenant), { type: 'reinit' } ou { a: ms }.
+  departDemande() {
+    if (this.departChoix === 'reinit') return { type: 'reinit' };
+    if (this.departChoix !== 'heure') return null;
+    const v = $('#depart-heure').value;
+    if (!/^\d{2}:\d{2}$/.test(v)) return null;
+    const [hh, mm] = v.split(':').map(Number);
+    const d = new Date();
+    d.setHours(hh, mm, 0, 0);
+    if (d.getTime() <= Date.now()) d.setDate(d.getDate() + 1); // heure passée : demain
+    return { a: d.getTime() };
+  }
+
+  // Heure de remise à zéro de la fenêtre de 5 h du compte de la prochaine demande, si on la connaît.
+  reinitFenetre() {
+    const C = this.store.conso || {};
+    const id = this.compte || this.store.compteDefaut;
+    const r = C.limites && C.limites[id] && C.limites[id].fenetres && C.limites[id].fenetres.five_hour && C.limites[id].fenetres.five_hour.reinit;
+    return r && r > Date.now() ? r : null;
+  }
+
   majReglageCout() {
     const box = $('#reglage-cout');
+    const selD = $('#depart-demande');
+    const reinit = this.reinitFenetre();
+    const h2 = (ms) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    selD.replaceChildren(
+      h('option', { value: 'maintenant' }, tr('départ : maintenant')),
+      h('option', { value: 'reinit' }, reinit ? tr('à la remise à zéro ({heure})', { heure: h2(reinit) }) : tr('à la remise à zéro de la fenêtre')),
+      h('option', { value: 'heure' }, tr('à une heure…')));
+    selD.value = this.departChoix || 'maintenant';
+    $('#depart-heure').hidden = this.departChoix !== 'heure';
+    selD.title = tr('Départ de la demande : tout de suite, quand ta fenêtre de 5 h repart à zéro, ou à l’heure choisie (demain si elle est passée). D’ici là, rien n’est consommé.');
+    box.classList.toggle('differe', !!this.departChoix && this.departChoix !== 'maintenant');
     const mode = this.calculerMode();
     box.hidden = !!mode && mode.type !== 'direct';
     const def = travailDe(this.store.reglages).cout;
@@ -1237,6 +1280,8 @@ export class Interface {
         h('div', { class: 'boutons' },
           S.plans.has(d.id) ? h('button', { class: 'petit', title: tr('Le plan du DG en grand, avec les dépendances'), on: { click: () => this.plan.ouvrir(d.id) } }, tr('Voir le plan')) : null,
           d.etat !== 'annule' ? h('button', { class: 'petit', title: tr('Ajouter un complément (texte, images) à ce dossier'), on: { click: () => this.modeCompleter(d.id) } }, d.etat === 'clarification' ? tr('Répondre') : tr('Compléter')) : null,
+          // départ programmé (1.0.11)
+          d.etat === 'programme' ? h('button', { class: 'petit', title: d.departA ? tr('Programmé pour {heure}', { heure: new Date(d.departA).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' }) }) : null, on: { click: () => this.action('/api/dossiers/' + encodeURIComponent(d.id) + '/lancer') } }, tr('Lancer maintenant')) : null,
           actif ? h('button', { class: 'petit danger', on: { click: () => this.action('/api/dossiers/' + encodeURIComponent(d.id) + '/annuler', undefined, tr('Annuler le dossier {dossier} et toutes ses tâches ?', { dossier: d.id })) } }, tr('Annuler le dossier')) : null,
           // dossier clos : rangé dans Réglages › Dossiers archivés, rien n'est effacé (1.0.7, à la main seulement)
           ['termine', 'annule', 'echec'].includes(d.etat) ? h('button', { class: 'petit', title: tr('Ranger ce dossier dans Réglages › Dossiers archivés : il quitte cette liste, rien n’est effacé'), on: { click: () => this.action('/api/dossiers/' + encodeURIComponent(d.id) + '/archiver') } }, tr('Archiver')) : null,
@@ -1586,7 +1631,7 @@ export class Interface {
       h('div', { class: 'meta' }, (S.etage(t.etage)?.nom || t.etage) + ' — ' + tr('dossier {dossier}', { dossier: t.dossier }) + (t.nature ? ' — ' + t.nature : '')),
       h('dl', {},
         h('dt', {}, tr('État')), h('dd', {}, h('span', { class: 'badge t-' + t.etat }, libelleEtat(t.etat)), depuis ? ' ' + tr('depuis {heure}', { heure: heure(depuis.t, true) }) : ''),
-        h('dt', {}, tr('Demandé')), h('dd', {}, M.nom + ' · ' + (t.effort || '?')),
+        h('dt', {}, tr('Demandé')), h('dd', {}, M.nom + ' · ' + (t.effort || '?'), t.raisonModele ? h('div', { class: 'meta' }, t.raisonModele) : null),
         h('dt', {}, tr('Réel')), h('dd', {}, t.modeleReel || t.effortReel ? (t.modeleReel || '?') + ' · ' + (t.effortReel || '?') : '—'),
         // plusieurs IA : compte qui fait la tâche, et pourquoi s'il n'est pas celui attendu
         S.multiIa && t.compte ? [h('dt', {}, tr('IA')), h('dd', {}, S.libelleCompte(t.compte),
@@ -1605,11 +1650,12 @@ export class Interface {
         t.lignes ? [h('dt', {}, tr('Code')), h('dd', {},
           h('button', { class: 'lien', on: { click: () => { this.ficheOnglet = 'code'; this.majFiche(); } } }, compteLignes(t.lignes.ajouts, t.lignes.suppressions)),
           ' ' + tr('dans {n} fichier(s)', { n: t.lignes.fichiers || 0 }))] : null,
+        this.ligneImage(t),
         dos && dos.dg && dos.dg.modele ? [h('dt', {}, tr('DG du dossier')), h('dd', {}, S.nomModele(dos.dg.modele, dos.dg.compte || dos.compte) + (dos.dg.effort ? ' · ' + dos.dg.effort : '') + (S.multiIa ? ' — ' + S.libelleCompte(dos.dg.compte || dos.compte) : ''))] : null,
         dos && dos.travail && dos.travail.cout ? [h('dt', {}, tr('Coût du dossier')), h('dd', {}, this.texteCoutDossier(dos))] : null,
         // lot C : estimation (tâche, plan) et mesures de la session (contexte, compactions, coût)
         t.estimation ? [h('dt', {}, tr('Estimation')), h('dd', {}, '≈ ' + montant(t.estimation.valeur, t.estimation.unite))] : null,
-        t.mesures ? [h('dt', {}, tr('Mesures')), h('dd', {}, texteMesures(t.mesures))] : null,
+        t.mesures ? [h('dt', {}, tr('Mesures')), h('dd', {}, texteMesures(t.mesures), this.ligneCompaction(t))] : null,
         dos && dos.estimation ? [h('dt', {}, tr('Plan estimé')), h('dd', {}, texteEstimation(dos.estimation))] : null,
         t.agent ? [h('dt', {}, tr('Agent')), h('dd', {},
           h('button', { class: 'lien', on: { click: () => this.ouvrirFicheDepuis('ag:' + t.agent) } }, agent && agent.prenom ? agent.prenom + ' (' + t.agent + ')' : t.agent),
@@ -1628,6 +1674,28 @@ export class Interface {
       t.resultat ? this.blocResultat(t) : null,
       actions.length ? h('div', { class: 'boutons' }, actions) : null,
     );
+  }
+
+  // Dernière compaction de la tâche (1.0.11) : son heure et la taille de la conversation que l'agent a résumée.
+  ligneCompaction(t) {
+    const c = this.store.compactions.get(t.id);
+    if (!c) return null;
+    return h('div', { class: 'meta' }, tr('dernière à {heure} : {n} k tokens résumés pour faire de la place', { heure: heure(c.t, true), n: Math.round((c.avant || 0) / 1000) }));
+  }
+
+  // Image demandée par l'agent (outil generer_image, 1.0.11) : en cours, créée ou pas créée. Une image créée
+  // arrive aussi dans le fil ; une image ratée n'est dite qu'ici (l'agent la décrit dans son rapport).
+  ligneImage(t) {
+    const S = this.store;
+    const d = S.delegations.get(t.id);
+    if (!d || (d.statut === 'en_cours' && TERMINAUX.has(t.etat))) return null;
+    const compte = d.compte ? ((S.comptes || []).find((c) => c.id === d.compte) || { nom: d.compte }).nom : null;
+    const moteur = libelleMoteurImage(d.moteur) + (compte ? ', ' + compte : '');
+    const cout = d.cout > 0 ? ' · ' + tr('{n} $', { n: d.cout.toLocaleString(locale(), { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }) : '';
+    const texte = d.statut === 'en_cours' ? '⏳ ' + tr('en cours de création ({moteur})', { moteur })
+      : d.statut === 'ok' ? tr('créée ({moteur})', { moteur }) + cout
+      : tr('pas créée ({moteur}) : l’agent la décrit dans son rapport', { moteur });
+    return [h('dt', {}, tr('Image')), h('dd', {}, texte, d.chemin ? h('div', { class: 'meta' }, d.chemin) : null)];
   }
 
   // Dossier supprimé ou archivé : la fiche ouverte d'une de ses tâches se ferme ; fil, demandes et cloche se mettent à jour.
@@ -2301,9 +2369,15 @@ export class Interface {
       this.conso.maj();
       return;
     }
-    if (ev.type === 'codex-installation' || ev.type === 'prerequis') {
+    if (ev.type === 'codex-installation') {
       this.parametres.maj();
       this.accueil.maj();
+      return;
+    }
+    if (ev.type === 'priorites') {
+      // changé ici, dans un autre onglet ou par Coût › mode avancé : Réglages › Priorités le montre tout de suite
+      if (recevoirPriorites(this.parametres, ev) && this.parametres.section === 'priorites') this.parametres.maj();
+      if (this.onglet === 'journal') this.majJournal();
       return;
     }
     if (ev.type === 'comptes') {

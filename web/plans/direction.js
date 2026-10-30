@@ -190,7 +190,7 @@ function carteRepaire() {
   m('fauteuil_dg', 6, 1, { dir: 'sw' });
   m('dir_chat', 5, 1);
   m('dir_bouton', 8, 2);
-  for (let x = 5; x <= 7; x++) m('dir_trappe', x, 3, { passage: true, conn: { w: x > 5, e: x < 7 } });
+  for (let x = 5; x <= 7; x++) m('dir_trappe', x, 3, { sol: true, conn: { w: x > 5, e: x < 7 } });
   m('dir_requins', 5, 4, { w: 3, h: 2 });
   m('dir_diamant', 9, 0);
 

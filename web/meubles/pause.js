@@ -34,6 +34,23 @@ function ovale(g, cx, cy, rx, ry, col) {
   }
 }
 
+// Bulle de texte des easter eggs, la pointe en bas à gauche sur (x, y) (en bas à droite si `gauche` : la bulle
+// s'étend alors vers la gauche) ; `ech` : taille du texte (1 ou 2). Elle est dessinée avec l'animation du meuble :
+// les meubles plus en avant passent devant, d'où le choix du côté.
+function bulle(g, O, txt, x, y, col, ech = 1, gauche = false) {
+  const tc = O.texteCanvas(txt, col);
+  const w = tc.width * ech + 8;
+  const h = tc.height * ech + 6;
+  const bx = Math.round(x) - (gauche ? w : 0);
+  const by = Math.round(y) - h - 4;
+  O.cadre(g, bx, by, w, h, '#15151f', '#fff4d6');
+  g.drawImage(tc, bx + 4, by + 3, tc.width * ech, tc.height * ech);
+  g.fillStyle = '#15151f';
+  const px = gauche ? bx + w - 6 : bx + 3;
+  g.fillRect(px, by + h, 3, 3);
+  g.fillRect(gauche ? px + 2 : px - 2, by + h + 2, 2, 2);
+}
+
 // Texte posé sur une face « y constant » (il descend de 1 pixel tous les 2 vers la droite).
 function texteBiais(g, O, txt, x, y, col) {
   const t = O.texteCanvas(txt, col);
@@ -570,6 +587,22 @@ function glaciere(it, typeTheme, etat, O) {
 // Château de sable : quatre tours, un donjon et son drapeau ; seau et pelle à côté.
 const SABLE_CHATEAU = '#e2bf78';
 function chateau(it, typeTheme, etat, O) {
+  // easter egg, après l'écroulement (phases 2 et 3) : un tas de sable où le mât du drapeau tient encore debout
+  if (etat.effet >= 2) {
+    return feuille(O, 0, 0, 1, 1, 52, (g, P) => {
+      const [cx, cy] = P(0.5, 0.5, 0);
+      for (let z = 0; z <= 13; z++) {
+        const r = 25 * Math.pow(1 - z / 14, 0.55);
+        ovale(g, cx, cy - z, Math.round(r), Math.round(r / 2), O.nuance(SABLE_CHATEAU, -0.14 + z * 0.012));
+      }
+      // mottes et bout de tour rescapé
+      O.prisme(g, P, 0.66, 0.66, 0.82, 0.82, 2, 11, SABLE_CHATEAU);
+      for (const [u, v] of [[0.16, 0.78], [0.86, 0.34], [0.3, 0.12]]) O.prisme(g, P, u - 0.05, v - 0.05, u + 0.05, v + 0.05, 0, 3, O.nuance(SABLE_CHATEAU, -0.05));
+      O.prisme(g, P, 0.49, 0.49, 0.51, 0.51, 12, 44, '#5a4a3a');
+      O.prisme(g, P, 0.84, 0.02, 0.98, 0.16, 0, 8, '#e8452f');
+      O.prisme(g, P, 0.82, 0.0, 1.0, 0.18, 8, 9, '#c0392b');
+    });
+  }
   return feuille(O, 0, 0, 1, 1, 52, (g, P) => {
     O.prisme(g, P, 0.08, 0.08, 0.92, 0.92, 0, 4, O.nuance(SABLE_CHATEAU, -0.06));
     const tour = (u, v, h) => {
@@ -692,9 +725,9 @@ function mns(it, typeTheme, etat, O) {
     O.quadX(g, P, 0.22, 0.3, 0.7, 58, 66, '#e8452f');
     O.quadX(g, P, 0.22, 0.46, 0.54, 59, 65, '#ffffff');
     O.quadX(g, P, 0.22, 0.38, 0.62, 61, 63, '#ffffff');
-    // drapeau
+    // drapeau (rouge pendant l'alerte au requin, l'easter egg)
     O.prisme(g, P, 0.84, 0.04, 0.88, 0.08, 50, 96, '#5a4a3a');
-    O.poly(g, [P(0.88, 0.06, 96), P(0.88, 0.42, 92), P(0.88, 0.06, 86)], '#3aa655');
+    O.poly(g, [P(0.88, 0.06, 96), P(0.88, 0.42, 92), P(0.88, 0.06, 86)], etat.effet ? '#e8452f' : '#3aa655');
     // bouée accrochée
     const [x, y] = P(0.86, 0.5, 40);
     ovale(g, x, y, 5, 6, '#e8452f');
@@ -747,6 +780,110 @@ function imgCrabe(O, f) {
 }
 // Meuble sans image fixe : tout est dessiné par son animation.
 const vide = (it, typeTheme, etat, O) => ({ c: O.creerCanvas(1, 1), dx: 0, dy: 0 });
+
+// ---------- easter eggs de la plage ----------
+// Le maître-nageur siffle et hisse le drapeau rouge ; un aileron de requin descend la mer, le canard en plastique
+// saute de frayeur à son passage et les bouées tanguent. Position de l'aileron (cases du monde) `depuis` ms après le
+// clic sur la chaise haute (`source`), ou null avant son arrivée.
+const REQUIN = { depart: 1500, fin: 8000 };
+function aileron(effet) {
+  const p = (effet.depuis - REQUIN.depart) / (REQUIN.fin - REQUIN.depart);
+  if (p < 0) return null;
+  const gy = effet.source.y - 0.6 + p * 13.2;
+  return { gx: effet.source.x + 2.2 + Math.sin(gy * 1.1) * 0.3, gy };
+}
+// Proximité (0 à 1) de l'aileron et d'une case (cx, cy) de la mer.
+function presRequin(effet, cx, cy) {
+  const a = effet && aileron(effet);
+  if (!a) return 0;
+  return Math.max(0, 1 - Math.hypot(a.gx - cx, a.gy - cy) / 1.8);
+}
+function animeMns(g, it, tx, ty, t, O, effet) {
+  if (!effet) return;
+  const P = O.projeteur(tx + 32, ty);
+  const d = effet.depuis;
+  if (d < 2800) {
+    // coups de sifflet
+    const [x, y] = P(0.3, 0.5, 74);
+    const v = Math.round(Math.sin(d / 35));
+    g.fillStyle = '#ffffff';
+    for (let k = 0; k < 3; k++) g.fillRect(Math.round(x) - 10 - k * 3, Math.round(y) - 6 + k * 4 + v, 4, 1);
+    bulle(g, O, O.enseigne('PRIIIT !', 'TWEEET!'), x - 4 + v, y - 6, ROUGE, d < 200 ? 1 : 2, true);
+  }
+  const a = aileron(effet);
+  if (!a) return;
+  const u = a.gx - it.x;
+  const w = a.gy - it.y;
+  const [x0, y0] = P(u, w, 0);
+  const X = Math.round(x0);
+  const Y = Math.round(y0);
+  // sillage d'écume derrière l'aileron (il descend vers +y : en bas à gauche de l'écran)
+  g.fillStyle = 'rgba(255,255,255,0.8)';
+  for (let k = 1; k <= 4; k++) {
+    const [sx, sy] = P(u, w - k * 0.2, 0);
+    const l = 6 - k;
+    g.fillRect(Math.round(sx) - l - 3, Math.round(sy) + 1, l, 1);
+    g.fillRect(Math.round(sx) + 4, Math.round(sy) + 1, l, 1);
+  }
+  g.fillRect(X - 11, Y + 1, 23, 1);
+  g.fillRect(X - 7, Y + 3, 15, 1);
+  // l'aileron, bord d'attaque vers l'avant
+  O.poly(g, [[X - 11, Y + 2], [X + 4, Y - 20], [X + 11, Y + 2]], O.CONTOUR);
+  O.poly(g, [[X - 9, Y + 1], [X + 4, Y - 18], [X + 10, Y + 1]], '#6a7a8c');
+  O.poly(g, [[X + 2, Y + 1], [X + 4, Y - 18], [X + 10, Y + 1]], '#4e5b6b');
+  // la musique du film, en rythme
+  if (Math.floor(d / 450) % 2 === 0) {
+    const tc = O.texteCanvas(O.enseigne('TA-DAM', 'DUN-DUN'), '#ffffff', '#15151f');
+    g.drawImage(tc, X + 12, Y - 30);
+  }
+}
+// Le château de sable tremble, un crabe sort par la porte… et tout s'écroule ; le crabe danse sur le tas.
+function animeChateau(g, it, tx, ty, t, O, effet) {
+  if (!effet) return;
+  const P = O.projeteur(tx + 32, ty);
+  const d = effet.depuis;
+  const f = Math.floor(d / 160) % 2;
+  if (effet.phase === 1) {
+    const v = Math.round(Math.sin(d / 28) * 1.5);
+    const [cx, cy] = P(0.5, 0.5, 22);
+    // grains qui tombent des tours, traits de vibration
+    g.fillStyle = '#c9a35a';
+    for (let k = 0; k < 7; k++) g.fillRect(Math.round(cx - 20 + k * 7 + v), Math.round(cy - 4 + ((d / 9 + k * 13) % 26)), 1, 2);
+    g.fillStyle = '#ffffff';
+    for (let k = 0; k < 3; k++) {
+      g.fillRect(Math.round(cx - 30 - k * 3 - v), Math.round(cy + k * 5), 4, 1);
+      g.fillRect(Math.round(cx + 27 + k * 3 + v), Math.round(cy + k * 5), 4, 1);
+    }
+    // le crabe pointe le bout des pinces à la porte, puis sort
+    if (d > 500) {
+      const sortie = Math.min(1, (d - 500) / 500);
+      const [px, py] = P(0.5, 0.8 + sortie * 0.18, 2);
+      g.drawImage(imgCrabe(O, f), Math.round(px) - 9, Math.round(py) - 9);
+      if (d > 1000) bulle(g, O, '!', px + 6, py - 8, ROUGE);
+    }
+    return;
+  }
+  if (effet.phase === 2) {
+    // nuage de sable
+    const e = (d - 1600) / 400;
+    const [cx, cy] = P(0.5, 0.5, 8);
+    for (let k = 0; k < 10; k++) {
+      const a = (k / 10) * Math.PI * 2;
+      const r = 6 + e * 20;
+      const x = cx + Math.cos(a) * r;
+      const y = cy + Math.sin(a) * r * 0.5 - e * 8;
+      ovale(g, x, y, 8, 5, '#b8955a');
+      ovale(g, x - 1, y - 1, 7, 4, '#ecd29a');
+    }
+    ovale(g, cx, cy - 4 - e * 8, 12, 7, '#f2dcaa');
+    return;
+  }
+  // phase 3 : le crabe danse sur le tas en claquant des pinces
+  const [x, y] = P(0.66, 0.66, 9);
+  const pas = Math.floor(d / 300) % 2 ? -2 : 2;
+  g.drawImage(imgCrabe(O, f), Math.round(x) - 9 + pas, Math.round(y) - 10 - (f ? 2 : 0));
+  if (d < 5600) bulle(g, O, O.enseigne('CLAC CLAC !', 'SNAP SNAP!'), x + 6, y - 10, ROUGE);
+}
 
 // ---------- jeux de la plage ----------
 // Volley : la balle passe d'un joueur à l'autre par-dessus le filet (case du filet = (6, 6) ; centre du terrain 6.5).
@@ -1205,6 +1342,69 @@ function jeuForce(g, it, tx, ty, t, actif, O) {
   }
 }
 
+// Easter egg du test de force : un coup de géant ! Les feux de l'échelle s'allument jusqu'en haut, la cloche sonne
+// (« DING ! ») et un feu d'artifice part au-dessus.
+function animeForce(g, it, tx, ty, t, O, effet) {
+  if (!effet) return;
+  const P = O.projeteur(tx + 32, ty);
+  const d = effet.depuis;
+  const cols = ['#3aa655', '#9be03a', '#ffd23f', '#ff9a3a', '#e8452f', '#b8323a'];
+  // les feux s'éteignent, puis se rallument un à un de bas en haut ; arrivés en haut, ils clignotent tous
+  const n = d < 1200 ? Math.min(6, Math.floor(d / 180)) : 6;
+  const clign = d >= 1200 && Math.floor(d / 150) % 2 === 1;
+  for (let k = 0; k < 6; k++) {
+    const allume = k < n;
+    O.quadY(g, P, 0.24, 0.37, 0.63, 12 + k * 15, 24 + k * 15, !allume ? O.nuance(cols[k], -0.6) : clign ? '#ffffff' : O.nuance(cols[k], 0.25));
+    if (allume && !clign) O.quadY(g, P, 0.24, 0.42, 0.58, 15 + k * 15, 21 + k * 15, '#fff6c8');
+  }
+  O.quadY(g, P, 0.24, 0.485, 0.515, 10, 100, '#3a2a1a');
+  // le palet file avec les feux
+  if (d < 1200) {
+    const [px, py] = P(0.5, 0.25, 12 + Math.min(1, d / 1080) * 86);
+    g.fillStyle = '#ffffff';
+    g.fillRect(Math.round(px) - 4, Math.round(py) - 1, 9, 3);
+    g.fillStyle = 'rgba(255,255,255,0.5)';
+    g.fillRect(Math.round(px) - 1, Math.round(py) + 3, 3, 8);
+  }
+  const [bx, by] = P(0.5, 0.18, 108);
+  if (d < 1100) return;
+  // la cloche sonne
+  const v = Math.round(Math.sin(d / 22) * 2);
+  ovale(g, bx + v, by, 7, 6, O.CONTOUR);
+  ovale(g, bx + v, by, 6, 5, '#ffe27a');
+  g.fillStyle = '#ffffff';
+  g.fillRect(Math.round(bx + v) - 3, Math.round(by) - 3, 2, 2);
+  for (const [dx, dy] of [[-12, -6], [11, -6], [-13, 1], [12, 1], [0, -12]]) g.fillRect(Math.round(bx + dx), Math.round(by + dy), 2, 2);
+  if (d < 3600) bulle(g, O, O.enseigne('DING !', 'DING!'), bx + 12, by - 6, ROUGE, d < 1250 ? 1 : 2);
+  // feu d'artifice : une fusée monte, puis un bouquet s'ouvre et retombe
+  const bouquets = [[1500, -40, -50, '#ff5fa2'], [2200, 34, -72, '#3df2ff'], [2900, -16, -96, '#ffd23f'], [3600, 40, -38, '#7dff6a']];
+  for (const [t0, dx, dy, col] of bouquets) {
+    const e = (d - t0) / 1500;
+    if (e < 0 || e >= 1) continue;
+    if (e < 0.2) {
+      const m = e / 0.2;
+      g.fillStyle = '#fff4d6';
+      g.fillRect(Math.round(bx + dx * m), Math.round(by + dy * m), 2, 2);
+      g.fillStyle = 'rgba(255,214,140,0.6)';
+      g.fillRect(Math.round(bx + dx * (m - 0.15)), Math.round(by + dy * (m - 0.15)), 1, 2);
+      continue;
+    }
+    const m = (e - 0.2) / 0.8;
+    const r = 4 + (1 - (1 - m) * (1 - m)) * 26;
+    g.globalAlpha = Math.max(0, 1 - m * m);
+    for (let k = 0; k < 18; k++) {
+      const a = (k / 18) * Math.PI * 2;
+      const x = Math.round(bx + dx + Math.cos(a) * r);
+      const y = Math.round(by + dy + Math.sin(a) * r * 0.9 + m * m * 8);
+      g.fillStyle = col;
+      g.fillRect(x, y, 2, 2);
+      g.fillStyle = '#ffffff';
+      g.fillRect(Math.round(bx + dx + Math.cos(a) * r * 0.55), Math.round(by + dy + Math.sin(a) * r * 0.5 + m * m * 6), 1, 1);
+    }
+    g.globalAlpha = 1;
+  }
+}
+
 // Machine à pinces : vitrine, peluches et pince qui se balade.
 function pince(it, typeTheme, etat, O) {
   const col = ['#e8457f', '#2ab0c0'][(it.variante || 0) % 2];
@@ -1353,12 +1553,8 @@ function passeTete(it, typeTheme, etat, O) {
     ovale(g, hx, hy, 9, 9, '#000000');
     g.restore();
   };
-  // le sprite principal reprend la planche (pour les aperçus, qui ne dessinent que lui) ; en jeu, `avant` la
-  // redessine devant la personne
-  const s = feuille(O, -0.4, -0.4, 1.4, 1.4, 90, (g, P) => {
-    O.prisme(g, P, 0.66, 0.66, 0.72, 0.72, 0, 6, '#5a3a1a');
-    planche(g, P);
-  });
+  // la planche est dans `avant`, devant la personne ; le sprite principal n'a que le piquet qui la tient
+  const s = feuille(O, -0.4, -0.4, 1.4, 1.4, 90, (g, P) => O.prisme(g, P, 0.66, 0.66, 0.72, 0.72, 0, 6, '#5a3a1a'));
   s.avant = feuille(O, -0.4, -0.4, 1.4, 1.4, 90, planche);
   return s;
 }
@@ -1423,33 +1619,82 @@ function banc(it, typeTheme, etat, O) {
   });
 }
 
-// Ballons gonflés à l'hélium, attachés à un poids (ils se balancent : voir ANIMES).
+// Ballons gonflés à l'hélium, attachés à un poids. Ils sont dans le sprite (on peut cliquer dessus) ; pendant
+// l'easter egg, le sprite n'a plus que le poids et l'animation les dessine.
+const COULEURS_BALLONS = ['#ff5fa2', '#ffd23f', '#3df2ff', '#7dff6a', '#ff8a2a', '#c9a0ff', '#e8452f'];
+const POS_BALLONS = [[-9, -58], [6, -62], [-2, -70], [12, -50], [-14, -48], [3, -50], [-6, -80]];
+function ballon(g, O, x, y, k, ech = 1) {
+  const X = Math.round(x);
+  const Y = Math.round(y);
+  const rx = Math.max(1, Math.round(5 * ech));
+  const ry = Math.max(1, Math.round(6 * ech));
+  ovale(g, X, Y, rx + 1, ry + 1, O.CONTOUR);
+  ovale(g, X, Y, rx, ry, COULEURS_BALLONS[k]);
+  if (ech < 0.6) return;
+  g.fillStyle = 'rgba(255,255,255,0.7)';
+  g.fillRect(X - 3, Y - 4, 2, 2);
+  g.fillStyle = O.nuance(COULEURS_BALLONS[k], -0.3);
+  g.fillRect(X - 1, Y + ry, 2, 2);
+}
 function ballons(it, typeTheme, etat, O) {
-  return O.spriteTuile(20, (g, P) => {
+  const poids = (g, P) => {
     O.prisme(g, P, 0.4, 0.4, 0.6, 0.6, 0, 8, '#5a5a66');
     O.prisme(g, P, 0.46, 0.46, 0.54, 0.54, 8, 10, '#3a3a46');
+  };
+  if (etat.effet) return feuille(O, -0.1, -0.1, 1.1, 1.1, 20, poids);
+  return feuille(O, -0.6, -0.6, 1.6, 1.6, 100, (g, P) => {
+    poids(g, P);
+    const [bx, by] = P(0.5, 0.5, 10);
+    POS_BALLONS.forEach(([dx, dy], k) => ballon(g, O, bx + dx, by + dy, k));
+  }, (g, P) => {
+    const [bx, by] = P(0.5, 0.5, 10);
+    for (const [dx, dy] of POS_BALLONS) trait(g, [bx, by], [bx + dx, by + dy + 8], 'rgba(240,240,240,0.7)');
   });
 }
-const COULEURS_BALLONS = ['#ff5fa2', '#ffd23f', '#3df2ff', '#7dff6a', '#ff8a2a', '#c9a0ff', '#e8452f'];
-function animeBallons(g, it, tx, ty, t, O) {
+// Easter egg des ballons : celui du haut éclate (« POP ! »), les autres filent vers le ciel, puis de nouveaux
+// ballons se regonflent un à un.
+function animeBallons(g, it, tx, ty, t, O, effet) {
+  if (!effet) return;
   const P = O.projeteur(tx + 32, ty);
   const [bx, by] = P(0.5, 0.5, 10);
-  const pos = [[-9, -58], [6, -62], [-2, -70], [12, -50], [-14, -48], [3, -50], [-6, -80]];
-  pos.forEach(([dx, dy], k) => {
-    const x = bx + dx + Math.sin(t / 900 + k) * 2;
-    const y = by + dy + Math.sin(t / 700 + k * 2) * 1.5;
-    trait(g, [bx, by], [x, y + 6], 'rgba(240,240,240,0.7)');
+  const d = effet.depuis;
+  POS_BALLONS.forEach(([dx, dy], k) => {
+    if (effet.phase === 3) {
+      const e = Math.min(1, (d - 4500 - k * 220) / 700);
+      if (e <= 0) return;
+      const x = bx + dx * e;
+      const y = by + dy * e;
+      trait(g, [bx, by], [x, y + 8 * e], 'rgba(240,240,240,0.7)');
+      ballon(g, O, x, y, k, 0.3 + e * 0.7);
+      return;
+    }
+    if (k === 6) return; // éclaté
+    const s = effet.phase === 1 ? 0 : Math.max(0, (d - 400 - k * 120) / 1000);
+    const x = bx + dx + Math.sin(s * 2.2 + k) * 7 * s;
+    const y = by + dy - s * 28 - s * s * 36;
+    if (s === 0) trait(g, [bx, by], [x, y + 8], 'rgba(240,240,240,0.7)');
+    else trait(g, [x, y + 8], [x + Math.sin(s * 6 + k) * 3, y + 20], 'rgba(240,240,240,0.7)');
+    ballon(g, O, x, y, k);
   });
-  pos.forEach(([dx, dy], k) => {
-    const x = Math.round(bx + dx + Math.sin(t / 900 + k) * 2);
-    const y = Math.round(by + dy + Math.sin(t / 700 + k * 2) * 1.5);
-    ovale(g, x, y, 6, 7, O.CONTOUR);
-    ovale(g, x, y, 5, 6, COULEURS_BALLONS[k]);
-    g.fillStyle = 'rgba(255,255,255,0.7)';
-    g.fillRect(x - 3, y - 4, 2, 2);
-    g.fillStyle = O.nuance(COULEURS_BALLONS[k], -0.3);
-    g.fillRect(x - 1, y + 6, 2, 2);
-  });
+  // l'éclatement : étoile, lambeaux de caoutchouc, « POP ! »
+  if (d < 1600) {
+    const [dx, dy] = POS_BALLONS[6];
+    const x = Math.round(bx + dx);
+    const y = Math.round(by + dy);
+    if (d < 260) {
+      const r = 4 + Math.round(d / 30);
+      g.fillStyle = '#ffffff';
+      g.fillRect(x - r, y, r * 2 + 1, 1);
+      g.fillRect(x, y - r, 1, r * 2 + 1);
+      g.fillRect(x - 2, y - 2, 5, 5);
+    }
+    g.fillStyle = COULEURS_BALLONS[6];
+    for (let k = 0; k < 5; k++) {
+      const a = k * 1.3;
+      g.fillRect(Math.round(x + Math.cos(a) * (4 + d / 40)), Math.round(y + Math.sin(a) * 4 + d / 25), 2, 1);
+    }
+    bulle(g, O, O.enseigne('POP !', 'POP!'), x + 6, y - 4, '#c4456f', d < 120 ? 1 : 2);
+  }
 }
 
 // Barrière des autos tamponneuses : bords du fond dans le dessin, bords de devant dans la couche « avant »
@@ -1477,12 +1722,10 @@ function barrierePiste(it, typeTheme, etat, O) {
     if (b.includes('s') && b.includes('w')) poteau(g, P, 0, 1);
     if (b.includes('n') && b.includes('e')) poteau(g, P, 1, 0);
   };
-  // le sprite principal reprend aussi les bords de devant (pour les aperçus) ; en jeu, `avant` les redessine
   const s = feuille(O, -0.1, -0.1, 1.1, 1.1, 24, (g, P) => {
     if (b.includes('n')) rail(g, P, 'n');
     if (b.includes('w')) rail(g, P, 'w');
     if (b.includes('n') && b.includes('w')) poteau(g, P, 0, 0);
-    devant(g, P);
   });
   if (b.includes('s') || b.includes('e')) s.avant = feuille(O, -0.1, -0.1, 1.1, 1.1, 24, devant);
   return s;
@@ -1534,7 +1777,6 @@ function auto(it, typeTheme, etat, O) {
     g.fillStyle = '#ffffff';
     g.fillRect(Math.round(x) - 2, Math.round(y) - 2, 4, 4);
   };
-  // le sprite principal reprend aussi la caisse de devant (pour les aperçus) ; en jeu, `avant` la redessine
   const s = feuille(O, -0.05, -0.05, 1.05, 1.05, 84, (g, P) => {
     O.prisme(g, P, 0.06, 0.06, 0.94, 0.94, 0, 6, '#15151f');
     O.prisme(g, P, 0.1, 0.1, 0.9, 0.9, 6, 9, O.nuance(col, -0.25));
@@ -1544,7 +1786,6 @@ function auto(it, typeTheme, etat, O) {
     // flancs du fond
     if (dir === 'se' || dir === 'nw') O.prisme(g, P, 0.1, 0.1, 0.9, 0.18, 6, 16, col);
     else O.prisme(g, P, 0.1, 0.1, 0.18, 0.9, 6, 16, col);
-    devant(g, P);
   });
   s.avant = feuille(O, -0.05, -0.05, 1.05, 1.05, 84, devant);
   return s;
@@ -1672,19 +1913,30 @@ export const ANIMES = {
   pince: animePince,
   ballons: animeBallons,
   auto: animeAuto,
-  bouee: (g, it, tx, ty, t, O) => {
+  mns: animeMns,
+  chateau_sable: animeChateau,
+  force: animeForce,
+  // les bouées tanguent fort quand l'aileron passe (easter egg du maître-nageur)
+  bouee: (g, it, tx, ty, t, O, effet) => {
     const [x, y] = O.projeteur(tx + 32, ty)(0.5, 0.5, 0);
-    const b = Math.round(Math.sin(t / 700 + it.y) * 1.5);
+    const pres = presRequin(effet, it.x + 0.5, it.y + 0.5);
+    const b = Math.round(Math.sin(t / 700 + it.y) * 1.5 + Math.sin(t / 120) * pres * 4);
     g.fillStyle = 'rgba(255,255,255,0.5)';
     g.fillRect(Math.round(x) - 14, Math.round(y) + 3, 28, 1);
     g.drawImage(imgBouee(O, it.variante || 0), Math.round(x) - 13, Math.round(y) - 8 + b);
   },
-  canard: (g, it, tx, ty, t, O) => {
+  // le canard saute de frayeur quand l'aileron passe (easter egg du maître-nageur)
+  canard: (g, it, tx, ty, t, O, effet) => {
     const [x, y] = O.projeteur(tx + 32, ty)(0.5, 0.5, 0);
-    const b = Math.round(Math.sin(t / 800) * 1.5);
+    // il s'élève à l'approche de l'aileron (qui passe dessous), en battant des ailes de panique
+    const pres = presRequin(effet, it.x + 0.5, it.y + 0.5);
+    const saut = pres > 0 ? Math.round(30 * Math.min(1, pres * 1.5) + Math.sin(t / 60) * 2 * Math.min(1, pres * 3)) : 0;
+    const b = Math.round(Math.sin(t / 800) * 1.5) - saut;
     g.fillStyle = 'rgba(255,255,255,0.5)';
     g.fillRect(Math.round(x) - 15, Math.round(y) + 3, 30, 1);
+    if (saut > 4) ovale(g, x, y + 2, 11, 3, 'rgba(0,40,80,0.35)');
     g.drawImage(imgCanard(O), Math.round(x) - 17, Math.round(y) - 28 + b);
+    if (pres > 0.15) bulle(g, O, O.enseigne('COIN !', 'QUACK!'), x - 12, y - 26 + b, '#c48a0a', 1, true);
   },
   crabe: (g, it, tx, ty, t, O) => {
     const c = (t % 9000) / 9000;
@@ -1693,6 +1945,15 @@ export const ANIMES = {
     g.drawImage(imgCrabe(O, Math.floor(t / 150) % 2), Math.round(x) - 9, Math.round(y) - 8);
   },
 };
+// Easter eggs (web/clics.js) : chaise du maître-nageur (alerte au requin), château de sable (le crabe), test de force
+// (coup de géant, feu d'artifice), ballons (l'un éclate, les autres s'envolent, de nouveaux se regonflent).
+export const CLICS = {
+  mns: { duree: 8000, declenche: ['canard', 'bouee'], phases: [REQUIN.depart] },
+  chateau_sable: { duree: 6500, phases: [1600, 2000] },
+  force: { duree: 5500 },
+  ballons: { duree: 7000, phases: [400, 4500] },
+};
+
 export const JEUX = {
   filet: jeuVolley, serviette: jeuRaquettes, chateau_sable: jeuChateau, boules: jeuPetanque,
   stand_fond: jeuStand, force: jeuForce, bassin: jeuPeche, auto: jeuAutos,

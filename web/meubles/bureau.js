@@ -57,31 +57,8 @@ function cylindreX(O, g, P, x0, x1, cy, cz, r, col, { bombe = 0, cercles = [], c
   }
 }
 
-// Couleur des tissus des box selon le thème de l'étage : du gris des années 90, teinté du thème.
-const TEINTE_BOX = { etudes: '#7f8f6a', roblox: '#2f6fde', unreal: '#3a3f73', atelier3d: '#8b8f96', bac: '#c9a400', direction: '#7a2a2a', hall: '#6d86b0' };
-
 // ---------- Labyrinthe de box ----------
-function panneauBox(it, look, etat, O) {
-  const tissu = O.melange(TEINTE_BOX[look] || '#8d8a80', '#a29f95', 0.55);
-  const cadre = '#cfcbc0';
-  const n = it.bord === 'n';
-  const rnd = graine(O, it);
-  return O.spriteTuile(40, (g, P) => {
-    const Pr = (a0, b0, a1, b1, z0, z1, col) => (n ? O.prisme(g, P, a0, b0, a1, b1, z0, z1, col) : O.prisme(g, P, b0, a0, b1, a1, z0, z1, col));
-    Pr(0, 0, 1, 0.07, 0, 3, O.nuance(cadre, -0.35));
-    Pr(0, 0.01, 1, 0.06, 3, 29, tissu);
-    // grain du tissu sur la face visible
-    for (let i = 0; i < 16; i++) {
-      const u = 0.08 + rnd() * 0.84;
-      const z = 5 + rnd() * 22;
-      O.pixel(g, n ? P(u, 0.06, z) : P(0.06, u, z), O.nuance(tissu, rnd() < 0.5 ? -0.12 : 0.1));
-    }
-    Pr(0, -0.005, 1, 0.075, 29, 32, cadre);
-    Pr(0, -0.01, 0.07, 0.08, 0, 33, cadre);
-    Pr(0.93, -0.01, 1, 0.08, 0, 33, cadre);
-  });
-}
-
+// (les panneaux de tissu des box sont des cloisons pleines du plan : web/plans/bureau.js)
 function retourBox(it, look, etat, O) {
   const T = O.theme(look);
   const col = T.bureau;
@@ -170,7 +147,8 @@ function photocopieuse(it, look, etat, O) {
   });
 }
 
-function animePhotocopieuse(g, it, tx, ty, t, O) {
+function animePhotocopieuse(g, it, tx, ty, t, O, effet) {
+  if (effet) return effetPhotocopieuse(g, it, tx, ty, O, effet);
   const P = O.projeteur(tx + 32, ty);
   // voyant vert, et de temps en temps la barre lumineuse du scanner sous le capot
   O.pixel(g, P(0.82, 0.8, 37), Math.floor(t / 700) % 2 ? '#3dff7a' : '#0f4a22', 2, 1);
@@ -556,8 +534,25 @@ function coffre(it, look, etat, O) {
   });
 }
 
-function animeCoffre(g, it, tx, ty, t, O) {
+function animeCoffre(g, it, tx, ty, t, O, effet) {
   const P = O.projeteur(tx + 32, ty);
+  if (effet) {
+    // easter egg : fontaine de pièces d'or qui retombent en tournant
+    const rnd = O.aleatoire(11);
+    for (let i = 0; i < 16; i++) {
+      const vx = -0.5 + rnd();
+      const vy = -0.5 + rnd();
+      const h = 30 + rnd() * 30;
+      const u = (effet.depuis - i * 150) / 1100;
+      if (u < 0 || u > 1) continue;
+      const [x, y] = P(0.5 + vx * u, 0.5 + vy * u, 18 + h * 4 * u * (1 - u));
+      const large = Math.floor(effet.depuis / 90 + i) % 3;
+      g.fillStyle = O.CONTOUR;
+      g.fillRect(Math.round(x) - 1 - (large ? 1 : 0), Math.round(y) - 1, large ? 5 : 3, 5);
+      g.fillStyle = large === 1 ? '#ffe680' : '#f4c430';
+      g.fillRect(Math.round(x) - (large ? 1 : 0), Math.round(y), large ? 3 : 1, 3);
+    }
+  }
   const pts = [[0.32, 0.42], [0.6, 0.5], [0.46, 0.34], [0.7, 0.62]];
   const k = Math.floor(t / 400) % pts.length;
   const [x, y] = P(pts[k][0], pts[k][1], 19);
@@ -616,10 +611,30 @@ function perroquet(it, look, etat, O) {
   });
 }
 
-function animePerroquet(g, it, tx, ty, t, O) {
-  // ara rouge perché, qui hoche la tête et bat des ailes de temps en temps
+function animePerroquet(g, it, tx, ty, t, O, effet) {
+  // ara rouge perché, qui hoche la tête et bat des ailes de temps en temps ; easter eggs : il s'envole affolé quand les
+  // canons tonnent, il crie « Pièces de huit ! » quand le coffre déborde
   const P = O.projeteur(tx + 32, ty);
+  if (effet && effet.source.type === 'pirate_canon') {
+    const a = effet.depuis / 280;
+    const [cx, cy] = P(0.5, 0.4, 76);
+    const fx = Math.round(cx + Math.cos(a) * 22);
+    const fy = Math.round(cy + Math.sin(a) * 9);
+    const aile = Math.floor(effet.depuis / 90) % 2;
+    g.fillStyle = '#15151f';
+    g.fillRect(fx - 4, fy - 4, 9, 7);
+    g.fillStyle = '#e3342f';
+    g.fillRect(fx - 3, fy - 3, 7, 5);
+    g.fillStyle = '#2f6fde';
+    g.fillRect(fx - 9, fy - (aile ? 6 : 0), 6, 2);
+    g.fillRect(fx + 4, fy - (aile ? 6 : 0), 6, 2);
+    g.fillStyle = '#f6c21c';
+    g.fillRect(fx - (Math.sin(a) > 0 ? 5 : -5), fy + 2, 2, 3);
+    O.phylactere(g, fx, fy - 6, O.enseigne('COUAC !', 'SQUAWK!'), '#a8232a');
+    return;
+  }
   const [x, y] = P(0.5, 0.4, 49);
+  if (effet) O.phylactere(g, x, y - 18, O.enseigne('Pièces de huit !', 'Pieces of eight!'));
   const hoche = Math.floor(t / 600) % 4 === 0 ? 1 : 0;
   const bat = (t % 7000) < 700 && Math.floor(t / 120) % 2;
   const R = (dx, dy, w, h, c) => {
@@ -960,7 +975,6 @@ function decorsPirate(g, cote, longueur, etage, O) {
 
 // ---------- registre ----------
 export const MEUBLES = {
-  box_panneau: panneauBox,
   box_retour: retourBox,
   box_porte_manteau: porteManteau,
   box_classeur: classeur,
@@ -993,6 +1007,9 @@ export const MEUBLES = {
 
 export const ANIMES = {
   box_photocopieuse: animePhotocopieuse,
+  loft_frigo: animeFrigo,
+  loft_moto: animeMoto,
+  pirate_canon: animeCanon,
   loft_comptoir: animeComptoir,
   pirate_mat: animeMat,
   pirate_coffre: animeCoffre,
@@ -1000,6 +1017,146 @@ export const ANIMES = {
   pirate_perroquet: animePerroquet,
   pirate_rhum: animeTonneauRhum,
 };
+
+// ---------- easter eggs (web/clics.js) ----------
+// Labyrinthe de box : bourrage de la photocopieuse. Loft : un manchot sort du frigo, la moto démarre.
+// Bateau pirate : bordée de canons (le perroquet s'affole), fontaine de pièces d'or du coffre.
+export const CLICS = {
+  box_photocopieuse: { duree: 4200 },
+  loft_frigo: { duree: 4400 },
+  loft_moto: { duree: 3200 },
+  pirate_canon: { duree: 3800, declenche: ['pirate_canon', 'pirate_perroquet'] },
+  pirate_coffre: { duree: 3600, declenche: ['pirate_perroquet'] },
+};
+
+const MANCHOT = [
+  '..kkkk..',
+  '.kkkkkk.',
+  'kkwkkwkk',
+  'kkkookkk',
+  'kkwwwwkk',
+  'kkwwwwkk',
+  'kkwwwwkk',
+  '.kwwwwk.',
+  '..kwwk..',
+  '.oo..oo.',
+];
+const COULEURS_MANCHOT = { k: '#1b1d24', w: '#f4f2ea', o: '#ff9a1f' };
+
+// Bouffée de fumée (ou de givre) : carré qui grossit et pâlit, u de 0 à 1.
+function bouffee(g, x, y, u, rgb = '120,120,130') {
+  const r = 2 + Math.round(u * 5);
+  g.fillStyle = `rgba(${rgb},${(0.75 * (1 - u)).toFixed(2)})`;
+  g.fillRect(Math.round(x) - r, Math.round(y) - r, r * 2, r * 2);
+}
+
+function effetPhotocopieuse(g, it, tx, ty, O, effet) {
+  // bourrage papier : voyant rouge, feuilles qui giclent du bac de sortie
+  const P = O.projeteur(tx + 32, ty);
+  const d = effet.depuis;
+  O.pixel(g, P(0.82, 0.8, 37), Math.floor(d / 180) % 2 ? '#ff3030' : '#5a1010', 2, 1);
+  const rnd = O.aleatoire(5);
+  for (let i = 0; i < 12; i++) {
+    const vx = 0.4 + rnd() * 1.6;
+    const vy = -0.6 + rnd() * 1.2;
+    const u = (d - i * 220) / 1300;
+    if (u < 0 || u > 1) continue;
+    const [x, y] = P(0.98 + vx * u, 0.45 + vy * u, 22 + 40 * u - 52 * u * u);
+    const tourne = Math.floor(d / 110 + i) % 2;
+    g.fillStyle = O.CONTOUR;
+    g.fillRect(Math.round(x) - 1, Math.round(y) - 1, tourne ? 9 : 6, tourne ? 6 : 9);
+    g.fillStyle = '#ffffff';
+    g.fillRect(Math.round(x), Math.round(y), tourne ? 7 : 4, tourne ? 4 : 7);
+    g.fillStyle = '#9aa3ad';
+    g.fillRect(Math.round(x) + 1, Math.round(y) + 1, tourne ? 4 : 2, 1);
+  }
+  if (d < 3200) {
+    const [cx, cy] = P(0.5, 0.5, 42);
+    O.phylactere(g, cx, cy, O.enseigne('BOURRAGE !', 'PAPER JAM!'), '#a8232a');
+  }
+}
+
+function animeFrigo(g, it, tx, ty, t, O, effet) {
+  // un manchot sort du frigo dans un nuage de givre, se dandine, dit « Brr ! » et rentre au frais
+  if (!effet) return;
+  const P = O.projeteur(tx + 32, ty);
+  const d = effet.depuis;
+  const u = d / effet.duree;
+  const sortie = u < 0.2 ? u / 0.2 : u > 0.8 ? (1 - u) / 0.2 : 1;
+  const dandine = Math.sin(d / 160) * 0.12 * (u > 0.2 && u < 0.8 ? 1 : 0);
+  for (let i = 0; i < 6; i++) {
+    const v = (d / 900 + i / 6) % 1;
+    const [x, y] = P(0.2 + i * 0.12, 0.8 + v * 0.3, 20 + i * 6 + v * 10);
+    bouffee(g, x, y, v, '210,240,255');
+  }
+  const [x, y] = P(0.5 + dandine, 0.78 + 0.5 * sortie, 0);
+  O.grillePixels(g, x, y - (Math.floor(d / 160) % 2), MANCHOT, COULEURS_MANCHOT, 2);
+  if (u > 0.25 && u < 0.75) O.phylactere(g, x, y - 24, O.enseigne('Brr !', 'Brr!'), '#1f4a7a', '#eaf6ff');
+}
+
+function animeMoto(g, it, tx, ty, t, O, effet) {
+  // la moto démarre : phare, pot d'échappement qui fume, vibrations, « VROUM ! »
+  if (!effet) return;
+  const P = O.projeteur(tx + 32, ty);
+  const d = effet.depuis;
+  for (let i = 0; i < 6; i++) {
+    const v = (d / 700 + i / 6) % 1;
+    const [x, y] = P(0.06 - v * 0.7, 0.55, 8 + v * 12);
+    bouffee(g, x, y, v);
+  }
+  const allume = Math.floor(d / 150) % 2;
+  const [hx, hy] = P(0.92, 0.5, 24);
+  g.fillStyle = allume ? '#fff3a0' : '#c9a227';
+  g.fillRect(hx - 1, hy - 1, 3, 3);
+  if (allume) {
+    g.fillStyle = 'rgba(255,243,160,0.35)';
+    g.fillRect(hx + 2, hy - 3, 10, 7);
+  }
+  g.fillStyle = '#ffffff';
+  for (const u of [0.18, 0.82]) {
+    const [x, y] = P(u, 0.5, 10);
+    const s = Math.floor(d / 60) % 2;
+    g.fillRect(x - 12 - s, y - 2, 2, 1);
+    g.fillRect(x + 10 + s, y - 4, 2, 1);
+  }
+  if (d < 2600) {
+    const [cx, cy] = P(0.5, 0.5, 34);
+    O.phylactere(g, cx + Math.round(Math.sin(d / 40)), cy, 'VROUM !');
+  }
+}
+
+function animeCanon(g, it, tx, ty, t, O, effet) {
+  // bordée : chaque canon tire à son tour (éclair, boulet qui part vers la mer, fumée)
+  if (!effet) return;
+  const P = O.projeteur(tx + 32, ty);
+  const u = effet.depuis - (it.x % 2) * 450;
+  if (u < 0) return;
+  if (u < 220) {
+    const [x, y] = P(0.5, 0.0, 15);
+    const r = 4 + Math.round((u / 220) * 6);
+    g.fillStyle = '#fff3a0';
+    g.fillRect(x - r, y - 1, r * 2, 3);
+    g.fillRect(x - 1, y - r, 3, r * 2);
+    g.fillStyle = '#ff9a1f';
+    g.fillRect(x - 2, y - 2, 5, 5);
+  }
+  if (u < 1300) {
+    const k = u / 1300;
+    const [x, y] = P(0.5, 0.0 - k * 3.2, 15 + 34 * k - 22 * k * k);
+    g.fillStyle = '#15151f';
+    g.fillRect(Math.round(x) - 2, Math.round(y) - 2, 4, 4);
+  }
+  for (let i = 0; i < 5; i++) {
+    const v = u / 2600 - i * 0.08;
+    if (v < 0 || v > 1) continue;
+    const [x, y] = P(0.5 + (i - 2) * 0.1, 0.02 - v * 0.3, 16 + v * 26);
+    bouffee(g, x, y, v, '200,200,205');
+  }
+  if (effet.clique && u > 80 && u < 1600) {
+    const [cx, cy] = P(0.5, 0.5, 24);
+    O.phylactere(g, cx, cy, O.enseigne('BOUM !', 'BOOM!'), '#a8232a');
+  }
+}
 
 export const JEUX = {};
 
@@ -1010,6 +1167,7 @@ export const THEMES = {
       dg: ['planches', '#8a5a36'], salon: ['planches', '#9a6b43'], reunion: ['loft_beton', '#aaa79f'], atelier: ['loft_beton', '#8d8a83'] },
     mur: 'loft_briques', dalle: '#4a4744', bureau: '#b8885a', chaise: '#2b2f36', canape: '#8a4b2a', canapeEquipe: '#8a4b2a', table: '#6e4a2c',
     salon: ['#3b2f2a', '#9a4a32'],
+    cloison: { cadre: '#1f2226', verre: 'rgba(190,215,230,0.26)' }, // verrières d'atelier : acier noir
   },
   // Bateau pirate : pont en planches, bois sombre, velours rouge.
   'bureau-pirate': {

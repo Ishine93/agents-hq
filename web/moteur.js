@@ -144,6 +144,11 @@ export class Moteur {
       if (!gl || gl.bouge || e.target !== c) return;
       const [ax, ay] = this.versArt(e.clientX, e.clientY);
       const av = this.dir.trouver(ax, ay);
+      // easter egg d'un meuble du décor : l'effet se joue dans la scène, la sélection ne bouge pas
+      if (av && av.type === 'decor') {
+        if (this.dir.cliquerDecor(av.meuble) && this.gfx) this.gfx.reveiller(800);
+        return;
+      }
       if (this.onClic) this.onClic(av);
     });
     c.addEventListener('wheel', (e) => {

@@ -3,17 +3,19 @@
 // (reglages.niveauxTravail, config/defauts/profils-travail.json).
 import { t } from './i18n.js';
 
-export const NIVEAUX = ['econome', 'equilibre', 'max'];
+// Standard (1.0.11) : comme Claude Code, le défaut des nouvelles installations
+export const NIVEAUX = ['standard', 'econome', 'equilibre', 'max'];
 export const PERSONNALISE = 'personnalise';
 export const COUTS = [...NIVEAUX, PERSONNALISE];
-export const NIVEAU_DEFAUT = 'equilibre';
+export const NIVEAU_DEFAUT = 'standard';
 
-export const nomNiveau = (n) => ({ econome: t('Économe'), equilibre: t('Équilibré'), max: t('Max'), personnalise: t('Personnalisé') })[n] || n;
+export const nomNiveau = (n) => ({ standard: t('Standard'), econome: t('Économe'), equilibre: t('Équilibré'), max: t('Max'), personnalise: t('Personnalisé') })[n] || n;
 export const phraseNiveau = (n) => ({
+  standard: t('comme Claude Code : les agents s’organisent seuls'),
   econome: t('le minimum qui donne un bon résultat'),
   equilibre: t('le juste coût'),
   max: t('qualité d’abord, sans regarder la dépense'),
-  personnalise: t('tes propres valeurs, à partir d’un des trois niveaux'),
+  personnalise: t('tes propres valeurs, à partir d’un des niveaux'),
 })[n] || '';
 
 // Nom du coût d'une demande ou des réglages ({cout, base}) : « Personnalisé (à partir de Économe) », sinon le niveau.
@@ -59,17 +61,19 @@ export function boutonsCout() {
     [t('plus haut'), t('l’agent garde plus de détails en tête et se résume moins souvent. Chaque étape coûte plus, car toute la conversation est relue à chaque fois.')],
     [t('plus bas'), t('chaque étape coûte moins, mais l’agent se résume plus tôt et peut oublier un détail lu au début.')],
     ['50 k', t('le minimum : en dessous, l’agent passerait son temps à se résumer. Au-delà de la mémoire du modèle, rien ne change : il se résume de toute façon à sa limite.')],
+    [t('vide'), t('celle de Claude Code : l’agent se résume tout seul près de la limite de son modèle, comme dans Claude Code. Il garde le plus de choses en tête, mais une très longue tâche coûte plus à chaque étape.')],
   ];
+  const nulMemoire = t('celle de Claude Code');
   return [
-    { cle: 'compactionAgents', lib: t('Compaction des agents'), type: 'k', min: 50, max: 1000, capacite: 'compaction',
+    { cle: 'compactionAgents', lib: t('Compaction des agents'), type: 'k', min: 50, max: 1000, nul: nulMemoire, capacite: 'compaction',
       quoi: t('Un agent garde en mémoire toute sa conversation : les fichiers lus, les commandes, ses réponses. Quand elle atteint cette taille, il la résume pour continuer plus léger : c’est la compaction.'),
       valeurs: memoire,
       note: t('1 k = 1 000 tokens, environ 750 mots ; 200 k, c’est à peu près un gros roman.'),
       exemple: t('un agent qui lit 40 fichiers d’un gros projet atteint vite 150 k : réglé à 150 k, il se résume tôt et relit parfois un fichier ; à 400 k, il garde tout en tête, mais chaque étape relit plus.') },
-    { cle: 'compactionVerif', lib: t('Compaction des vérificateurs'), type: 'k', min: 50, max: 1000, capacite: 'compaction',
+    { cle: 'compactionVerif', lib: t('Compaction des vérificateurs'), type: 'k', min: 50, max: 1000, nul: nulMemoire, capacite: 'compaction',
       quoi: t('La même chose pour les vérificateurs, les agents qui relisent et testent le travail d’un autre. Un vérificateur lit surtout : il a rarement besoin d’une très grande mémoire.'),
       valeurs: memoire },
-    { cle: 'compactionDg', lib: t('Compaction du DG'), type: 'k', min: 50, max: 1000, capacite: 'compaction',
+    { cle: 'compactionDg', lib: t('Compaction du DG'), type: 'k', min: 50, max: 1000, nul: nulMemoire, capacite: 'compaction',
       quoi: t('La même chose pour le DG, qui garde tout le dossier en tête : le plan, les résultats des tâches, tes réponses. Trop bas, il peut oublier une décision prise plus tôt dans le dossier.'),
       valeurs: memoire },
     { cle: 'maxCompactions', lib: t('Compactions max par tâche'), type: 'nombre', min: 1, max: 50, nul: t('aucune limite'), capacite: 'compaction',
@@ -105,6 +109,10 @@ export function boutonsCout() {
           t('Le DG sépare la production, la vérification ou la mesure, et chaque travail qui dépend d’un autre (par exemple : étude, puis code, puis mesure des performances).'),
           t('Chaque étape a son agent et son résultat bien à part : le plus facile à suivre et à reprendre.'),
           t('Le plus de tâches : chaque agent relit le projet, donc le plus de tokens.')],
+        ['libre', t('libre, comme dans Claude Code'),
+          t('Le DG s’organise comme s’il travaillait seul : une seule tâche si c’est le plus simple, plusieurs quand le travail s’y prête. Chaque agent peut en plus lancer ses propres sous-agents.'),
+          t('Le DG adapte le découpage à chaque demande.'),
+          t('Moins prévisible : le nombre de tâches change d’une demande à l’autre.')],
       ],
       exemple: t('« Corrige le bug de connexion puis mesure le temps de chargement » : « une tâche par chantier » donne un seul agent qui fait tout ; « séparer » donne une tâche de correction, puis une tâche de mesure.') },
     { cle: 'agentDirect', lib: t('Mode « agent direct »'),
@@ -122,6 +130,10 @@ export function boutonsCout() {
           t('Chaque demande passe par un plan, des tâches et leurs vérifications.'),
           t('Le plus encadré.'),
           t('Même une correction d’une ligne passe par un plan : plus lent et plus cher.')],
+        ['libre', t('quand c’est le plus simple (au choix du DG)'),
+          t('Le DG choisit à chaque demande entre un agent seul et un vrai plan.'),
+          t('Rapide quand c’est simple, encadré quand c’est gros.'),
+          t('Le DG décide seul de ce qui est « simple ».')],
       ],
       exemple: t('« Mets le bouton Envoyer en vert » : avec « pour une petite demande », un agent s’en charge tout de suite, sans plan.') },
     { cle: 'verifDefaut', lib: t('Vérification par défaut'),
@@ -139,6 +151,10 @@ export function boutonsCout() {
           t('Un vérificateur relit chaque tâche qui modifie du code.'),
           t('Le plus sûr.'),
           t('Le plus cher : presque chaque tâche coûte deux agents.')],
+        ['libre', t('au choix du DG, comme un développeur seul'),
+          t('Le plus souvent, l’agent se vérifie lui-même avec des tests ; le DG ajoute un vérificateur quand un regard neuf apporte vraiment quelque chose.'),
+          t('La relecture là où elle sert, sans règle fixe.'),
+          t('Le DG peut juger qu’un changement n’a pas besoin d’être relu.')],
       ],
       exemple: t('pour un petit site perso, « l’agent se vérifie lui-même » suffit souvent ; pour le code d’un jeu déjà publié, « vérificateur pour toute tâche » évite les mauvaises surprises.') },
     { cle: 'verifNiveau', lib: t('Modèle du vérificateur'),
@@ -161,7 +177,7 @@ export function boutonsCout() {
         ['medium', t('moyen (medium)'), t('Un juste milieu.'), t('Assez soigné pour la plupart des tâches.'), null],
         ['high', t('élevé (high)'), t('Réfléchit beaucoup.'), t('La relecture la plus soignée.'), t('La plus chère.')],
       ] },
-    { cle: 'verifMaxTurns', lib: t('Tours du vérificateur'), type: 'nombre', min: 1, max: 200,
+    { cle: 'verifMaxTurns', lib: t('Tours du vérificateur'), type: 'nombre', min: 1, max: 200, nul: t('le réglage général du QG'),
       quoi: t('Le nombre d’étapes (lire un fichier, lancer un test, répondre…) que le vérificateur peut faire avant de rendre son avis.'),
       valeurs: [
         ['1 à 5', t('il a à peine le temps de lire : avis rapide, mais superficiel.')],
@@ -199,6 +215,7 @@ export function boutonsCout() {
         ['interdite', t('interdit'), t('L’agent cherche lui-même.'), t('Il voit tout de ses propres yeux.'), t('Sur un gros projet, sa conversation grossit vite : chaque étape coûte plus.')],
         ['permise', t('permis'), t('L’agent s’en sert pour une grosse recherche, s’il le juge utile.'), t('Au cas par cas.'), t('Un résumé peut laisser de côté un détail.')],
         ['encouragee', t('encouragé'), t('L’agent confie toute grosse recherche à l’assistant.'), t('Le plus économique sur un gros projet.'), t('L’agent travaille plus souvent sur des résumés que sur les fichiers eux-mêmes.')],
+        ['autonome', t('autonome, comme dans Claude Code'), t('À la place de l’assistant du QG, l’agent a les outils de Claude Code pour s’organiser seul : ses propres sous-agents (avec le modèle de son choix), des commandes en arrière-plan, et des workflows qui répartissent un gros travail entre plusieurs agents.'), t('L’agent travaille comme toi dans Claude Code.'), t('Chaque sous-agent ou workflow consomme en plus : une grosse tâche peut coûter nettement plus.')],
       ],
       exemple: t('« Trouve où le jeu enregistre les scores » dans un gros projet : l’assistant fouille et répond « sauvegarde.lua, ligne 120 » ; l’agent ne lit que ce fichier-là.') },
     { cle: 'seuilAccordFenetre', lib: t('Accord avant lancement'), type: 'pourcent', nul: t('jamais (estimation affichée seulement)'),

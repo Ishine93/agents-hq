@@ -229,7 +229,7 @@ function cellule() {
   m('chaise', 14, 1, { dir: 'ne' });
 
   // --- coursive : marquage de la file d'attente ---
-  for (let x = 8; x <= 11; x++) m('iso_marquage', x, 6, { passage: true, premier: x === 8 });
+  for (let x = 8; x <= 11; x++) m('iso_marquage', x, 6, { passage: true, sol: true, premier: x === 8 });
 
   // --- cour de promenade (pause), fermée côté parloir par un grillage ---
   m('distributeur', 0, 7);

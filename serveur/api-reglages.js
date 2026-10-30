@@ -4,7 +4,7 @@ import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { RACINE, modifierReglages, racines, sous, etage as trouverEtage, fiche } from './config.js';
+import { RACINE, modifierReglages, racines, sous, etage as trouverEtage, fiche, MODES_FABLE } from './config.js';
 import { patchTelephone, envoyerEssai } from './telephone.js';
 import * as plateforme from './plateforme.js';
 import { emettre, comptesPublics, reglagesPublics, etagesPublics, modelesPublics, mcpPublic, alerte } from './bus.js';
@@ -375,8 +375,22 @@ export async function routesReglages(req, res, chemin, ctx) {
       if (corps.gardeFable && typeof corps.gardeFable === 'object') {
         const g = {};
         if (typeof corps.gardeFable.actif === 'boolean') g.actif = corps.gardeFable.actif;
+        if (MODES_FABLE.includes(corps.gardeFable.mode)) {
+          g.mode = corps.gardeFable.mode;
+          g.actif = g.mode !== 'off';
+        }
         if (Number.isFinite(corps.gardeFable.resteMin) && corps.gardeFable.resteMin >= 0 && corps.gardeFable.resteMin <= 100) g.resteMin = Math.round(corps.gardeFable.resteMin);
         patch.gardeFable = g;
+      }
+      // réserve de fenêtre (1.0.11) : part de la fenêtre de 5 h gardée pour toi aux heures choisies
+      if (corps.reserveFenetre && typeof corps.reserveFenetre === 'object') {
+        const r = corps.reserveFenetre;
+        const g = {};
+        if (typeof r.actif === 'boolean') g.actif = r.actif;
+        if (Number.isFinite(r.pct) && r.pct >= 5 && r.pct <= 90) g.pct = Math.round(r.pct);
+        for (const k of ['debut', 'fin']) if (Number.isFinite(r[k]) && r[k] >= 0 && r[k] <= 24) g[k] = Math.round(r[k] * 2) / 2;
+        if (['semaine', 'tous'].includes(r.jours)) g.jours = r.jours;
+        patch.reserveFenetre = g;
       }
       if (corps.miniJeu && typeof corps.miniJeu === 'object') {
         const mj = corps.miniJeu;

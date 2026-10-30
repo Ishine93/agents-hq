@@ -10,9 +10,10 @@ import { serveurQg, definitionsQg, OUTILS_QG } from './outils-qg.js';
 import { imagesActives, NOM_OUTIL as OUTIL_IMAGE } from './delegation.js';
 import { REGLAGES, directive, etage as trouverEtage } from './config.js';
 import { optionsMcp, mcpDemande } from './mcp.js';
-import { optionsProfil } from './permissions.js';
+import { optionsProfil, crochetsAdmin, fusionnerCrochets } from './permissions.js';
 import { executerSession, raisonEchec } from './session.js';
-import { avecReprise, crochetsFiltreTests, plafondTache } from './economie.js';
+import { avecReprise, crochetsFiltreTests, plafondTache, PLANCHER_PLAFOND_USD } from './economie.js';
+import { donneesConso } from './conso.js';
 import { profilEffectif, optionsExploration } from './travail.js';
 import { verificationsEtage, annonceControles, mentionControlesPasses } from './controles.js';
 import { consigneTache } from './routeur.js';
@@ -125,10 +126,19 @@ export function promptRework(verdict) {
 }
 
 // B6 : plafond de la tâche (le plafond relevé par le DG après un dépassement l'emporte)
+const plafondTotal = (t, dossier) => t.x.plafondUsd ?? plafondTache(profilEffectif(dossier), t.x.estimation?.usd);
+
+// Le SDK reçoit ce qu'il reste à dépenser : une reprise a déjà coûté (1.0.11). L'adaptateur Claude y ajoute le
+// coût que la conversation reprise porte déjà.
 function plafondOptions(t, dossier) {
-  const plafond = t.x.plafondUsd ?? plafondTache(profilEffectif(dossier), t.x.estimation?.usd);
-  return plafond ? { maxBudgetUsd: plafond } : {};
+  const plafond = plafondTotal(t, dossier);
+  if (!plafond) return {};
+  const deja = donneesConso().taches?.[t.id]?.cout || 0;
+  return { maxBudgetUsd: Math.max(PLANCHER_PLAFOND_USD, Math.round((plafond - deja) * 100) / 100) };
 }
+
+// Crochets d'un agent qui travaille : refus des commandes en administrateur, sorties de tests filtrées (A11).
+const crochetsAgent = ({ tests = true } = {}) => fusionnerCrochets(crochetsAdmin(), tests && REGLAGES.filtreTests !== false ? crochetsFiltreTests() : null);
 
 function optionsProduction(t, dossier, ctx, captures) {
   const e = trouverEtage(t.etage);
@@ -146,7 +156,7 @@ function optionsProduction(t, dossier, ctx, captures) {
   const sk = optionsSkills(skillsSession({ role: 'agent', dossier, tache: t, etage: t.etage }), { projet: e.projet });
   // B7 : sous-agent explorateur (lecture seule, modèle léger) si le profil de travail le permet
   const explo = optionsExploration(profilEffectif(dossier), t.x.profil);
-  const outilsEnPlus = [...(sk.plugins ? ['Skill'] : []), ...(explo ? ['Agent'] : [])];
+  const outilsEnPlus = [...(sk.plugins ? ['Skill'] : []), ...(explo ? ['Agent', ...(explo.outils || [])] : [])];
   return {
     model: modele,
     effort,
@@ -155,7 +165,7 @@ function optionsProduction(t, dossier, ctx, captures) {
     ...profil,
     ...(sk.plugins ? { plugins: sk.plugins, skills: sk.skills } : {}),
     ...(outilsEnPlus.length && Array.isArray(profil.tools) ? { tools: [...profil.tools, ...outilsEnPlus] } : {}),
-    ...(explo ? { agents: explo.agents } : {}),
+    ...(explo?.agents ? { agents: explo.agents } : {}),
     allowedTools: [...profil.allowedTools, ...mcp.autorises, ...OUTILS_QG, ...(imagesActives(t.x.profil) ? [OUTIL_IMAGE] : []), ...outilsEnPlus],
     disallowedTools: [...profil.disallowedTools, ...mcp.interdits],
     canUseTool: ctx.canUseTool,
@@ -168,7 +178,7 @@ function optionsProduction(t, dossier, ctx, captures) {
     ...plafondOptions(t, dossier),
     abortController: ctx.abortController,
     resume: ctx.resume || undefined,
-    hooks: REGLAGES.filtreTests !== false ? crochetsFiltreTests() : undefined, // A11 : sorties de tests filtrées
+    hooks: crochetsAgent(), // commandes administrateur refusées (1.0.11), sorties de tests filtrées (A11)
     forkSession: ctx.fork || undefined, // clone d'un agent de la réserve déjà occupé ailleurs
     title: `QG ${dossier.id} ${t.ref} — ${t.titre}`,
   };
@@ -224,11 +234,13 @@ function consignesDirect(dossier, langue = REGLAGES.langueIA || 'fr') {
     "Tu travailles dans le QG des agents, en DEMANDE DIRECTE : l'utilisateur te parle comme dans Claude Code, sans directeur ni découpage. Réponds-lui directement, en français.",
     `Dossier de travail : ${lieu.cwd || '?'}. Tu y écris librement ; ailleurs, l'écriture demande son accord.`,
     "Organise-toi comme tu l'entends : si c'est utile, lance tes propres sous-agents (outil Agent) ou des commandes en arrière-plan.",
+    "Un serveur que tu lances pour tester écoute sur 127.0.0.1, jamais sur toutes les interfaces : sinon Windows ouvre une fenêtre du pare-feu. Aucune commande en administrateur (RunAs, sudo) : elle est refusée.",
   ];
   const en = [
     'You work in the Agents HQ, as a DIRECT REQUEST: the user talks to you as in Claude Code, with no director and no task split. Answer them directly, in English.',
     `Working folder: ${lieu.cwd || '?'}. You may write there freely; writing elsewhere needs their approval.`,
     'Organize yourself as you see fit: if useful, start your own sub-agents (Agent tool) or background commands.',
+    'A server you start for testing listens on 127.0.0.1, never on all interfaces: otherwise Windows opens a firewall prompt. No administrator command (RunAs, sudo): it is refused.',
   ];
   return (langue === 'en' ? en : fr).join('\n');
 }
@@ -255,9 +267,37 @@ function optionsDirect(t, dossier, ctx) {
     mcpServers: mcp.mcpServers,
     strictMcpConfig: mcp.strictMcpConfig,
     systemPrompt: { type: 'preset', preset: 'claude_code', append: consignesDirect(dossier) + sk.append },
+    hooks: crochetsAgent({ tests: false }),
     abortController: ctx.abortController,
     resume: ctx.resume || undefined,
     title: `QG ${dossier.id} — ${t.titre}`,
+  };
+}
+
+// 1.0.11 : question à un agent. La copie de sa conversation part avec exactement les réglages de sa tâche (modèle,
+// effort, consignes, outils, connecteurs, sortie structurée) : Claude la relit alors dans son cache au lieu de la
+// réécrire entière (une question à un agent Fable coûtait environ 5 $). Ses outils restent déclarés, mais tous
+// refusés ; seule la sortie structurée, où il met sa réponse, passe.
+const outilsRefuses = async (nom, input) => (nom === 'StructuredOutput'
+  ? { behavior: 'allow', updatedInput: input }
+  : { behavior: 'deny', message: 'Question en passant : réponds sans outil.' });
+
+export function optionsQuestion(t, dossier, session) {
+  const ctx = { canUseTool: outilsRefuses };
+  const o = t.x.direct ? optionsDirect(t, dossier, ctx) : optionsProduction(t, dossier, ctx, []);
+  return {
+    ...o,
+    resume: session,
+    forkSession: true,
+    persistSession: false,
+    maxTurns: 2,
+    permissionMode: 'dontAsk',
+    allowedTools: [],
+    canUseTool: outilsRefuses,
+    hooks: undefined,
+    abortController: undefined,
+    maxBudgetUsd: undefined,
+    title: undefined,
   };
 }
 
@@ -333,7 +373,7 @@ export async function produire(t, dossier, ctx) {
     },
   });
   const raison = raisonEchec(s);
-  const plafond = s.result?.subtype === 'error_max_budget_usd' ? (plafondOptions(t, dossier).maxBudgetUsd ?? null) : undefined;
+  const plafond = s.result?.subtype === 'error_max_budget_usd' ? (plafondTotal(t, dossier) ?? null) : undefined;
   return { sessionId: s.sessionId, sortie: raison ? null : s.result.structured_output, echec: raison, erreur: s.erreur, limite: s.limite, contexte: s.contexte ?? null, compte: s.compte || t.x.route?.compte || compteTache(dossier), avertissements: s.avertissements || null, ...(plafond !== undefined ? { plafondAtteint: plafond ?? true } : {}) };
 }
 
@@ -423,6 +463,7 @@ async function sessionVerif(t, dossier, ctx, prompt, resume) {
       mcpServers: {},
       strictMcpConfig: true,
       systemPrompt: { type: 'preset', preset: 'claude_code', append: directive('verif') },
+      hooks: crochetsAgent({ tests: false }),
       outputFormat: { type: 'json_schema', schema: SCHEMA_VERDICT },
       maxTurns: t.x.verification.maxTurns || REGLAGES.verif.maxTurns,
       abortController: ctx.abortController,

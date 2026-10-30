@@ -345,8 +345,10 @@ function parasol(it, T, etat, O) {
 }
 
 // ---------- animations ----------
-function animPiscine(g, it, tx, ty, t, O) {
+function animPiscine(g, it, tx, ty, t, O, effet) {
   const P = O.projeteur(tx + 32, ty);
+  // easter egg : le canard géant est dessiné par la case du coin avant droit (la dernière dessinée du bassin)
+  if (effet && !(it.conn || {}).e && !(it.conn || {}).s) canardGeant(g, P, it, effet);
   for (let i = 0; i < 3; i++) {
     const ph = (t / 2600 + i * 0.37 + (it.x * 7 + it.y * 3) * 0.11) % 1;
     const x = 0.12 + ((i * 0.31 + ph * 0.6) % 0.76);
@@ -360,6 +362,116 @@ function animPiscine(g, it, tx, ty, t, O) {
       O.pixel(g, P(0.15 + i * 0.3, 1, -1 - ph * 8), '#e6fbff', 1, 2);
     }
   }
+}
+
+// ---------- easter eggs du penthouse ----------
+// Note de musique (croche ou double croche) en (x, y), avec une ombre d'un pixel.
+function note(g, x, y, double, col) {
+  const R = (a, b, w, h) => g.fillRect(Math.round(x + a), Math.round(y + b), w, h);
+  for (const [c, o] of [['rgba(20,20,30,0.55)', 1], [col, 0]]) {
+    g.fillStyle = c;
+    if (double) {
+      R(2 + o, o, 1, 6);
+      R(7 + o, o, 1, 6);
+      R(2 + o, o, 6, 2);
+      R(-1 + o, 5 + o, 4, 2);
+      R(4 + o, 5 + o, 4, 2);
+    } else {
+      R(3 + o, o, 1, 6);
+      R(4 + o, 1 + o, 1, 1);
+      R(5 + o, 2 + o, 1, 2);
+      R(o, 5 + o, 4, 2);
+    }
+  }
+}
+
+// Le piano joue tout seul : des touches s'enfoncent en rythme et des notes s'envolent du couvercle.
+function animPiano(g, it, tx, ty, t, O, effet) {
+  if (!effet) return;
+  const P = O.projeteur(tx + 32, ty);
+  const d = effet.depuis;
+  const temps = Math.floor(d / 170);
+  const l = 1.22 / 17;
+  for (let k = 0; k < 3; k++) {
+    if ((temps + k) % 4 === 3) continue;
+    const i = (temps * 5 + k * 6 + (temps >> 3)) % 17;
+    O.quadZ(g, P, 26.3, 0.345 + i * l, 1.7, 0.33 + (i + 1) * l, 1.8, '#b5ab96');
+  }
+  const cols = ['#f4d35e', '#ff7ab8', '#7ff6ff', '#ffffff', '#b8f27a'];
+  for (let k = 0; k < 9; k++) {
+    const age = (d - k * 430) / 2400;
+    if (age < 0 || age > 1) continue;
+    if (age > 0.75 && Math.floor(d / 80) % 2) continue; // elle s'efface en clignotant
+    const [x0, y0] = P(0.7 + (k % 3) * 0.3, 0.9 + ((k * 2) % 3) * 0.2, 58);
+    const x = x0 + Math.sin(age * 7 + k) * 5 + ((k * 5) % 9) - 4 + age * (k % 2 ? 10 : -10);
+    note(g, x, y0 - age * 56, k % 3 === 1, cols[k % cols.length]);
+  }
+}
+
+// Canard de bain géant vu de profil, tourné vers la droite (une lettre = un pixel ×2 ; la dernière ligne est sous
+// l'eau).
+const CANARD = [
+  '.........yyyy...',
+  '........yyyyyy..',
+  '........yyywky..',
+  '........yyyyyooo',
+  '........yyyyyoo.',
+  '.........yyyy...',
+  '.y......yyyyyy..',
+  'yyy...yyyyyyyyy.',
+  'yyyyyyyyyyywwyyy',
+  'yyyyyyyyyyyyyyyy',
+  'dyyyyyyyyyyyyyyd',
+  '.dddddddddddddd.',
+];
+const COUL_CANARD = { y: '#ffd23f', d: '#e0a020', o: '#ff8a1f', k: '#15151f', w: '#ffffff' };
+// (x, y) : milieu de la ligne de flottaison ; n : lignes hors de l'eau (0 à 11), la tête sort la première.
+function canard(g, x, y, sens, n) {
+  const E = 3;
+  const w = CANARD[0].length;
+  for (const passe of [0, 1]) {
+    for (let r = 0; r < n; r++) {
+      for (let c = 0; c < w; c++) {
+        const ch = CANARD[r][c];
+        if (ch === '.') continue;
+        const X = Math.round(x + ((sens > 0 ? c : w - 1 - c) - w / 2) * E);
+        const Y = Math.round(y - (n - r) * E);
+        g.fillStyle = passe ? COUL_CANARD[ch] : '#5a3a10';
+        if (passe) g.fillRect(X, Y, E, E);
+        else g.fillRect(X - 1, Y - 1, E + 2, E + 2);
+      }
+    }
+  }
+}
+
+// Easter egg de la piscine : un canard géant surgit là où l'on a cliqué, traverse le bassin vers le bout le plus
+// éloigné en se dandinant, puis replonge. `it` est la case du coin avant droit du bassin (8 × 2 cases).
+function canardGeant(g, P, it, effet) {
+  const W = monde(P, it);
+  const d = effet.depuis;
+  const xmin = it.x - 6.2;
+  const xmax = it.x + 0.2;
+  const x0 = Math.max(xmin, Math.min(xmax, effet.source.x + 0.5));
+  const x1 = x0 - xmin < xmax - x0 ? xmax : xmin;
+  const k = Math.max(0, Math.min(1, (d - 600) / 6200));
+  const x = x0 + (x1 - x0) * k * k * (3 - 2 * k);
+  const [sx, sy] = W(x, it.y + Math.sin(d / 700) * 0.12, 0.6);
+  const sens = x1 > x0 ? 1 : -1;
+  const n = d < 500 ? Math.round((d / 500) * 11) : d > 7100 ? Math.max(0, Math.round((1 - (d - 7100) / 600) * 11)) : 11;
+  // sillage derrière lui, ronds autour
+  if (d > 600 && d < 7000) {
+    g.fillStyle = 'rgba(230,251,255,0.85)';
+    for (let i = 1; i <= 3; i++) g.fillRect(Math.round(sx - sens * (24 + i * 6)) - 2, Math.round(sy - sens * (12 + i * 3)), 5, 1);
+  }
+  canard(g, sx, sy + Math.round(Math.sin(d / 260)), sens, n);
+  if (n) {
+    g.fillStyle = '#c8f4ff';
+    g.fillRect(Math.round(sx) - 26, Math.round(sy), 6, 1);
+    g.fillRect(Math.round(sx) + 20, Math.round(sy), 6, 1);
+  }
+  const EAU_ = ['#e6fbff', '#8fdcf0', '#ffffff'];
+  gerbe(g, sx, sy, d / 600, EAU_, 14, 20, 20);
+  gerbe(g, sx, sy, (d - 7100) / 600, EAU_, 14, 18, 20);
 }
 
 function animBrasero(g, it, tx, ty, t, O) {
@@ -469,6 +581,8 @@ function decorMursPenthouse(g, cote, longueur, etage, O) {
 // ---------- repaire du méchant ----------
 const JAUNE = '#f5c400';
 const LAVE = ['#e8551a', '#ff7a1a', '#ffb52e', '#ffe27a'];
+// Écran du compte à rebours sur le mur du fond, au-dessus du diamant (colonne et ligne du mur peint, en px).
+const REBOURS = { col: 8 * 32 + 10, ligne: 12, l: 70, h: 28 };
 
 // Bandes jaunes et noires le long d'une face y = cste (x0..x1) ou x = cste (y0..y1).
 function hachuresY(g, P, O, y, x0, x1, z0, z1) {
@@ -480,13 +594,39 @@ function hachuresX(g, P, O, x, y0, y1, z0, z1) {
   for (let i = 0; i < n; i++) O.quadX(g, P, x, y0 + ((y1 - y0) * i) / n, y0 + ((y1 - y0) * (i + 1)) / n, z0, z1, i % 2 ? '#1d1d1d' : JAUNE);
 }
 
-// Fusée de secours du DG sur son pas de tir, avec sa tour de lancement.
+// La fusée seule : ailerons, tuyère, fuselage, hublot, coiffe (même repère que le pas de tir).
+function dessinFusee(g, P, O) {
+  O.prisme(g, P, 0.92, 0.92, 1.28, 1.28, 6, 12, '#2a2d33');
+  O.prisme(g, P, 1.04, 1.28, 1.16, 1.52, 10, 30, '#d2382c');
+  O.prisme(g, P, 1.28, 1.04, 1.52, 1.16, 10, 30, '#b02a20');
+  O.prisme(g, P, 0.86, 0.86, 1.34, 1.34, 12, 84, '#eef0f2');
+  O.prisme(g, P, 0.86, 0.86, 1.34, 1.34, 56, 61, '#2a2d33');
+  O.prisme(g, P, 0.86, 0.86, 1.34, 1.34, 20, 23, '#d2382c');
+  O.quadY(g, P, 1.34, 1.0, 1.2, 66, 74, '#2a2d33');
+  O.quadY(g, P, 1.34, 1.03, 1.17, 67, 73, '#7fd3ff');
+  O.prisme(g, P, 0.9, 0.9, 1.3, 1.3, 84, 92, '#d2382c');
+  O.prisme(g, P, 0.96, 0.96, 1.24, 1.24, 92, 99, '#d2382c');
+  O.prisme(g, P, 1.03, 1.03, 1.17, 1.17, 99, 106, '#d2382c');
+  O.prisme(g, P, 1.08, 1.08, 1.12, 1.12, 106, 110, '#eef0f2');
+  O.prisme(g, P, 1.04, 0.62, 1.16, 0.86, 10, 30, '#d2382c');
+}
+// Sprite de la fusée en vol (easter egg du bouton rouge), fait une fois.
+let fuseeEnVol = null;
+const spriteFuseeVol = (O) => fuseeEnVol || (fuseeEnVol = O.spriteBloc(2, 2, 112, (g, P) => dessinFusee(g, P, O)));
+
+// Fusée de secours du DG sur son pas de tir, avec sa tour de lancement. Pendant les phases 2 et 3 du bouton rouge
+// (décollage, retour), le pas de tir est vide et roussi : la fusée est dessinée en vol par son animation.
 function fusee(it, T, etat, O) {
+  const partie = (etat.effet || 0) >= 2;
   return O.spriteBloc(2, 2, 112, (g, P) => {
     O.prisme(g, P, 0.08, 0.08, 1.92, 1.92, 0, 6, '#4a4f58');
     hachuresY(g, P, O, 1.92, 0.08, 1.92, 1, 5);
     hachuresX(g, P, O, 1.92, 0.08, 1.92, 1, 5);
     O.quadZ(g, P, 6.2, 0.7, 0.7, 1.5, 1.5, '#2a2d33');
+    if (partie) {
+      O.quadZ(g, P, 6.3, 0.8, 0.8, 1.4, 1.4, '#141418');
+      O.quadZ(g, P, 6.4, 0.95, 0.95, 1.25, 1.25, '#ff7a1a');
+    }
     // tour de lancement (treillis rouge) et son bras
     const tour = '#b8322a';
     for (const [x, y] of [[0.14, 0.14], [0.44, 0.14], [0.14, 0.44], [0.44, 0.44]]) O.prisme(g, P, x, y, x + 0.05, y + 0.05, 6, 90, tour);
@@ -494,23 +634,10 @@ function fusee(it, T, etat, O) {
       O.prisme(g, P, 0.14, 0.44, 0.49, 0.49, z, z + 2, tour);
       O.prisme(g, P, 0.44, 0.14, 0.49, 0.49, z, z + 2, tour);
     }
-    O.prisme(g, P, 0.49, 0.28, 0.9, 0.34, 74, 77, '#8a8f99');
+    O.prisme(g, P, 0.49, 0.28, partie ? 0.62 : 0.9, 0.34, 74, 77, '#8a8f99');
     O.prisme(g, P, 0.12, 0.12, 0.51, 0.51, 90, 93, '#2a2d33');
     O.pixel(g, P(0.3, 0.3, 95), '#ff3b3b', 2, 2);
-    // ailerons, tuyère, fuselage, hublot, coiffe
-    O.prisme(g, P, 0.92, 0.92, 1.28, 1.28, 6, 12, '#2a2d33');
-    O.prisme(g, P, 1.04, 1.28, 1.16, 1.52, 10, 30, '#d2382c');
-    O.prisme(g, P, 1.28, 1.04, 1.52, 1.16, 10, 30, '#b02a20');
-    O.prisme(g, P, 0.86, 0.86, 1.34, 1.34, 12, 84, '#eef0f2');
-    O.prisme(g, P, 0.86, 0.86, 1.34, 1.34, 56, 61, '#2a2d33');
-    O.prisme(g, P, 0.86, 0.86, 1.34, 1.34, 20, 23, '#d2382c');
-    O.quadY(g, P, 1.34, 1.0, 1.2, 66, 74, '#2a2d33');
-    O.quadY(g, P, 1.34, 1.03, 1.17, 67, 73, '#7fd3ff');
-    O.prisme(g, P, 0.9, 0.9, 1.3, 1.3, 84, 92, '#d2382c');
-    O.prisme(g, P, 0.96, 0.96, 1.24, 1.24, 92, 99, '#d2382c');
-    O.prisme(g, P, 1.03, 1.03, 1.17, 1.17, 99, 106, '#d2382c');
-    O.prisme(g, P, 1.08, 1.08, 1.12, 1.12, 106, 110, '#eef0f2');
-    O.prisme(g, P, 1.04, 0.62, 1.16, 0.86, 10, 30, '#d2382c');
+    if (!partie) dessinFusee(g, P, O);
   });
 }
 
@@ -548,16 +675,17 @@ function chat(it, T, etat, O) {
   });
 }
 
-// Gros bouton rouge sur sa colonne, capot de verre relevé.
+// Gros bouton rouge sur sa colonne, capot de verre relevé. Easter egg : enfoncé pendant le compte à rebours.
 function bouton(it, T, etat, O) {
+  const enfonce = etat.effet ? 2.5 : 0;
   return O.spriteTuile(52, (g, P) => {
     O.prisme(g, P, 0.36, 0.36, 0.64, 0.64, 0, 26, '#3a3d44');
     hachuresY(g, P, O, 0.64, 0.36, 0.64, 4, 10);
     hachuresX(g, P, O, 0.64, 0.36, 0.64, 4, 10);
     O.prisme(g, P, 0.28, 0.28, 0.72, 0.72, 26, 29, JAUNE);
-    O.prisme(g, P, 0.38, 0.38, 0.62, 0.62, 29, 32, '#b01a22');
-    O.prisme(g, P, 0.41, 0.41, 0.59, 0.59, 32, 35, '#e3242f');
-    O.pixel(g, P(0.45, 0.45, 35.5), '#ff9a9a', 2, 1);
+    O.prisme(g, P, 0.38, 0.38, 0.62, 0.62, 29, 32 - enfonce / 2, '#b01a22');
+    O.prisme(g, P, 0.41, 0.41, 0.59, 0.59, 32 - enfonce / 2, 35 - enfonce, enfonce ? '#ff4a4a' : '#e3242f');
+    O.pixel(g, P(0.45, 0.45, 35.5 - enfonce), '#ff9a9a', 2, 1);
     O.poly(g, [P(0.3, 0.3, 29), P(0.7, 0.3, 29), P(0.7, 0.26, 44), P(0.3, 0.26, 44)], 'rgba(200,235,255,0.45)');
   });
 }
@@ -747,8 +875,176 @@ function tonneau(it, T, etat, O) {
   });
 }
 
+// ---------- outils des easter eggs (web/clics.js) ----------
+// Point (gx, gy, z) de l'étage dans le repère de la case animée (P = O.projeteur(tx + 32, ty)).
+const monde = (P, it) => (gx, gy, z) => P(gx - it.x, gy - it.y, z);
+// Point d'un saut de A à B (positions [gx, gy, z]) qui monte de `haut` au-dessus de la droite ; p de 0 à 1.
+const arc = (A, B, haut, p) => [A[0] + (B[0] - A[0]) * p, A[1] + (B[1] - A[1]) * p, A[2] + (B[2] - A[2]) * p + 4 * haut * p * (1 - p)];
+
+// Dessin « à plat » posé sur le mur droit (plan y = 0) depuis l'animation d'un meuble : colonne `col` du mur
+// (0 = coin du fond), ligne `ligne` depuis le haut, cisaillé comme les murs (cisailler, web/decor.js).
+function surMurDroit(g, P, it, O, plat, col, ligne) {
+  const [ox, oy] = P(-it.x, -it.y, 0);
+  for (let i = 0; i < plat.width; i++) {
+    g.drawImage(plat, i, 0, 1, plat.height, Math.round(ox) + col + i, Math.round(oy) + Math.floor((col + i) / 2) - O.HW + 1 + ligne, 1, plat.height);
+  }
+}
+
+// Gerbe de gouttes qui jaillit de (ox, oy) et retombe, avec un anneau qui s'élargit ; k de 0 à 1 (rien ailleurs).
+function gerbe(g, ox, oy, k, couleurs, n = 12, haut = 18, large = 14) {
+  if (!(k >= 0 && k <= 1)) return;
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * Math.PI * 2 + 0.3;
+    const h = haut * (0.6 + ((i * 7) % 5) / 10);
+    const x = ox + Math.cos(a) * large * k * (0.7 + (i % 3) * 0.2);
+    const y = oy + Math.sin(a) * large * 0.4 * k - 4 * h * k * (1 - k);
+    const c = k < 0.6 ? 2 : 1;
+    g.fillStyle = couleurs[i % couleurs.length];
+    g.fillRect(Math.round(x), Math.round(y), c, c);
+  }
+  const r = 3 + k * large;
+  g.fillStyle = couleurs[0];
+  for (let i = 0; i < 16; i++) {
+    const a = (i / 16) * Math.PI * 2;
+    g.fillRect(Math.round(ox + Math.cos(a) * r), Math.round(oy + Math.sin(a) * r * 0.5), 2, 1);
+  }
+}
+
+// Bouffée de fumée ou de vapeur, ovale, centrée en (x, y), de rayon r.
+function bouffee(g, x, y, r, col) {
+  const R = Math.max(1, Math.round(r));
+  g.fillStyle = col;
+  for (let dy = -R; dy <= R; dy++) {
+    const w = Math.max(1, Math.round(Math.sqrt(R * R - dy * dy) * 1.3));
+    g.fillRect(Math.round(x - w), Math.round(y + dy), w * 2, 1);
+  }
+}
+
+// Requin vu de profil en plein saut (pixels d'écran) : museau vers `sens` (1 = droite), penché de `pente` pixel par
+// colonne (> 0 : museau plus bas), gueule ouverte. `brule` : ressorti de la lave, noirci, des braises sur le dos.
+function requinVol(g, cx, cy, sens, pente, brule, t) {
+  const L = 22;
+  const p = Math.max(-1.1, Math.min(1.1, pente));
+  const dos = brule ? '#3a3232' : '#5d6b78';
+  const ventre = brule ? '#6a564a' : '#e8eef2';
+  const noir = '#15151f';
+  const col = (i, y0, y1, c) => {
+    g.fillStyle = c;
+    g.fillRect(Math.round(cx + sens * (L / 2 - i)), Math.round(cy + (L / 2 - i) * p) + y0, 1, y1 - y0 + 1);
+  };
+  const demi = (i) => (i < 4 ? [2, 3, 4, 4][i] : i < 13 ? 5 : Math.max(1, Math.round(5 - (i - 12) * 0.45)));
+  const dorsale = [2, 4, 6, 7, 4, 2];
+  const queue = (j) => [-(3 + j * 2), 2 + j];
+  // contour du corps et des nageoires, puis remplissage
+  col(-1, -2, 1, noir);
+  for (let i = 0; i < L; i++) col(i, -demi(i) - 1, Math.round(demi(i) * 0.8) + 1, noir);
+  dorsale.forEach((h, k) => col(7 + k, -6 - h, -5, noir));
+  // queue en croissant : pleine près du corps, deux lobes au bout
+  for (let j = 0; j < 5; j++) {
+    const [a, b] = queue(j);
+    if (j < 2) col(L + j, a - 1, b + 1, noir);
+    else {
+      col(L + j, a - 1, a + 2, noir);
+      col(L + j, b - 2, b + 1, noir);
+    }
+  }
+  for (let k = 0; k < 4; k++) col(8 + k, 4, 6 + k, noir);
+  for (let i = 0; i < L; i++) {
+    const h = demi(i);
+    col(i, -h, 0, dos);
+    if (h > 1) col(i, 1, Math.round(h * 0.8), ventre);
+  }
+  dorsale.forEach((h, k) => col(7 + k, -5 - h, -5, dos));
+  for (let j = 0; j < 5; j++) {
+    const [a, b] = queue(j);
+    if (j < 2) col(L + j, a, b, dos);
+    else {
+      col(L + j, a, a + 1, dos);
+      col(L + j, b - 1, b, dos);
+    }
+  }
+  for (let k = 0; k < 4; k++) col(8 + k, 5, 5 + k, dos);
+  // œil, gueule ouverte et dents
+  col(4, -2, -2, brule ? '#ffd23f' : '#ffffff');
+  col(3, -2, -2, noir);
+  for (let i = 1; i <= 6; i++) col(i, 1, 2, '#7a1a22');
+  for (const i of [2, 4, 6]) col(i, 1, 1, '#ffffff');
+  for (const i of [3, 5]) col(i, 2, 2, '#ffffff');
+  if (brule) for (const [i, y] of [[6, -3], [11, -2], [16, -2], [9, 1], [14, 0]]) if ((Math.floor(t / 120) + i) % 3) col(i, y, y, '#ff7a1a');
+}
+
+// Grand aileron qui fend la lave : gris, il rougit à mesure (chaud de 0 à 1) ; bourrelet incandescent et
+// gouttes de lave qui sautent autour.
+function aileronLave(g, O, x, y, sens, chaud, t) {
+  const R = (a, b, w, h, c) => {
+    g.fillStyle = c;
+    g.fillRect(x + a, y + b, w, h);
+  };
+  const H = 14;
+  const larg = (r) => Math.max(1, Math.round((H - r) * 0.85));
+  const debut = (r) => (sens > 0 ? 2 - larg(r) : -2);
+  for (let r = 0; r < H; r++) R(debut(r) - 1, -r - 2, larg(r) + 2, 1, '#15151f');
+  R(debut(H - 1), -H - 2, 1, 1, '#15151f');
+  const gris = O.melange('#6a7886', '#e3442a', chaud);
+  for (let r = 0; r < H - 1; r++) {
+    R(debut(r), -r - 1, larg(r), 1, gris);
+    R(sens > 0 ? 1 : -2, -r - 1, 1, 1, O.melange('#a8b4c0', '#ffb52e', chaud));
+  }
+  R(-10, 0, 20, 1, LAVE[2]);
+  R(-7, 1, 14, 1, LAVE[1]);
+  R(-5 + (Math.floor(t / 90) % 3) * 2, 0, 4, 1, LAVE[3]);
+  for (let i = 0; i < 4; i++) {
+    const ph = (t / 380 + i / 4) % 1;
+    R((i % 2 ? 1 : -1) * (5 + i * 2) + Math.round(ph * (i % 2 ? 3 : -3)), -Math.round(Math.sin(ph * Math.PI) * 6), 1, 1, LAVE[3]);
+  }
+}
+
+// Easter egg du bassin : le requin saute dans la lave (phase 1), la traverse en fumant et fait demi-tour (2), puis
+// ressort noirci et replonge dans son bassin (3). Dessiné par la case de lave devant le bout droit du bassin, donc
+// après le bassin et la lave de gauche.
+function sautRequin(g, P, O, it, effet, t) {
+  const W = monde(P, it);
+  const s = effet.source;
+  const d = effet.depuis;
+  const A = [s.x + 2.4, s.y + 1.0, 15];
+  const B = [s.x + 0.8, s.y + 2.6, 2];
+  const C = [s.x + 0.4, s.y + 2.5, 2];
+  const D = [s.x + 1.6, s.y + 0.9, 15];
+  const vol = (u, v, haut, p, brule) => {
+    const [x0, y0] = W(...arc(u, v, haut, p));
+    const [x1, y1] = W(...arc(u, v, haut, Math.min(1, p + 0.02)));
+    requinVol(g, x0, y0, x1 < x0 ? -1 : 1, (y1 - y0) / Math.max(1, Math.abs(x1 - x0)), brule, t);
+  };
+  if (d < 1350) vol(A, B, 46, d / 1500, false);
+  const [bx, by] = W(...B);
+  gerbe(g, bx, by, (d - 1350) / 650, [LAVE[3], LAVE[1], '#fff3a0', LAVE[2]], 14, 20, 16);
+  if (d >= 1800 && d < 3600) {
+    const aller = d < 2800;
+    const k = aller ? (d - 1800) / 1000 : (d - 2800) / 800;
+    const x = aller ? B[0] - k * 1.4 : B[0] - 1.4 + k * 1.0;
+    const [fx, fy] = W(x, C[1], 1.5);
+    aileronLave(g, O, Math.round(fx), Math.round(fy), aller ? -1 : 1, (d - 1800) / 1800, t);
+    for (let i = 0; i < 3; i++) {
+      const ph = (d / 600 + i / 3) % 1;
+      bouffee(g, fx + Math.sin(d / 150 + i) * 3, fy - 18 - ph * 22, 2 + ph * 4, `rgba(150,144,150,${(0.75 * (1 - ph)).toFixed(2)})`);
+    }
+  }
+  if (d >= 3600 && d < 4900) {
+    const p = (d - 3600) / 1400;
+    for (let k = 5; k >= 1; k--) {
+      const q = p - k * 0.05;
+      if (q <= 0) continue;
+      const [x, y] = W(...arc(C, D, 50, q));
+      bouffee(g, x, y, 2 + k * 0.7, `rgba(70,66,72,${(0.55 - k * 0.08).toFixed(2)})`);
+    }
+    vol(C, D, 50, p, true);
+  }
+  const [cx, cy] = W(...C);
+  gerbe(g, cx, cy, (d - 3600) / 500, [LAVE[3], LAVE[1], LAVE[2]], 10, 12, 10);
+}
+
 // ---------- animations du repaire ----------
-function animLave(g, it, tx, ty, t, O) {
+function animLave(g, it, tx, ty, t, O, effet) {
   const P = O.projeteur(tx + 32, ty);
   // bulles qui gonflent et éclatent, filets clairs qui glissent vers l'avant
   const ph = (t / 1700 + it.x * 0.37) % 1;
@@ -764,10 +1060,33 @@ function animLave(g, it, tx, ty, t, O) {
       O.pixel(g, P(1, 0.3 + i * 0.16, -1 - v * 10), LAVE[3], 1, 2);
     }
   }
+  // easter egg du bassin : le saut du requin est dessiné par la case de lave devant le bout droit du bassin
+  if (effet && effet.source.type === 'dir_requins' && it.x === effet.source.x + 2 && it.y === effet.source.y + 2) sautRequin(g, P, O, it, effet, t);
 }
 
-function animRequins(g, it, tx, ty, t, O) {
+// Aileron qui tourne dans le bassin, bulles. Easter egg : l'aileron disparaît pendant le saut (le requin est dans la
+// lave), gerbes d'eau au départ et au retour, puis nuage de vapeur quand le requin roussi refroidit.
+function animRequins(g, it, tx, ty, t, O, effet) {
   const P = O.projeteur(tx + 32, ty);
+  const d = effet ? effet.depuis : 0;
+  if (!effet || d >= 4900) aileronBassin(g, P, t);
+  const b = (t / 900) % 1;
+  O.pixel(g, P(0.5, 1.5, 4 + b * 10), 'rgba(200,235,255,0.7)', 1, 1);
+  O.pixel(g, P(2.4, 1.2, 4 + ((b + 0.5) % 1) * 10), 'rgba(200,235,255,0.7)', 1, 1);
+  if (!effet) return;
+  const EAU_ = ['#e6fbff', '#8fc8ea', '#ffffff'];
+  const [ax, ay] = P(2.4, 1.0, 15);
+  gerbe(g, ax, ay, d / 600, EAU_, 12, 16, 12);
+  const [rx, ry] = P(1.6, 0.9, 15);
+  gerbe(g, rx, ry, (d - 4880) / 600, EAU_, 12, 14, 12);
+  if (d > 4900) {
+    const k = (d - 4900) / 1100;
+    for (let i = 0; i < 5; i++) {
+      bouffee(g, rx - 8 + i * 4, ry - 6 - k * 26 - (i % 2) * 5, 2 + k * 5, `rgba(235,240,245,${(0.75 * (1 - k)).toFixed(2)})`);
+    }
+  }
+}
+function aileronBassin(g, P, t) {
   const a = t / 2600;
   const x = 1.5 + Math.cos(a) * 1.05;
   const y = 1.0 + Math.sin(a) * 0.55;
@@ -786,9 +1105,6 @@ function animRequins(g, it, tx, ty, t, O) {
     const w = 5 - k;
     g.fillRect(sens > 0 ? cx - w + 2 : cx - 1, cy - k - 1, Math.max(1, w - 1), 1);
   }
-  const b = (t / 900) % 1;
-  O.pixel(g, P(0.5, 1.5, 4 + b * 10), 'rgba(200,235,255,0.7)', 1, 1);
-  O.pixel(g, P(2.4, 1.2, 4 + ((b + 0.5) % 1) * 10), 'rgba(200,235,255,0.7)', 1, 1);
 }
 
 function animHologramme(g, it, tx, ty, t, O) {
@@ -826,16 +1142,129 @@ function animHologramme(g, it, tx, ty, t, O) {
   }
 }
 
-function animFusee(g, it, tx, ty, t, O) {
+// Vapeur sous la fusée. Easter egg du bouton rouge : vapeur de plus en plus forte et lampe de la tour qui clignote
+// pendant le compte à rebours (1), décollage (2), retour en douceur sur le pas de tir (3).
+function animFusee(g, it, tx, ty, t, O, effet) {
   const P = O.projeteur(tx + 32, ty);
-  // vapeur qui s'échappe sous la fusée
-  for (let i = 0; i < 4; i++) {
-    const ph = (t / 1800 + i * 0.25) % 1;
-    const [x, y] = P(1.1 + (i % 2 ? 0.3 : -0.3) * ph * 2, 1.1 + (i < 2 ? 0.3 : -0.2) * ph * 2, 6 + ph * 14);
-    g.fillStyle = `rgba(235,240,245,${(0.6 * (1 - ph)).toFixed(2)})`;
-    const w = 3 + Math.round(ph * 5);
-    g.fillRect(x - w, y - 2, w * 2, 3);
+  const phase = effet ? effet.phase : 0;
+  const d = effet ? effet.depuis : 0;
+  if (phase <= 1) {
+    const n = phase ? 4 + Math.floor(d / 800) : 4;
+    for (let i = 0; i < n; i++) {
+      const ph = (t / (phase ? 1000 : 1800) + i / n) % 1;
+      const a = i * 2.4;
+      const [x, y] = P(1.1 + Math.cos(a) * 0.35 * ph * 2, 1.1 + Math.sin(a) * 0.35 * ph * 2, 6 + ph * 14);
+      g.fillStyle = `rgba(235,240,245,${(0.6 * (1 - ph)).toFixed(2)})`;
+      const w = 3 + Math.round(ph * 5);
+      g.fillRect(x - w, y - 2, w * 2, 3);
+    }
+    if (phase && Math.floor(d / 250) % 2) {
+      const [x, y] = P(0.3, 0.3, 95);
+      g.fillStyle = '#ffe0e0';
+      g.fillRect(x, y, 2, 2);
+      g.fillStyle = 'rgba(255,80,80,0.7)';
+      g.fillRect(x - 5, y, 3, 1);
+      g.fillRect(x + 4, y, 3, 1);
+    }
+    return;
   }
+  const fv = spriteFuseeVol(O);
+  let h;
+  let flamme;
+  if (phase === 2) {
+    // décollage : la fusée tremble, s'arrache du pas de tir et accélère jusqu'à sortir de l'écran
+    const s = (d - 7000) / 1000;
+    h = s < 0.5 ? 0 : 70 * (s - 0.5) ** 2;
+    flamme = s < 0.5 ? 6 + s * 36 : 26;
+    for (let z = 10; z < h; z += 12) {
+      const [x, y] = P(1.1, 1.1, z);
+      bouffee(g, x + Math.sin(z) * 2, y, 3 + Math.min(4, z / 40), 'rgba(225,228,235,0.55)');
+    }
+  } else {
+    // retour : elle redescend en freinant et se repose sur le pas de tir
+    const s = (d - 10000) / 3000;
+    h = 340 * (1 - s) ** 2;
+    flamme = 6 + (1 - s) * 5;
+  }
+  const jx = phase === 2 && h < 30 ? Math.round(Math.sin(d / 23)) : 0;
+  const [fx, fy] = P(1.1, 1.1, 6 + h);
+  flammeFusee(g, fx + jx, fy, flamme, t);
+  g.drawImage(fv.c, tx + fv.dx + jx, ty + fv.dy - Math.round(h));
+  if (phase === 2) nuagePasDeTir(g, P, (d - 7000) / 1000);
+  else if (h < 40) nuagePasDeTir(g, P, 0.4 + (1 - h / 40) * 0.6, 0.5);
+}
+
+// Flamme de la tuyère, pointe vers le bas : cœur blanc-jaune, bords orange et rouges.
+function flammeFusee(g, x, y, long, t) {
+  const L = Math.max(2, Math.round(long + (Math.floor(t / 60) % 3) - 1));
+  for (let k = 0; k < L; k++) {
+    const w = Math.max(1, Math.round(((L - k) / L) * (long > 12 ? 5 : 3)));
+    g.fillStyle = '#ff5a1f';
+    g.fillRect(x - w - 1, y + k, w * 2 + 2, 1);
+    g.fillStyle = '#ffb52e';
+    g.fillRect(x - w, y + k, w * 2, 1);
+    if (w > 2) {
+      g.fillStyle = '#fff3a0';
+      g.fillRect(x - w + 2, y + k, w * 2 - 4, 1);
+    }
+  }
+}
+
+// Nuage de fumée qui s'étale autour du pas de tir (s en secondes depuis l'allumage).
+function nuagePasDeTir(g, P, s, force = 1) {
+  const etendue = Math.min(1, s / 1.5);
+  const alpha = (s < 2 ? 0.85 : Math.max(0, 0.85 * (1 - (s - 2)))) * force;
+  if (alpha <= 0.02) return;
+  for (let i = 0; i < 14; i++) {
+    const a = i * 2.39996;
+    const r = (0.35 + 0.9 * etendue * force) * (0.55 + ((i * 37) % 10) / 22);
+    const [x, y] = P(1.1 + Math.cos(a) * r, 1.1 + Math.sin(a) * r, 4 + ((i * 13) % 7) + etendue * 6);
+    bouffee(g, x, y, 3 + etendue * 4 + (i % 3), `rgba(${i % 2 ? '236,238,242' : '205,208,216'},${alpha.toFixed(2)})`);
+  }
+}
+
+// Bouton rouge : il luit pendant l'effet, et l'écran du mur égrène le compte à rebours, gyrophares allumés.
+function animBouton(g, it, tx, ty, t, O, effet) {
+  if (!effet) return;
+  const P = O.projeteur(tx + 32, ty);
+  const d = effet.depuis;
+  if (Math.floor(d / 200) % 2) O.pixel(g, P(0.5, 0.5, 33), '#ffd0d0', 3, 1);
+  surMurDroit(g, P, it, O, ecranRebours(O, d), REBOURS.col - 5, 0);
+}
+
+// Écran du compte à rebours à l'instant d (ms depuis l'appui) : 00:07 … 00:01, puis 00:00 qui clignote. Dessin « à
+// plat » du mur (à partir de la colonne REBOURS.col - 5, ligne 0), mis en cache par état affiché. Le bas de l'écran,
+// que le diamant peut cacher, n'est pas repeint.
+const ECRANS_REBOURS = new Map();
+function ecranRebours(O, d) {
+  const reste = Math.max(0, Math.ceil((7000 - d) / 1000));
+  const eclat = d < 7000 ? d % 1000 < 140 : Math.floor(d / 250) % 2 === 0;
+  const tourne = Math.floor(d / 180) % 2;
+  const cle = reste + '|' + eclat + '|' + tourne;
+  let c = ECRANS_REBOURS.get(cle);
+  if (c) return c;
+  c = O.creerCanvas(REBOURS.l + 10, REBOURS.ligne + REBOURS.h - 4);
+  const g = c.getContext('2d');
+  const R = (x, y, w, h, col) => {
+    g.fillStyle = col;
+    g.fillRect(x, y, w, h);
+  };
+  // gyrophares allumés, l'un après l'autre
+  for (const x of [11, 69]) {
+    const on = (x === 11) === !!tourne;
+    R(x - 2, 4, 5, 4, on ? '#ff5a5a' : '#c01a22');
+    R(x - 1, 4, 1, 2, '#ffe0e0');
+    if (on) {
+      R(x - 7, 5, 4, 1, 'rgba(255,90,90,0.8)');
+      R(x + 4, 5, 4, 1, 'rgba(255,90,90,0.8)');
+      R(x - 6, 2, 3, 1, 'rgba(255,90,90,0.5)');
+      R(x + 4, 2, 3, 1, 'rgba(255,90,90,0.5)');
+    }
+  }
+  R(7, REBOURS.ligne + 2, REBOURS.l - 4, REBOURS.h - 8, eclat && reste ? '#2a0c0c' : '#120a0a');
+  if (reste || eclat) O.texteDouble(g, '00:0' + reste, 40, REBOURS.ligne + 5, eclat ? '#ffd0d0' : '#ff3b3b', '#5a0f0f');
+  ECRANS_REBOURS.set(cle, c);
+  return c;
 }
 
 function animDiamant(g, it, tx, ty, t, O) {
@@ -990,10 +1419,10 @@ function decorMursRepaire(g, cote, longueur, etage, O) {
     }
     R(cx - 4, cy - 2, 3, 3, '#f4d35e');
     R(cx + 2, cy - 2, 3, 3, '#f4d35e');
-    // compte à rebours au-dessus du diamant
-    const px = 8 * 32 + 10;
-    O.cadre(g, px, 12, 70, 28, '#3a3d44', '#120a0a');
-    O.texteDouble(g, '00:07', px + 35, 17, '#ff3b3b', '#5a0f0f');
+    // compte à rebours au-dessus du diamant (il défile quand on appuie sur le bouton rouge, voir animBouton)
+    const px = REBOURS.col;
+    O.cadre(g, px, REBOURS.ligne, REBOURS.l, REBOURS.h, '#3a3d44', '#120a0a');
+    O.texteDouble(g, '00:07', px + 35, REBOURS.ligne + 5, '#ff3b3b', '#5a0f0f');
     gyrophare(px + 6, 8);
     gyrophare(px + 64, 8);
     gyrophare(14 * 32 + 20, 10);
@@ -1092,7 +1521,19 @@ export const MEUBLES = {
 };
 export const ANIMES = {
   dir_piscine: animPiscine, dir_brasero: animBrasero, dir_lave: animLave, dir_requins: animRequins, dir_hologramme: animHologramme,
-  dir_fusee: animFusee, dir_diamant: animDiamant, dir_chat: animChat,
+  dir_fusee: animFusee, dir_diamant: animDiamant, dir_chat: animChat, dir_bouton: animBouton, dir_piano: animPiano,
+};
+// Easter eggs (web/clics.js) : un clic sur ces meubles lance une petite scène, puis tout revient comme avant.
+export const CLICS = {
+  // repaire : le bouton rouge lance le compte à rebours de 7 s sur l'écran du mur, la fusée décolle (phase 2) puis
+  // revient se poser (phase 3)
+  dir_bouton: { duree: 13000, declenche: ['dir_fusee'], phases: [7000, 10000] },
+  // repaire : le requin saute dans la lave, la traverse en fumant (phase 2) et retourne au bassin, noirci (phase 3)
+  dir_requins: { duree: 6000, declenche: ['dir_lave'], phases: [1500, 3600] },
+  // penthouse : le piano joue tout seul
+  dir_piano: { duree: 6000 },
+  // penthouse : un canard géant surgit dans la piscine et la traverse
+  dir_piscine: { duree: 8000, declenche: ['dir_piscine'] },
 };
 export const JEUX = {};
 export const SOLS = SOLS_DIR;

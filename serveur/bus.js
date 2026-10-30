@@ -6,7 +6,7 @@ import { etatInstallation as etatInstallationCodex } from './ia/codex-installati
 import { etat as etatBacASable } from './ia/codex-bac-a-sable.js';
 import path from 'node:path';
 import os from 'node:os';
-import { RACINE, REGLAGES, etages, racines } from './config.js';
+import { RACINE, REGLAGES, etages, racines, modeFable } from './config.js';
 import * as plateforme from './plateforme.js';
 import { chargerComptes, compteConnecte, dossierConfig, fournisseur as fournisseurDuCompte, adaptateur as adaptateurDuCompte } from './comptes.js';
 import { listeFournisseurs, FOURNISSEURS } from './ia/fournisseurs.js';
@@ -152,7 +152,8 @@ export function reglagesPublics() {
     ouvrirEnApp: REGLAGES.ouvrirEnApp !== false,
     entreeEnvoie: REGLAGES.entreeEnvoie === true,
     ecritureHorsProjet: REGLAGES.ecritureHorsProjet === true,
-    gardeFable: { actif: REGLAGES.gardeFable?.actif !== false, resteMin: REGLAGES.gardeFable?.resteMin ?? 30 },
+    gardeFable: { actif: modeFable() !== 'off', mode: modeFable(), resteMin: REGLAGES.gardeFable?.resteMin ?? 30 },
+    reserveFenetre: { actif: false, pct: 30, debut: 9, fin: 18, jours: 'semaine', ...(REGLAGES.reserveFenetre || {}) },
     navigateurApp: appInstallee(),
     miseAJourAuto: REGLAGES.miseAJourAuto !== false,
     dureeBulles: Number(REGLAGES.dureeBulles) || 1,

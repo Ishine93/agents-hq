@@ -6,6 +6,7 @@ import path from 'node:path';
 import { RACINE, REGLAGES } from '../config.js';
 import { chargerComptes } from '../comptes.js';
 import { dossiersSensibles } from './codex-etancheite.js';
+import { t } from '../i18n.js';
 
 export const PROFILS = ['lecture', 'lecture+tests', 'verif', 'edition', 'edition+tests', 'ops'];
 export const PROFILS_LECTURE = new Set(['lecture', 'lecture+tests', 'verif']);
@@ -23,21 +24,22 @@ export const PROFILS_ECRITURE = new Set(['edition', 'edition+tests', 'ops']);
  * Agents ACP (Grok, Cursor, Copilot…) : aucun bac à sable imposé par le QG ; le QG décide de chaque demande qui
  * passe par lui (permissions, fichiers, terminal : ia/acp-permissions.js). Tous les profils sont donc
  * « restreints », ops est refusé, et le mode prudent refuse les profils qui écrivent.
+ * Le motif d'un refus s'affiche dans le site (tâche impossible sur ce compte) : il est traduit.
  */
 export function profilGaranti(fournisseur, profil, reglages = REGLAGES) {
-  if (!PROFILS.includes(profil)) return { statut: 'refuse', motif: `profil inconnu : ${profil}` };
+  if (!PROFILS.includes(profil)) return { statut: 'refuse', motif: t('profil inconnu : {profil}', { profil }) };
   if (fournisseur === 'acp') return profilGarantiAcp(profil, reglages);
   if (fournisseur !== 'codex') return { statut: 'garanti', motif: null };
-  if (profil === 'ops') return { statut: 'refuse', motif: "Codex ne peut pas demander ton accord action par action (profil ops)" };
-  if (reglages.modeTravail === 'prudent' && PROFILS_ECRITURE.has(profil)) return { statut: 'refuse', motif: 'mode prudent : Codex ne sait pas demander ton accord avant chaque action' };
-  if (reglages.codex?.lectureStricte === true && PROFILS_LECTURE.has(profil)) return { statut: 'refuse', motif: 'lecture stricte demandée dans les réglages : Codex lancerait des commandes en lecture seule' };
+  if (profil === 'ops') return { statut: 'refuse', motif: t('Codex ne peut pas demander ton accord action par action (profil ops)') };
+  if (reglages.modeTravail === 'prudent' && PROFILS_ECRITURE.has(profil)) return { statut: 'refuse', motif: t('mode prudent : Codex ne sait pas demander ton accord avant chaque action') };
+  if (reglages.codex?.lectureStricte === true && PROFILS_LECTURE.has(profil)) return { statut: 'refuse', motif: t('lecture stricte demandée dans les réglages : Codex lancerait des commandes en lecture seule') };
   if (PROFILS_ECRITURE.has(profil)) return { statut: 'restreint', motif: 'écriture limitée aux dossiers de la tâche, .git en lecture, réseau coupé' };
   return { statut: 'garanti', motif: null };
 }
 
 function profilGarantiAcp(profil, reglages) {
-  if (profil === 'ops') return { statut: 'refuse', motif: "un agent ACP ne peut pas être tenu action par action (profil ops)" };
-  if (reglages.modeTravail === 'prudent' && PROFILS_ECRITURE.has(profil)) return { statut: 'refuse', motif: 'mode prudent : un agent ACP peut agir sans demander' };
+  if (profil === 'ops') return { statut: 'refuse', motif: t('un agent ACP ne peut pas être tenu action par action (profil ops)') };
+  if (reglages.modeTravail === 'prudent' && PROFILS_ECRITURE.has(profil)) return { statut: 'refuse', motif: t('mode prudent : un agent ACP peut agir sans demander') };
   return { statut: 'restreint', motif: "garde-fou du QG sur les demandes de l'agent, pas de bac à sable" };
 }
 

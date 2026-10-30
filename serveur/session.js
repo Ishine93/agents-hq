@@ -4,6 +4,7 @@
 import { trouverCompte } from './comptes.js';
 import { adaptateurDe } from './ia/fournisseurs.js';
 import { tronquer } from './ia/commun.js';
+import { t } from './i18n.js';
 
 export { cibleOutil, modificationDe } from './ia/commun.js';
 
@@ -23,14 +24,14 @@ export async function executerSession(args) {
   return adaptateurDe(compteObj).lancer({ ...args, compteObj });
 }
 
-// Raison lisible d'un échec de session.
+// Raison lisible d'un échec de session (montrée dans le site : traduite).
 export function raisonEchec(s) {
   // refus d'un fournisseur (profil, rôle, binaire) : la raison lisible est dans l'exception
   if (s.erreur && s.exception && ['profil_refuse', 'role_non_pris_en_charge', 'binaire_absent', 'bac_a_sable'].includes(s.erreur)) return tronquer(s.exception, 400);
   if (s.erreur) return s.erreur;
   if (s.exception) return tronquer(s.exception, 200);
-  if (!s.result) return 'session sans résultat';
+  if (!s.result) return t('session sans résultat');
   if (s.result.subtype !== 'success') return `${s.result.subtype}${s.result.errors?.length ? ' : ' + tronquer(s.result.errors.join(' ; '), 160) : ''}`;
-  if (s.result.structured_output == null) return 'pas de sortie structurée';
+  if (s.result.structured_output == null) return t('pas de sortie structurée');
   return null;
 }

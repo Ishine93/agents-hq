@@ -4,7 +4,9 @@
 // (`table` + `centre`, et le meuble `jeu` du même nom) pour les jeux à plusieurs. Dessin : web/meubles/pause.js.
 import { W, H, HW, s, grilles, spotsNeutres, zonesDe } from './outils.js';
 
-// Une place de jeu : case, orientation, activité et détails (assis, table, centre, pose…).
+// Une place de jeu : case, orientation, activité et détails (assis, table, centre, pose…). Les phrases viennent de
+// l'activité (SORTE_JEU et ARRIVEE_JEU dans web/scenes.js) ; `phrases` et `arrivee` les remplacent pour une place
+// (un « café » qui sert des cocktails, une « arcade » à peluches). Listes : web/phrases.js.
 const J = (x, y, dir, activite, extra = {}) => s(x, y, dir, { activite, ...extra });
 
 // ---------- Plage : sable, mer, paillote, volley ----------
@@ -79,12 +81,12 @@ function cartePlage() {
 
   // Places de jeu, dans l'ordre où on les remplit : les duos d'abord (volley, raquettes, château, pétanque).
   const V = (x, y, dir, pose) => J(x, y, dir, 'volley', { table: 'volley', centre: [6.5, 6.5], pose, rythme: pose === 'taper' ? 260 : 600 });
-  const R = (x, y, dir) => J(x, y, dir, 'pingpong', { table: 'raquettes', centre: [10.5, 4.5] });
+  const R = (x, y, dir) => J(x, y, dir, 'pingpong', { table: 'raquettes', centre: [10.5, 4.5], phrases: 'jeuRaquettes' });
   const Ch = (x, y, dir) => J(x, y, dir, 'chateau', { table: 'chateau', centre: [8.5, 10.5], pose: 'taper', rythme: 380 });
   const Pq = (x, y, dir) => J(x, y, dir, 'petanque', { table: 'petanque', centre: [4.5, 10.5], pose: 'taper', rythme: 900 });
-  const Bar = (x) => J(x, 2, 'ne', 'cafe', { assis: true, cafe: true, centre: [x + 0.5, 1.5] });
+  const Bar = (x) => J(x, 2, 'ne', 'cafe', { assis: true, cafe: true, centre: [x + 0.5, 1.5], phrases: 'jeuBar', arrivee: 'jeuBar' });
   const Tr = (y) => J(12, y, 'se', 'transat', { assis: true, centre: [14.5, y + 0.5], pose: 'lire', rythme: 1200 });
-  const Gl = (x, y, dir) => J(x, y, dir, 'cafe', { cafe: true, centre: [0.5, 7.5] });
+  const Gl = (x, y, dir) => J(x, y, dir, 'cafe', { cafe: true, centre: [0.5, 7.5], phrases: 'jeuGlace', arrivee: 'jeuGlace' });
   const Rg = (x, y, dir, centre) => J(x, y, dir, 'regarde', { centre });
   const jeu = [
     V(5, 4, 'sw', 'lever'), V(7, 8, 'ne', 'taper'), R(10, 2, 'sw'), R(10, 6, 'ne'), Ch(7, 10, 'se'), Ch(9, 10, 'nw'),
@@ -187,8 +189,8 @@ function carteFoire() {
   const Cb = (x) => J(x, 2, 'ne', 'chamboule', { table: 'chamboule', centre: [5, 0.5], pose: 'lever', rythme: 500 });
   const Ti = (x) => J(x, 2, 'ne', 'tir', { table: 'tir', centre: [8.5, 0.5], pose: 'taper', rythme: 650 });
   const Fo = (x) => J(x, 1, 'ne', 'force', { table: 'force', centre: [12.5, 0.5], pose: 'lever', rythme: 700 });
-  const Pi = (x) => J(x, 1, 'ne', 'arcade', { centre: [x + 0.5, 0.5] });
-  const Ba = (x, y) => J(x, y, 'nw', 'cafe', { cafe: true, centre: [0.5, y + 0.5] });
+  const Pi = (x) => J(x, 1, 'ne', 'arcade', { centre: [x + 0.5, 0.5], phrases: 'jeuPince', arrivee: 'arriveeStand' });
+  const Ba = (x, y) => J(x, y, 'nw', 'cafe', { cafe: true, centre: [0.5, y + 0.5], phrases: 'jeuBarbe', arrivee: 'jeuBarbe' });
   const Rg = (x, y, dir, centre, extra = {}) => J(x, y, dir, 'regarde', { centre, ...extra });
   const jeu = [
     Pc(4, 6, 'se'), Pc(7, 6, 'nw'), Au(11, 7, 'se'), Au(13, 9, 'nw'), Cb(4), Cb(5), Ti(7), Ti(9), Fo(12), Fo(11),

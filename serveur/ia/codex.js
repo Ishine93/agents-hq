@@ -17,7 +17,7 @@ import { profilGaranti, profilCodex, tomlInline, EXCLUSIONS_ENV } from './profil
 import { cibleOutil, modificationDe, diffLignes, finDe, profilDemande, consignesQg as consignes, copierSkills } from './commun.js';
 export { ROLES_LECTURE, PROFILS_LECTURE, profilDemande } from './commun.js';
 import { chargerEquivalences, convertirModele, convertirEffort } from './fournisseurs.js';
-import { lireStructure, consigneRelance, RELANCES_STRUCTURE } from './schema.js';
+import { lireStructure, consigneRelance, relancesCommeClaude } from './schema.js';
 import { t } from '../i18n.js';
 import * as bacASable from './codex-bac-a-sable.js';
 
@@ -193,8 +193,9 @@ const reinitDe = (message) => {
  *   ROLES_LECTURE), profil, cwd, dossiersSup, pieces, consignes (défaut : options.systemPrompt), schema (sortie
  *   structurée, aussi options.outputFormat.schema), outilsQg { definitions } (outils MCP du QG, ceux du DG
  *   compris), mcp { nom: { command, args, env } | { url, headers } } (ignorés en lecture seule), skills, titre.
- * Sortie structurée : --output-schema, puis JSON final vérifié ; invalide → une relance (exec resume) avec
- * les erreurs. Reprise : options.resume (jamais pour un fork : Codex ne sait pas copier une conversation).
+ * Sortie structurée : --output-schema, puis JSON final vérifié ; invalide → relancée (exec resume) avec les
+ * erreurs, autant de fois que Claude Code relance la sienne (schema.js › relancesCommeClaude : 4 relances).
+ * Reprise : options.resume (jamais pour un fork : Codex ne sait pas copier une conversation).
  * Sans `demande`, le rôle n'est pas pris en charge (role_non_pris_en_charge).
  */
 export async function lancer({ prompt, images = [], options = {}, compte, compteObj, demande = null, surInit, surOutil, surActivite, surImage, surCommande, surModification, surPensee, canal, conso = {} }) {
@@ -203,7 +204,7 @@ export async function lancer({ prompt, images = [], options = {}, compte, compte
   if (canal) canal.injecter = async () => false;
   if (!demande) {
     sortie.erreur = 'role_non_pris_en_charge';
-    sortie.exception = `Codex ne peut pas encore tenir le rôle « ${meta.role} » (prévu au lot 2)`;
+    sortie.exception = t('Codex ne peut pas encore tenir le rôle « {role} »', { role: meta.role });
     return sortie;
   }
   const { lectureSeule, profil } = profilDemande(demande);
@@ -212,7 +213,7 @@ export async function lancer({ prompt, images = [], options = {}, compte, compte
   const garantie = profilGaranti('codex', profil);
   if (garantie.statut === 'refuse') {
     sortie.erreur = 'profil_refuse';
-    sortie.exception = `profil ${profil} refusé sur Codex : ${garantie.motif}`;
+    sortie.exception = t('profil {profil} refusé sur Codex : {motif}', { profil, motif: garantie.motif });
     return sortie;
   }
   // Codex ne sait pas copier une conversation (fork) : reprendre l'original le modifierait pendant qu'il travaille.
@@ -221,14 +222,14 @@ export async function lancer({ prompt, images = [], options = {}, compte, compte
   const cmd = plateforme.codexCommande();
   if (!cmd.present) {
     sortie.erreur = 'binaire_absent';
-    sortie.exception = 'Codex introuvable sur ce PC (Réglages › Comptes IA › Installer Codex, ou Codex CLI officiel)';
+    sortie.exception = t('Codex introuvable sur ce PC (Réglages › Comptes IA › Installer Codex, ou Codex CLI officiel)');
     return sortie;
   }
   const signal = options.abortController?.signal || null;
   const liberer = await prendreSlot(compteObj, signal);
   if (signal?.aborted) {
     liberer();
-    sortie.exception = 'interrompue avant le lancement';
+    sortie.exception = t('interrompue avant le lancement');
     return sortie;
   }
 
@@ -283,7 +284,7 @@ export async function lancer({ prompt, images = [], options = {}, compte, compte
 
   // ---- traduction des événements JSONL en rappels du QG
   const connus = new Map(); // fichier → dernier contenu connu (diffs)
-  const vus = new Set(); // identifiants d'éléments déjà traités en « completed »
+  const vus = new Set(); // identifiants d'éléments déjà traités en « completed » (vidé à chaque lancement)
   let dernierMessage = '';
   let usageTour = null;
   const noterErreur = (message) => {
@@ -416,15 +417,19 @@ export async function lancer({ prompt, images = [], options = {}, compte, compte
     };
   }
   let relances = 0;
+  const relancesMax = schema ? relancesCommeClaude() : 0;
   let lu = null;
   try {
     let texte = reprise ? prompt : `${consignes(demande, skillsCopies)}\n\n${prompt}`;
     let threadId = reprise;
     for (;;) {
+      // chaque `codex exec` (resume compris) renumérote ses éléments depuis le début (item_0, item_1…) : sans
+      // ce ménage, la réponse d'une relance ou d'un complément serait prise pour un doublon et ignorée
+      vus.clear();
       courant = lancerCodex({ args: argsPour(threadId), env, cwd, prompt: texte, signal, surEvenement: traiter, commande: cmd });
       const r = await courant.fin;
       if (signal?.aborted) {
-        sortie.exception = sortie.exception || 'session interrompue';
+        sortie.exception = sortie.exception || t('session interrompue');
         break;
       }
       if (complement) {
@@ -438,12 +443,12 @@ export async function lancer({ prompt, images = [], options = {}, compte, compte
         if (!threadId) texte = `${consignes(demande, skillsCopies)}\n\n${prompt}\n\n${texte}`;
         continue;
       }
-      if (r.erreur) noterErreur(`Codex impossible à lancer : ${r.erreur.message}`);
-      else if (r.code !== 0 && !sortie.erreur && !sortie.exception) noterErreur(`codex a quitté avec le code ${r.code}${r.stderr ? ' : ' + r.stderr.trim().slice(-600) : ''}`);
+      if (r.erreur) noterErreur(t('Codex impossible à lancer : {erreur}', { erreur: r.erreur.message }));
+      else if (r.code !== 0 && !sortie.erreur && !sortie.exception) noterErreur(t('Codex s’est arrêté (code {code})', { code: r.code }) + (r.stderr ? ' : ' + r.stderr.trim().slice(-600) : ''));
       if (schema && !sortie.erreur && !sortie.exception) {
-        // sortie structurée vérifiée contre le schéma ; invalide → une relance dans la même conversation
+        // sortie structurée vérifiée contre le schéma ; invalide → relance dans la même conversation, avec les erreurs
         lu = lireStructure(dernierMessage, schema);
-        if (!lu.structure && relances < RELANCES_STRUCTURE && sortie.sessionId) {
+        if (!lu.structure && relances < relancesMax && sortie.sessionId) {
           relances += 1;
           texte = consigneRelance(lu.erreurs);
           threadId = sortie.sessionId;
@@ -454,7 +459,8 @@ export async function lancer({ prompt, images = [], options = {}, compte, compte
       break;
     }
     if (!sortie.erreur && !sortie.exception) {
-      // toujours invalide après la relance → « pas de sortie structurée » (raisonEchec), comme pour Claude
+      // toujours invalide après les relances → « pas de sortie structurée » (raisonEchec) ; l'ordonnanceur fait
+      // alors un nouvel essai, comme après « error_max_structured_output_retries » de Claude
       const structure = schema ? lu?.structure ?? null : null;
       if (schema && !structure) sortie.erreursStructure = lu?.erreurs || [];
       sortie.relancesStructure = relances;

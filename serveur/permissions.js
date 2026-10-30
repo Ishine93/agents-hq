@@ -197,6 +197,37 @@ function sorteAction(outil, input = {}) {
   return outil;
 }
 
+// 1.0.11 : une commande qui demande les droits administrateur ouvre une fenêtre Windows (contrôle de compte) qui
+// bloque l'agent jusqu'au retour de l'utilisateur. Elle est refusée, quel que soit le profil.
+const ADMIN = /-Verb\s+['"]?RunAs\b|\brunas(\.exe)?\s+\/|\b(g?sudo)(\.exe)?\s|\bStart-Process\b[^\n|;]*\bRunAs\b|\bnircmd(c)?(\.exe)?\s+elevate\b/i;
+export const demandeAdmin = (commande) => ADMIN.test(String(commande || ''));
+
+/** Crochet PreToolUse des agents : refus des commandes en administrateur (Bash et PowerShell). */
+export function crochetsAdmin() {
+  return {
+    PreToolUse: [{
+      matcher: 'Bash|PowerShell',
+      hooks: [async (entree) => {
+        if (!demandeAdmin(entree?.tool_input?.command)) return { continue: true };
+        return {
+          hookSpecificOutput: {
+            hookEventName: 'PreToolUse',
+            permissionDecision: 'deny',
+            permissionDecisionReason: "Refusé par le QG : cette commande demande les droits administrateur, et la fenêtre de Windows bloquerait le travail jusqu'au retour de l'utilisateur. Fais sans ; si c'est vraiment nécessaire, dis-le dans ton rapport.",
+          },
+        };
+      }],
+    }],
+  };
+}
+
+/** Plusieurs jeux de crochets en un (les entrées d'un même événement s'ajoutent). */
+export function fusionnerCrochets(...jeux) {
+  const r = {};
+  for (const j of jeux) for (const [ev, liste] of Object.entries(j || {})) r[ev] = [...(r[ev] || []), ...liste];
+  return Object.keys(r).length ? r : undefined;
+}
+
 export function canUseToolPour(tache) {
   return async (toolName, input, { signal, suggestions, blockedPath }) => {
     const fichier = fichierVise(toolName, input);

@@ -42,12 +42,13 @@ export function zonesDe(zoneDe) {
 }
 
 // Grilles de collision (meubles de plusieurs cases : w × h) et arêtes des cloisons.
-// Un meuble `passage: true` (tapis, flaque, marquage au sol) se dessine sans bloquer.
+// Un meuble `passage: true` se dessine sans bloquer, mais par-dessus les avatars de sa case ; un meuble plat
+// (tapis, flaque, marquage) prend `sol: true` : il est peint avec le sol, sous les avatars, et ne bloque pas non plus.
 export function grilles(meubles, cloisons, autresBloques = []) {
   const bloque = new Uint8Array(W * H);
   const siege = new Uint8Array(W * H);
   for (const it of meubles) {
-    if (it.passage) continue;
+    if (it.passage || it.sol) continue; // meuble de passage, ou plat au sol (tapis, marquage) : on marche dessus
     for (let dy = 0; dy < (it.h || 1); dy++) {
       for (let dx = 0; dx < (it.w || 1); dx++) {
         const x = it.x + dx;

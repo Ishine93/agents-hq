@@ -15,6 +15,10 @@
     "natures": { "impl": 8000000, "analyse": 4500000, "bench": 2000000, "test": 3000000, "review": 1500000, "doc": 5000000, "asset": 4000000, "synthese": 1500000, "ops": 2000000 },
     "dg": 1500000
   },
+  "poidsFenetre": {
+    "note": "1.0.11 : poids d'un niveau de modèle dans la fenêtre de 5 h, pour un même $. Deux mesures (dossier D3 du 29/10/2026 et 06-mesure.md) : un $ de Fable remplit la fenêtre environ deux fois plus vite qu'un $ d'Opus. Niveau absent : 1.",
+    "max": 2
+  },
   "pointsParDollar": {
     "note": "Points de la fenêtre de 5 h par $ d'équivalent API, avant que le QG ait appris le rapport du compte (C2). Max : la fenêtre est passée à 100 % pour environ 100 à 105 $ le 26/10/2026 (06-mesure.md §7, une seule observation, à confirmer). Forfait absent de cette liste : pas de % tant que le rapport n'est pas appris.",
     "max": 0.97

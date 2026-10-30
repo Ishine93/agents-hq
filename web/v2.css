@@ -153,7 +153,7 @@ ol.param-liste li::before { counter-increment: rang; content: counter(rang) ".";
 .accueil-fil li::before { content: counter(etape) '. '; }
 .accueil-fil li.courante { background: var(--accent); color: #fff; font-weight: 700; }
 .accueil-fil li.faite { color: #9fe3b4; }
-.accueil-contenu { min-height: 260px; }
+.accueil-contenu { min-height: 260px; flex-shrink: 0; }
 .accueil-contenu .gros, .conso-economie .gros { font-size: 17px; font-weight: 800; }
 .accueil-intro ul, .accueil-astuces, .accueil-garde ul { margin: 6px 0 12px; padding-left: 20px; line-height: 1.6; }
 .accueil-garde { border: 1px solid #2d6b45; background: rgba(63, 211, 107, 0.07); border-radius: 8px; padding: 10px 12px; margin-top: 12px; }
@@ -345,6 +345,10 @@ ol.param-liste li::before { counter-increment: rang; content: counter(rang) ".";
   #btn-documents span, #btn-reglages span { display: none; }
   .cible-saisie { max-width: 180px; }
 }
+/* départ programmé (1.0.11) */
+.reglage-cout #depart-demande { max-width: 170px; }
+.reglage-cout #depart-heure { width: 92px; }
+.reglage-cout.differe #depart-demande { font-weight: 600; }
 /* la pastille Coût (1.0.6) tient dans la barre : icône au lieu du libellé, compte, cible et saisie plus étroits */
 @media (max-width: 1600px) {
   .reglage-cout .lib { display: none; }

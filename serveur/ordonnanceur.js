@@ -3,7 +3,7 @@
 // Le « moteur » (sessions Claude réelles ou simulation) est injecté par index.js.
 import fs from 'node:fs';
 import path from 'node:path';
-import { REGLAGES, RACINE, etage as trouverEtage, etages as tousLesEtages, racines } from './config.js';
+import { REGLAGES, RACINE, etage as trouverEtage, etages as tousLesEtages, racines, modeFable } from './config.js';
 import { etat, majDossier, changerEtatTache, majTache, message, majDg, emettre, alerte, effacerDossier, cacherDossier, montrerDossier } from './bus.js';
 import { canUseToolPour, refuserPour, demander } from './permissions.js';
 import { validerTaches, compteDg } from './dg.js';
@@ -16,7 +16,7 @@ import { sauverPiecesUtilisateur, piecePublique } from './pieces.js';
 import { notifier, notificationResolue } from './notifications.js';
 import { enregistrerReemploi, surLimitesLues, oublierDossier as oublierDossierConso, quotaFable, lireLimites, limitesDe, annoterConso, donneesConso } from './conso.js';
 import { demanderDecision, abandonnerDecisionsPour } from './decisions.js';
-import { estimerDossier, resumePublic, texteEstimation, demarrerCalibrage, jetonsDe } from './estimation.js';
+import { estimerDossier, resumePublic, texteEstimation, texteCoutFable, demarrerCalibrage, jetonsDe, reserveAtteinte, pointsHorsQg, bilanDossier, texteBilan } from './estimation.js';
 import { skillsAttribuables } from './skills.js';
 import { recruter, reembaucher, occuper, liberer, agent as agentEquipe, tirerPrenom, libererPrenom } from './equipe.js';
 import { t as tr } from './i18n.js';
@@ -57,7 +57,7 @@ let minuteriePause = null;
 // 1.0.7). Démo, un seul compte connecté, ou quota.pause « globale » : pause de tout le QG (pauseGlobale).
 const minuteriesComptes = new Map(); // compteId → minuterie de levée à la remise à zéro
 let minuterieAttente = null;
-let pausesVues = new Set();
+let pausesVues = new Map(); // compteId → type de sa pause (pour dire pourquoi il reprend)
 const pauseParCompte = () => !enDemo() && chargerPriorites().quota?.pause !== 'globale' && (multiIa() || comptesDisponibles().length > 1);
 const motifCompte = (id) => {
   const c = trouverCompte(id);
@@ -91,7 +91,7 @@ function tableau(d) {
 
 // skills : choisis à l'envoi ([{id, pour: 'dg' | 'tous' | 'demande'}]) ; skillsExclus : skills de partout à ne pas utiliser ici.
 // scenario : grand scénario de la démo (simulation), choisi par la démo elle-même
-export function creerDossier({ texte, etageAffiche, compte, compteAgents = null, compteImpose = null, dg = null, pieces = [], skills = [], skillsExclus = [], scenario = null, travail = null }) {
+export function creerDossier({ texte, etageAffiche, compte, compteAgents = null, compteImpose = null, dg = null, pieces = [], skills = [], skillsExclus = [], scenario = null, travail = null, departA = null }) {
   const e = trouverEtage(etageAffiche);
   const reglage = reglageDg();
   const d = {
@@ -119,11 +119,38 @@ export function creerDossier({ texte, etageAffiche, compte, compteAgents = null,
     skillsExclus,
     x: { dgSession: null, essaisPlan: 0, syntheseEnCours: false, pieces: [], complementsEnAttente: [], ...(scenario ? { scenario } : {}) },
   };
+  // départ programmé (1.0.11) : la demande attend son heure, rien n'est consommé d'ici là
+  if (departA && departA > Date.now() + 60000) Object.assign(d, { etat: 'programme', departA });
   majDossier(d);
   const jointes = joindre(d, pieces);
   message(d.id, 'toi', texte, d.etages.length ? d.etages : ['hall'], jointes.map(piecePublique));
-  planifierDossier(d, {});
+  if (d.etat === 'programme') {
+    message(d.id, 'systeme', tr('Demande programmée : le DG commencera à {heure}.', { heure: quandReprise(d.departA) }));
+    armerDepart(d);
+  } else planifierDossier(d, {});
   return d;
+}
+
+// ---------------------------------------------------------------- départ programmé (1.0.11)
+const departs = new Map(); // dossierId → minuterie
+
+function armerDepart(d) {
+  clearTimeout(departs.get(d.id));
+  const m = setTimeout(() => lancerMaintenant(d), Math.max(0, (d.departA || 0) - Date.now()));
+  m.unref?.();
+  departs.set(d.id, m);
+}
+
+/** Une demande programmée part tout de suite (son heure est venue, ou « Lancer maintenant »). */
+export function lancerMaintenant(d) {
+  clearTimeout(departs.get(d.id));
+  departs.delete(d.id);
+  if (d.etat !== 'programme') return false;
+  d.etat = 'planification';
+  majDossier(d);
+  message(d.id, 'systeme', tr('Départ de la demande : le DG commence.'));
+  planifierDossier(d, {});
+  return true;
 }
 
 // ---------------------------------------------------------------- demandes directes (1.0.10)
@@ -503,6 +530,7 @@ function ajouterTaches(d, liste) {
         compteDemande: p.compte || null,
       },
       skills: p.skills, // affichés dans la fiche
+      raisonModele: p.justification || null, // pourquoi ce modèle et cet effort (fiche, plan ; 1.0.11)
       agent: null, // id de l'agent qui porte la tâche (réserve : A1, A2…)
       reembauche: false,
       // Prénom affiché dès le plan : celui de l'agent de la réserve demandé, sinon celui de la future recrue.
@@ -518,12 +546,14 @@ function ajouterTaches(d, liste) {
   d.etages = [...new Set(tachesDe(d).map((t) => t.etage))];
   // C1 : estimation du plan, et accord demandé au-delà du seuil du profil (jamais bloquant sans estimation)
   const accord = preparerAccord(d, nouvelles, poserEstimation(d));
+  annoncerFable(d, nouvelles);
+  avertirSansGardeFou(d);
   majDossier(d);
   emettre('plan', {
     dossier: d.id,
     taches: tachesDe(d)
       .sort((a, b) => numRef(a) - numRef(b))
-      .map((t) => ({ ref: t.ref, titre: t.titre, etage: t.etage, deps: t.x.deps.map((x) => x.ref), modele: t.modele, effort: t.effort, estimation: t.estimation || null })),
+      .map((t) => ({ ref: t.ref, titre: t.titre, etage: t.etage, deps: t.x.deps.map((x) => x.ref), modele: t.modele, effort: t.effort, estimation: t.estimation || null, raisonModele: t.raisonModele || null })),
     estimation: d.estimation || null,
   }, d.id);
   if (accord) accorderCout(d, garde).catch((e) => console.error('accord coût', e.message));
@@ -538,6 +568,24 @@ function ajouterTaches(d, liste) {
 const ATTENTE_FABLE_MS = Number(process.env.QG_ATTENTE_FABLE_MS) || 10 * 60 * 1000; // (réglable pour les tests)
 const estFable = (t) => /fable/i.test(t.modele || '');
 
+// Personnalisé sans aucun garde-fou de dépense (1.0.11) : dit une fois, au premier plan du dossier.
+function avertirSansGardeFou(d) {
+  const p = profilEffectif(d);
+  if (p.cout !== 'personnalise' || d.x.averti1011 || p.seuilAccordFenetre != null || p.plafondTacheFacteur != null || p.maxCompactions != null) return;
+  d.x.averti1011 = true;
+  message(d.id, 'systeme', tr('Profil Personnalisé sans garde-fou de dépense : ni accord avant lancement, ni plafond par tâche, ni limite de compactions. Ce dossier peut consommer beaucoup sans te demander (Réglages › Coût).'));
+}
+
+// Au lancement du plan (1.0.11) : les tâches que le DG met sur Fable, sa raison pour chacune, et leur coût comparé à
+// Opus. Pour information : le dossier continue (seul le garde-fou, s'il est réglé pour, te demande quelque chose).
+function annoncerFable(d, nouvelles) {
+  const fable = nouvelles.filter((t) => estFable(t) && !TERMINAUX.has(t.etat));
+  if (!fable.length) return;
+  const raisons = fable.map((t) => (t.raisonModele ? `${t.ref} : ${t.raisonModele}` : t.ref)).join(' ; ');
+  const cout = texteCoutFable(d.estimation);
+  message(d.id, 'systeme', tr('Le DG met {n} tâche(s) sur Fable. {raisons}.', { n: fable.length, raisons }) + (cout ? ' ' + cout : ''));
+}
+
 function basculerOpus(t, raison) {
   if (!estFable(t)) return;
   t.x.modeleAvant = t.modele;
@@ -548,9 +596,16 @@ function basculerOpus(t, raison) {
 
 async function gardeFable(d, taches) {
   const g = REGLAGES.gardeFable || {};
+  const mode = modeFable(g);
   const fable = taches.filter(estFable);
-  if (!fable.length || g.actif === false) return;
+  if (!fable.length || mode === 'off') return;
+  if (mode === 'jamais') {
+    // le DG ne se voit plus proposer Fable ; reste le cas d'un plan fait avant le changement de réglage
+    for (const t of fable) if (!TERMINAUX.has(t.etat)) basculerOpus(t, tr('tu as choisi de ne jamais utiliser Fable'));
+    return;
+  }
   for (const t of fable) t.x.gardeFable = 'attente';
+  await null; // l'appelant pose d'abord l'estimation du plan (d.estimation), dont la question donne le coût
   let q = quotaFable(d.compte);
   if (!q || Date.now() - (q.lu || 0) > 5 * 60 * 1000) {
     await lireLimites(d.compte).catch(() => null);
@@ -563,22 +618,31 @@ async function gardeFable(d, taches) {
     }
     tick();
   };
-  if (!q) return liberer(false); // quota inconnu (démo, clé API…) : on ne bloque rien
-  if (q.reste <= 0) return liberer(true, tr('Fable est épuisé pour cette semaine'));
+  // quota inconnu (démo, clé API…) : on ne bloque rien, sauf si tu as demandé à être consulté à chaque fois
+  if (!q && mode !== 'toujours') return liberer(false);
+  if (q && q.reste <= 0) return liberer(true, tr('Fable est épuisé pour cette semaine'));
   const seuil = g.resteMin ?? 30;
-  if (q.reste >= seuil) return liberer(false);
+  if (mode === 'seuil' && q.reste >= seuil) return liberer(false);
   const refs = fable.map((t) => t.ref).join(', ');
-  const quand = q.reinit ? new Date(q.reinit).toLocaleString(REGLAGES.langueInterface === 'en' ? 'en-GB' : 'fr-FR', { weekday: 'long', hour: '2-digit', minute: '2-digit' }) : '—';
+  const min = ATTENTE_FABLE_MS / 60000;
+  const quand = q?.reinit ? new Date(q.reinit).toLocaleString(REGLAGES.langueInterface === 'en' ? 'en-GB' : 'fr-FR', { weekday: 'long', hour: '2-digit', minute: '2-digit' }) : '—';
+  const cout = texteCoutFable(d.estimation);
   const ctrl = new AbortController();
   const minuterie = setTimeout(() => ctrl.abort(), ATTENTE_FABLE_MS);
   const choix = await demanderDecision(fable[0], {
-    question: tr('Le DG a prévu {n} tâche(s) sur Fable ({refs}). Il te reste environ {reste} % de ta semaine Fable (remise à zéro {quand}). On garde Fable ? Sans réponse dans {min} min, elles passent sur Opus.', { n: fable.length, refs, reste: q.reste, quand, min: ATTENTE_FABLE_MS / 60000 }),
+    question: [
+      tr('Le DG a prévu {n} tâche(s) sur Fable ({refs}).', { n: fable.length, refs }),
+      q ? tr('Il te reste environ {reste} % de ta semaine Fable (remise à zéro {quand}).', { reste: q.reste, quand }) : null,
+      cout || null,
+      tr('On garde Fable ? Sans réponse dans {min} min, elles passent sur Opus.', { min }),
+    ].filter(Boolean).join(' '),
     options: [{ libelle: tr('Garder Fable') }, { libelle: tr('Passer sur Opus') }],
     brut: true,
   }, ctrl.signal);
   clearTimeout(minuterie);
-  if (choix === 'O1') liberer(false);
-  else liberer(true, choix === 'O2' ? tr('ton choix (il restait {reste} % de Fable)', { reste: q.reste }) : tr('pas de réponse, il ne restait que {reste} % de Fable', { reste: q.reste }));
+  if (choix === 'O1') return liberer(false);
+  if (choix === 'O2') return liberer(true, q ? tr('ton choix (il restait {reste} % de Fable)', { reste: q.reste }) : tr('ton choix'));
+  liberer(true, mode === 'seuil' ? tr('pas de réponse, il ne restait que {reste} % de Fable', { reste: q.reste }) : tr('pas de réponse en {min} min', { min }));
 }
 
 export function repondre(d, texte, pieces = []) {
@@ -602,6 +666,8 @@ export function repondre(d, texte, pieces = []) {
 
 export function annulerDossier(d) {
   if (['termine', 'annule', 'echec'].includes(d.etat)) return;
+  clearTimeout(departs.get(d.id)); // départ programmé (1.0.11)
+  departs.delete(d.id);
   d.etat = 'annule';
   notificationResolue(`QD-${d.id}`);
   majDossier(d);
@@ -768,7 +834,7 @@ export function tick() {
       }
       if (t.x.gardeFable === 'attente') continue;
       if (t.x.accordCout === 'attente') continue; // C1 : plan au-dessus du seuil, ton accord d'abord
-      if (estFable(t) && !t.x.direct && REGLAGES.gardeFable?.actif !== false && (quotaFable(d.compte)?.reste ?? 100) <= 0) basculerOpus(t, tr('Fable est épuisé pour cette semaine'));
+      if (estFable(t) && !t.x.direct && modeFable() !== 'off' && (quotaFable(d.compte)?.reste ?? 100) <= 0) basculerOpus(t, tr('Fable est épuisé pour cette semaine'));
       if (!t.x.approuvee) {
         demanderApprobation(t);
         continue;
@@ -1484,7 +1550,7 @@ function gererEchec(t, d, r, phase) {
     reveilDG(d, `${t.ref} ne peut pas tourner sur ${nomCompte(r.compte || compteTache(d))} : ${r.echec}`);
     return;
   }
-  if ((r.erreur === 'rate_limit' || r.limite) && estFable(t) && REGLAGES.gardeFable?.actif !== false && (!parCompte || surClaude(idCompte))) {
+  if ((r.erreur === 'rate_limit' || r.limite) && estFable(t) && modeFable() !== 'off' && (!parCompte || surClaude(idCompte))) {
     // limite de Fable (sa fenêtre à lui) : on relit les limites ; si c'est bien Fable qui est épuisé, la
     // tâche repart sur Opus, dans sa propre conversation, sans mettre le QG en pause
     const cl = parCompte ? idCompte : d.compte;
@@ -1829,10 +1895,22 @@ async function verifierFinDossier(d) {
   }
   d.synthese = res.sortie?.message || `${tr('Synthèse indisponible ({raison}).', { raison: res.echec })}\n${tableau(d)}`;
   message(d.id, 'dg', d.synthese, d.etages);
+  annoncerBilan(d, taches);
   const faites = taches.filter((t) => t.etat === 'done').length;
   d.etat = faites ? 'termine' : 'echec';
   notifier({ type: 'info', titre: tr(faites ? 'Dossier {id} terminé' : 'Dossier {id} en échec', { id: d.id }), texte: d.titre, dossier: d.id, telephone: 'fin' });
   majDossier(d);
+}
+
+// Bilan de fin (1.0.11) : ce que le dossier a coûté, en $ et en fenêtres de 5 h, et la part de Fable comparée à Opus.
+function annoncerBilan(d, taches) {
+  let texte = '';
+  try {
+    texte = texteBilan(bilanDossier(d, taches));
+  } catch (e) {
+    console.error('bilan', d.id, e.message);
+  }
+  if (texte) message(d.id, 'systeme', texte, d.etages);
 }
 
 // ---------------------------------------------------------------- lot C : estimation du plan, accord, mesures
@@ -2038,6 +2116,10 @@ export function reprendreDossiers() {
     for (const t of enGarde) t.x.gardeFable = null;
     const aGarder = enGarde.filter((t) => !TERMINAUX.has(t.etat));
     const garde = aGarder.length ? gardeFable(d, aGarder).catch((e) => console.error('garde Fable', e.message)) : null;
+    if (d.etat === 'programme') {
+      armerDepart(d); // heure passée pendant l'arrêt du serveur : il part tout de suite
+      continue;
+    }
     if (d.etat === 'planification') {
       message(d.id, 'systeme', tr('Le serveur a redémarré pendant la planification : le DG reprend son plan.'));
       planifierDossier(d, {});
@@ -2137,8 +2219,10 @@ function mettreCompteEnPause(id, { type, jusqua = null, raison = '' }) {
   if (nouveau) notifier({ type: 'info', titre: tr('{nom} en pause', { nom: nomCompte(id) }), texte: motifCompte(id), telephone: 'pause' });
 }
 
-// Un compte reprend : le DG qui l'attendait repart ; ses tâches repartent au prochain passage.
-function compteRepris(id) {
+// Un compte reprend : le DG qui l'attendait repart ; ses tâches repartent au prochain passage. Après une limite
+// d'usage ou la réserve de ta fenêtre, une notification le dit, avec l'heure (1.0.11).
+function compteRepris(id, type = null) {
+  if ((type === 'quota' || type === 'reserve') && aDuTravail()) notifier({ type: 'info', titre: tr('{nom} reprend', { nom: nomCompte(id) }), texte: tr('Le travail repart à {heure}.', { heure: quandReprise(Date.now()) }), telephone: 'pause' });
   fermerCartes(id);
   clearTimeout(minuteriesComptes.get(id));
   minuteriesComptes.delete(id);
@@ -2148,12 +2232,12 @@ function compteRepris(id) {
 surPauses((pauses) => {
   etat.ordonnanceur = { ...etat.ordonnanceur, pauses };
   emettre('ordonnanceur', { ordonnanceur: etat.ordonnanceur });
-  const levees = [...pausesVues].filter((id) => !(id in pauses));
-  pausesVues = new Set(Object.keys(pauses));
+  const levees = [...pausesVues].filter(([id]) => !(id in pauses));
+  pausesVues = new Map(Object.entries(pauses).map(([id, p]) => [id, p.type]));
   // différé : une levée peut survenir pendant un passage de l'ordonnanceur (pauseDe)
   if (levees.length)
     setImmediate(() => {
-      for (const id of levees) compteRepris(id);
+      for (const [id, type] of levees) compteRepris(id, type);
       tick();
     });
 });
@@ -2170,8 +2254,11 @@ export function pauseGlobale(raison, jusqua, extra = {}) {
   if (jusqua) minuteriePause = setTimeout(() => reprendre({ comptes: false }), Math.max(0, jusqua - Date.now()) + 30000);
 }
 
-// « Reprendre » : lève aussi les pauses des comptes (comptes: false pour la seule pause globale).
+// « Reprendre » : lève aussi les pauses des comptes (comptes: false pour la seule pause globale). Après une limite
+// d'usage ou la réserve de ta fenêtre, une notification dit que le travail repart, avec l'heure (1.0.11).
 export function reprendre({ comptes = true } = {}) {
+  const p = etat.ordonnanceur.pause;
+  if (p && (p.limite || p.reserve) && aDuTravail()) notifier({ type: 'info', titre: tr('QG relancé'), texte: tr('Le travail repart à {heure}.', { heure: quandReprise(Date.now()) }), telephone: 'pause' });
   clearTimeout(minuteriePause);
   if (comptes) viderPauses();
   etat.ordonnanceur = { ...etat.ordonnanceur, pause: null };
@@ -2184,30 +2271,92 @@ export function reprendre({ comptes = true } = {}) {
 // changé, fenêtre remise à zéro plus tôt), on reprend sans attendre l'heure annoncée.
 // Même chose pour un compte en pause (D4).
 function limitesRelues(compteId, l) {
+  verifierReserve(compteId, l);
+  surveillerHorsQg(compteId, l);
   const fenetres = Object.values(l.fenetres || {}).filter((f) => f.utilisation != null);
   const marge = fenetres.length > 0 && !fenetres.some((f) => f.utilisation >= 100);
   if (marge && pauseDe(compteId)?.type === 'quota') leverPauseCompte(compteId);
   const p = etat.ordonnanceur.pause;
   if (!p?.limite || (p.compte && p.compte !== compteId) || !marge) return;
-  notifier({ type: 'info', titre: tr('QG relancé'), texte: tr('Le forfait a de nouveau de la marge : le travail reprend sans attendre.'), telephone: 'pause' });
-  reprendre({ comptes: false });
+  reprendre({ comptes: false }); // (la notification « QG relancé » part de reprendre)
 }
 surLimitesLues(limitesRelues);
 demarrerCalibrage(); // C2 : chaque lecture des limites affine le rapport $ -> % de fenêtre du compte
 
+// Du travail en cours ou en attente (sinon, inutile de prévenir que le travail repart).
+const aDuTravail = () => [...etat.dossiers.values()].some((d) => d.etat === 'en_cours');
+
+// ---------------------------------------------------------------- réserve de fenêtre (1.0.11)
+// Tu gardes pour toi une part de ta fenêtre de 5 h aux heures choisies (Réglages › Général, ex. 30 % de 9 h à 18 h en
+// semaine). Atteinte : les tâches de ce compte s'interrompent proprement (elles reprendront où elles en étaient, comme
+// après un arrêt d'urgence) et rien de neuf ne part, jusqu'à la fin de la plage ou la remise à zéro de la fenêtre.
+function enReserve(compteId) {
+  if (pauseParCompte()) return pauseDe(compteId)?.type === 'reserve';
+  const p = etat.ordonnanceur.pause;
+  return !!(p?.reserve && (!p.compte || p.compte === compteId));
+}
+
+function verifierReserve(compteId, l, now = Date.now()) {
+  if (enDemo()) return;
+  const r = reserveAtteinte(l, REGLAGES.reserveFenetre, now);
+  const deja = enReserve(compteId);
+  if (r && !deja) {
+    const raison = tr('Réserve de ta fenêtre atteinte : {pct} % gardés pour toi jusqu’à {heure}', { pct: r.pct, heure: quandReprise(r.jusqua) });
+    suspendreTaches((t) => !pauseParCompte() || (t.compte || t.x.route?.compte) === compteId, tr('réserve de ta fenêtre'));
+    if (pauseParCompte()) mettreCompteEnPause(compteId, { type: 'reserve', jusqua: r.jusqua, raison });
+    else pauseGlobale(raison, r.jusqua, { reserve: true, compte: compteId });
+  } else if (!r && deja) {
+    if (pauseParCompte()) leverPauseCompte(compteId);
+    else reprendre({ comptes: false });
+  }
+}
+
+// ---------------------------------------------------------------- usage hors du QG (1.0.11)
+// Ta fenêtre de 5 h se remplit aussi quand tu utilises Claude ailleurs (un autre appareil, un collègue sur un compte
+// d'équipe) : les estimations du QG ne le voient pas. Une notification par fenêtre, quand le QG a du travail en cours.
+const SEUIL_HORS_QG = 8; // points de la fenêtre
+const horsQg = new Map(); // compteId → { reinit, points, depuis, prevenu }
+
+function surveillerHorsQg(compteId, l, now = Date.now()) {
+  if (enDemo()) return;
+  const n = pointsHorsQg(compteId, l, now);
+  const reinit = l?.fenetres?.five_hour?.reinit || null;
+  let s = horsQg.get(compteId);
+  if (!s || (reinit && s.reinit && Math.abs(reinit - s.reinit) > 10 * 60000)) {
+    s = { reinit, points: 0, depuis: now, prevenu: false };
+    horsQg.set(compteId, s);
+  }
+  s.reinit = reinit || s.reinit;
+  if (!(n > 0)) return;
+  s.points += n;
+  if (s.prevenu || s.points < SEUIL_HORS_QG || !aDuTravail()) return;
+  s.prevenu = true;
+  notifier({
+    type: 'info',
+    titre: tr('Ta fenêtre se remplit aussi hors du QG'),
+    texte: tr('{nom} : environ {n} points de ta fenêtre de 5 h utilisés ailleurs depuis {heure} (Claude sur un autre appareil, ou un collègue sur un compte d’équipe). Les estimations du QG ne les comptent pas : tes dossiers peuvent attendre la remise à zéro plus tôt que prévu.', { nom: nomCompte(compteId), n: Math.round(s.points), heure: quandReprise(s.depuis) }),
+  });
+}
+
 // Arrêt d'urgence : tout s'arrête ; les tâches en cours repartiront (reprise de session) sur « Reprendre ».
 export function urgence() {
   pauseGlobale(tr("Arrêt d'urgence"), null);
-  const actives = [...etat.taches.values()].filter(occupeUnePlace);
+  suspendreTaches(() => true, "arrêt d'urgence");
+}
+
+// Interrompt proprement les tâches en cours choisies : elles repartent de leur conversation à la reprise.
+function suspendreTaches(filtre, motif) {
+  const actives = [...etat.taches.values()].filter((t) => occupeUnePlace(t) && filtre(t));
   refuserPour(new Set(actives.map((t) => t.id)));
   for (const t of actives) {
     const phase = t.etat === 'verifying' ? 'verification' : t.etat === 'rework' ? 'rework' : 'production';
     t.x.gen += 1;
     controleurs.get(t.id)?.abort();
     libererVerrou(t);
-    t.x.reprise = repriseDe(t, phase, "arrêt d'urgence");
-    changerEtatTache(t, 'queued', { motifFile: "arrêt d'urgence" });
+    t.x.reprise = repriseDe(t, phase, motif);
+    changerEtatTache(t, 'queued', { motifFile: motif });
   }
+  return actives.length;
 }
 
 export const etatInterne = { verrous, dgOccupe, reveils, relancesDg, minuteriesComptes };

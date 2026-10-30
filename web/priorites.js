@@ -40,6 +40,16 @@ const teteI = (cle, lib, aide) => {
 /** Badge « pas encore qualifié » : compte jamais essayé avec un vrai agent par le QG (agents ACP). */
 export const badgeQualification = (c) => (c && c.qualification === 'non-faite' ? h('span', { class: 'badge st-warn', title: t('Ce type d’agent n’a pas encore été essayé par le QG : à essayer d’abord sur un petit projet.') }, t('pas encore qualifié')) : null);
 
+/** Événement `priorites` (même corps que GET /api/priorites) : changement fait ici, dans un autre onglet ou par le
+ *  fichier de Coût › mode avancé. Réglages › Priorités le montre tout de suite, sans relire le serveur. */
+export function recevoirPriorites(param, ev) {
+  const { seq, t: _t, type, ...donnees } = ev || {};
+  if (!donnees.priorites || !donnees.apercu) return false;
+  param.donneesPrio = donnees;
+  param.prioritesT = Date.now();
+  return true;
+}
+
 export function sectionPriorites(param) {
   const S = param.store;
   const ui = param.ui;

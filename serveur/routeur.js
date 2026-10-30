@@ -296,6 +296,7 @@ export function heureReprise(ms) {
 
 export function motifPause(c, p, id = null) {
   if (p.type === 'connexion') return tr('{nom} à reconnecter (Réglages › Comptes IA)', { nom: nomDe(c, id) });
+  if (p.type === 'reserve') return tr('réserve de ta fenêtre sur {nom} jusqu’à {heure}', { nom: nomDe(c, id), heure: heureReprise(p.jusqua) });
   return p.jusqua ? tr("limite d'usage de {nom} jusqu'à {heure}", { nom: nomDe(c, id), heure: heureReprise(p.jusqua) }) : tr("limite d'usage de {nom}", { nom: nomDe(c, id) });
 }
 

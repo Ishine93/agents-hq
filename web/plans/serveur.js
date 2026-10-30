@@ -120,9 +120,9 @@ function carteLabo() {
   const meubles = [];
   const m = (type, x, y, o = {}) => meubles.push({ type, x, y, ...o });
 
-  // --- la frise : bobines Tesla entre les baies, porte du milieu marquée au sol ---
+  // --- la frise : bobines Tesla entre les baies, porte du milieu marquée à la craie (peinte avec le sol) ---
   BOBINES.forEach(([x, y], i) => m('srv_tesla', x, y, { variante: i }));
-  m('srv_marquage', 7, 5, { passage: true });
+  m('srv_marquage', 7, 5, { sol: true });
 
   // --- derrière : bocaux, grimoires, cuves ---
   m('srv_bocaux', 3, 0);

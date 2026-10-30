@@ -12,7 +12,9 @@ import { t as tr, langueCourante } from './i18n.js';
 import {
   versArt, coinTuile, construireCouche, spriteMeuble, animerMeuble, spriteCloison, spriteAscenseur, spriteHorloge, spriteTableau,
   ledsService, animerJeu, spriteTele, spriteCouverture, oreiller, voileNuit, programmeTele, resteProgrammeTele, animeDecor,
+  meubleCliquable, CLICS,
 } from './decor.js';
+import { EffetsDecor } from './clics.js';
 import { TERMINAUX } from './etat.js';
 
 const VITESSE = 2.3; // cases par seconde
@@ -37,9 +39,20 @@ const cle = (s) => s.x + ',' + s.y + (s.niveau ? '/' + s.niveau : '');
 const SORTE_JEU = {
   billard: 'jeuBillard', babyfoot: 'jeuBabyfoot', tele: 'jeuTele', arcade: 'jeuArcade', pingpong: 'jeuPingpong',
   pouf: 'jeuPouf', cafe: 'jeuCafe', regarde: 'jeuRegarde',
+  // décors au choix (1.0.11) : plage et fête foraine
+  volley: 'jeuVolley', chateau: 'jeuChateau', petanque: 'jeuPetanque', transat: 'jeuTransat', peche: 'jeuPeche',
+  autos: 'jeuAutos', chamboule: 'jeuChamboule', tir: 'jeuTir', force: 'jeuForce', photo: 'jeuPhoto',
 };
 // Ce qu'on dit en arrivant à une place (rien sur une place debout improvisée).
-const ARRIVEE_JEU = { tele: 'arriveeTele', cafe: 'jeuCafe', regarde: 'jeuRegarde', billard: 'arriveeJeu', babyfoot: 'arriveeJeu', pingpong: 'arriveeJeu', arcade: 'arriveeJeu', pouf: 'arriveeJeu' };
+const ARRIVEE_JEU = {
+  tele: 'arriveeTele', cafe: 'jeuCafe', regarde: 'jeuRegarde', billard: 'arriveeJeu', babyfoot: 'arriveeJeu', pingpong: 'arriveeJeu', arcade: 'arriveeJeu', pouf: 'arriveeJeu',
+  volley: 'arriveeJeu', petanque: 'arriveeJeu', chateau: 'arriveeChateau', transat: 'arriveeTransat', peche: 'arriveeStand',
+  autos: 'arriveeAutos', chamboule: 'arriveeStand', tir: 'arriveeStand', force: 'arriveeStand', photo: 'arriveePhoto',
+};
+// Une place peut avoir ses propres phrases (`phrases`, `arrivee`) : le bar de la plage est un « café » qui parle de
+// cocktails, les machines à pinces une « arcade » qui parle de peluches.
+const sorteJeu = (s) => (s && (s.phrases || SORTE_JEU[s.activite])) || null;
+const arriveeJeu = (s) => (s && (s.arrivee || ARRIVEE_JEU[s.activite])) || null;
 // Durée d'une activité en salle de pause avant d'avoir envie d'autre chose (une visite est plus courte).
 const dureeEnvie = (visite = false) => (visite ? 20000 + Math.random() * 20000 : 35000 + Math.random() * 55000);
 const JOY_VISITE = [20000, 30000]; // salle de pause : Joy passe voir un joueur, puis un autre
@@ -254,6 +267,7 @@ export class Directeur {
     this.visages = chargerVisages();
     this.looks = new Map();
     this.effets = [];
+    this.clics = new EffetsDecor(CLICS); // easter eggs du décor en cours (web/clics.js), jamais envoyés au serveur
     this.descentes = new Map(); // tache -> { service, action, t0, fin } (agent parti au sous-sol)
     this.flashBaie = new Map();
     this.boitesServices = [];
@@ -501,7 +515,7 @@ export class Directeur {
       const [a, b, c] = libres;
       const amb = (Array.isArray(S.bonheur && S.bonheur.ambiance) ? S.bonheur.ambiance : []).filter((x) => typeof x === 'string' && x.trim());
       // en salle de pause, une fois sur deux on parle du jeu en cours
-      const jeu = salle && a.spot && SORTE_JEU[a.spot.activite] && Math.random() < 0.5 ? this.phrasesJeu(a.spot.activite, now) : [];
+      const jeu = salle && sorteJeu(a.spot) && Math.random() < 0.5 ? this.phrasesJeu(a.spot, now) : [];
       const lignes = jeu.length ? jeu : amb.length ? amb : listePhrases('ambiance');
       const rep = listePhrases('reponsesBavardage');
       const i2 = Math.floor(Math.random() * rep.length);
@@ -528,19 +542,19 @@ export class Directeur {
     this.prochainCri = now + (2500 + Math.random() * 3500) * m;
     if (this.joyActe && now < this.joyActe.fin) return;
     const joueurs = [...this.avatars.values()].filter((a) => a.type === 'agent' && a.cat === 'jeu' && a.arrive && !a.chemin.length && a.alpha > 0.9
-      && a.spot && SORTE_JEU[a.spot.activite] && !this.parleEncore(a.id, now) && now - (this.dernierePhrase.get(a.id) || 0) > PHRASE_DELAI * m);
+      && sorteJeu(a.spot) && !this.parleEncore(a.id, now) && now - (this.dernierePhrase.get(a.id) || 0) > PHRASE_DELAI * m);
     if (!joueurs.length) return;
     const a = joueurs[Math.floor(Math.random() * joueurs.length)];
     const t = this.store.taches.get(a.tacheId);
     if (!t || estBloquee(t)) return;
-    const l = this.phrasesJeu(a.spot.activite, now);
+    const l = this.phrasesJeu(a.spot, now);
     if (l.length) this.dire(a.id, { texte: l[Math.floor(Math.random() * l.length)] }, 2600, { phrase: true, parle: true });
   }
 
   // Phrases d'une activité de la salle de pause. Devant la télé, elles suivent le programme à l'écran
   // (foot ou dessin animé) ; juste avant le changement de programme, une phrase qui va avec les deux.
-  phrasesJeu(activite, now) {
-    if (activite !== 'tele') return listePhrases(SORTE_JEU[activite]);
+  phrasesJeu(spot, now) {
+    if (spot.activite !== 'tele') return listePhrases(sorteJeu(spot));
     if (resteProgrammeTele(now) < 3500 * this.mult() + 800 || Math.random() < 0.25) return listePhrases('jeuTele');
     return listePhrases(programmeTele(now) === 'foot' ? 'jeuTeleFoot' : 'jeuTeleDessin');
   }
@@ -603,18 +617,24 @@ export class Directeur {
         // une table vide : on s'y installe en attendant qu'on vienne jouer avec nous
         choix.push({ poids: 1, spot: tb.libres[0] });
       } else if (tb.joueurs.length >= 2) {
+        // une partie à plusieurs (volley, autos tamponneuses…) : on s'y joint s'il reste une place
+        if (tb.libres.length) choix.push({ poids: 2, spot: auHasard(tb.libres), rejoint: auHasard(tb.joueurs).id });
         // 2. regarder une partie à deux, à une place de spectateur
         const spect = libres.filter((s) => s.activite === 'regarde' && s.centre && tb.centre && s.centre[0] === tb.centre[0] && s.centre[1] === tb.centre[1]);
         if (spect.length) choix.push({ poids: 1.5, spot: auHasard(spect) });
       }
     }
     // 3. discuter avec un joueur sans jouer : debout à côté de lui
-    const joueurs = [...this.avatars.values()].filter((a) => a !== av && a.type === 'agent' && a.cat === 'jeu' && a.arrive && !a.chemin.length && a.spot && a.spot.table);
+    const joueurs = [...this.avatars.values()].filter((a) => a !== av && a.type === 'agent' && a.cat === 'jeu' && a.arrive && !a.chemin.length && a.spot
+      && (a.spot.table || a.spot.pose) && !a.spot.assis);
     if (joueurs.length) choix.push({ poids: 3, visite: auHasard(joueurs) });
     // 4. la télé ; 5. café, arcade, poufs
     const par = (act) => libres.filter((s) => s.activite === act);
     if (par('tele').length && !(ici && ici.activite === 'tele')) choix.push({ poids: 3, spot: auHasard(par('tele')) });
     for (const act of ['cafe', 'arcade', 'pouf']) if (par(act).length && !(ici && ici.activite === act)) choix.push({ poids: 1.2, spot: auHasard(par(act)) });
+    // 6. les autres places sans table d'un décor (transats…) : une envie par activité, comme le café
+    const autres = new Set(libres.filter((s) => !s.table && !['tele', 'regarde', 'cafe', 'arcade', 'pouf'].includes(s.activite)).map((s) => s.activite));
+    for (const act of autres) if (!(ici && ici.activite === act)) choix.push({ poids: 1.2, spot: auHasard(par(act).filter((s) => !s.table)) });
     if (!choix.length) return null;
     let r = Math.random() * choix.reduce((n, c) => n + c.poids, 0);
     let c = choix[choix.length - 1];
@@ -915,6 +935,7 @@ export class Directeur {
     this.glissements = [];
     this.bulles.clear();
     this.effets = [];
+    this.clics.vider();
     this.syn = null;
     this.programme = [];
     this.bavardageJusqua.clear();
@@ -1828,8 +1849,8 @@ export class Directeur {
         this.dire(av.id, { texte: phrase(question, av.id + '|' + now) }, 2800, { phrase: true, force: true, parle: true });
         this.programmer(now + 2600 * this.mult(), () => this.dire(autre.id, { texte: phrase(reponse, autre.id + '|' + now) }, 2800, { phrase: true, force: true, parle: true }));
         e.rejoint = e.visite = null;
-      } else if (ARRIVEE_JEU[av.spot && av.spot.activite] && Math.random() < 0.45) {
-        this.dire(av.id, { icone: 'sourire', texte: phrase(ARRIVEE_JEU[av.spot.activite], av.id + '|' + now) }, 3000, { phrase: true, parle: true });
+      } else if (arriveeJeu(av.spot) && Math.random() < 0.45) {
+        this.dire(av.id, { icone: 'sourire', texte: phrase(arriveeJeu(av.spot), av.id + '|' + now) }, 3000, { phrase: true, parle: true });
       }
     } else if (av.type === 'inspecteur' && av.cat === 'insp') {
       this.dire(av.id, { icone: 'loupe', texte: phrase('verifDebut', av.id) }, 3000, { phrase: true });
@@ -2589,12 +2610,15 @@ export class Directeur {
     // --- mobilier ---
     for (const it of carte.meubles) {
       const etat = it.type === 'bureau_dg' ? { lampe: it.lampe ? lampe : false, decroche: it.telephone ? decroche : false } : {};
+      // easter egg en cours (meuble cliqué ou déclenché) : apparence de sa phase, et son animation
+      const ef = this.clics.effetDe(it, now);
+      if (ef) etat.effet = ef.phase;
       const s = spriteMeuble(it, typeTheme, etat);
       const [tx, ty] = coinTuile(it.x, it.y);
       // un meuble de plusieurs cases se trie sur sa case la plus en avant
       const k = it.x + it.y + (it.w || 1) + (it.h || 1) - 1 - 0.02;
       const extra = [];
-      if (['baie', 'imprimante3d', 'machine_cafe', 'poste_machine', 'arcade', 'jukebox'].includes(it.type) || animeDecor(it.type)) extra.push((g) => animerMeuble(g, it, tx, ty, td));
+      if (['baie', 'imprimante3d', 'machine_cafe', 'poste_machine', 'arcade', 'jukebox'].includes(it.type) || animeDecor(it.type) || ef) extra.push((g) => animerMeuble(g, it, tx, ty, td, ef));
       if (it.jeu) {
         const n = joueurs[it.jeu] || 0;
         extra.push((g) => animerJeu(g, it, tx, ty, td, it.jeu === 'billard' ? n >= 1 : n >= 2));
@@ -2637,7 +2661,7 @@ export class Directeur {
       });
     }
     for (const c of carte.cloisons) {
-      const s = spriteCloison(c.cote, typeTheme);
+      const s = spriteCloison(c.cote, typeTheme, c);
       const [tx, ty] = coinTuile(c.x, c.y);
       monde.push({ k: c.x + c.y + 1.5, img: s.c, x: tx + s.dx, y: ty + s.dy });
     }
@@ -2874,7 +2898,15 @@ export class Directeur {
     }
     const tb = this.boiteTableau;
     if (tb && ax >= tb.x0 && ax <= tb.x1 && ay >= tb.y0 && ay <= tb.y1) return { type: 'tableau', id: 'tableau', dossier: tb.dossier, etage: this.etageId };
+    // easter egg : un meuble cliquable du décor (web/clics.js)
+    const it = meubleCliquable(this.carte, ax, ay);
+    if (it) return { type: 'decor', id: 'decor:' + it.x + ',' + it.y, meuble: it };
     return null;
+  }
+
+  /** Clic sur un meuble cliquable : lance son effet, dans le navigateur seulement (rien n'est envoyé au serveur). */
+  cliquerDecor(it, now = performance.now()) {
+    return this.clics.declencher(it, now);
   }
 }
 

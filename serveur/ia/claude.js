@@ -9,7 +9,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import * as plateforme from '../plateforme.js';
-import { enregistrerAppel, enregistrerCout, enregistrerCompaction, majLimiteEvenement, signalerActivite } from '../conso.js';
+import { enregistrerAppel, enregistrerCout, enregistrerCompaction, majLimiteEvenement, signalerActivite, coutConnuSession, noterCoutSession } from '../conso.js';
 import { suiviPensees } from '../pensees.js';
 import { cibleOutil, modificationDe, texteResultat, finDe } from './commun.js';
 import { t } from '../i18n.js';
@@ -170,6 +170,69 @@ export function nettoyerReglages(dossier = DOSSIER_REGLAGES, maintenant = Date.n
   return retires;
 }
 
+// ---------------------------------------------------------------- coût déjà porté par une conversation (1.0.11)
+// Claude Code range dans l'historique de chaque conversation (<config>/projects/<projet>/<id>.jsonl) des entrées
+// « cost-state » avec son coût total, et repart de ce total quand on la reprend ou qu'on la copie : le
+// total_cost_usd d'une conversation reprise compte donc aussi tout ce qui précède. Le QG retient le dernier total
+// vu (conso.js) ; pour une conversation qu'il ne connaît pas (d'avant la 1.0.11), il lit ce total dans
+// l'historique. Seules ces entrées sont lues : le contenu de la conversation n'est ni gardé ni affiché.
+const BLOC_HISTORIQUE = 4 * 1024 * 1024;
+const MAX_HISTORIQUE = 16 * BLOC_HISTORIQUE;
+
+/** Coût total que Claude Code reprendra pour cette conversation (0 s'il n'en a pas noté, null si introuvable). */
+export function coutDansHistorique(configDir, sessionId) {
+  if (!configDir || !/^[\w-]{8,64}$/.test(String(sessionId || ''))) return null;
+  let projets;
+  try {
+    projets = fs.readdirSync(path.join(configDir, 'projects'));
+  } catch {
+    return null;
+  }
+  for (const nom of projets) {
+    const f = path.join(configDir, 'projects', nom, `${sessionId}.jsonl`);
+    if (fs.existsSync(f)) return dernierCoutNote(f, sessionId);
+  }
+  return null;
+}
+
+// Lecture de la fin vers le début, par blocs : la dernière entrée de cette conversation est le total repris.
+function dernierCoutNote(fichier, sessionId) {
+  let fd = null;
+  try {
+    fd = fs.openSync(fichier, 'r');
+    let fin = fs.fstatSync(fd).size;
+    let suite = '';
+    for (let lus = 0; fin > 0 && lus < MAX_HISTORIQUE; lus += BLOC_HISTORIQUE) {
+      const debut = Math.max(0, fin - BLOC_HISTORIQUE);
+      const buf = Buffer.alloc(fin - debut);
+      fs.readSync(fd, buf, 0, buf.length, debut);
+      const lignes = (buf.toString('utf8') + suite).split('\n');
+      suite = debut > 0 ? lignes.shift() : ''; // ligne coupée : complétée par le bloc d'avant
+      for (let i = lignes.length - 1; i >= 0; i--) {
+        if (!lignes[i].includes('"cost-state"')) continue;
+        try {
+          const e = JSON.parse(lignes[i]);
+          if (e.type === 'cost-state' && typeof e.totalCostUSD === 'number' && (!e.sessionId || e.sessionId === sessionId)) return e.totalCostUSD;
+        } catch {
+          /* ligne abîmée : on continue */
+        }
+      }
+      fin = debut;
+    }
+    return 0;
+  } catch {
+    return null;
+  } finally {
+    if (fd != null) fs.closeSync(fd);
+  }
+}
+
+/** Point de départ du coût d'une session : 0 pour une conversation neuve, sinon le total déjà porté. */
+export function coutDeDepart(options, compteObj) {
+  if (!options?.resume) return 0;
+  return coutConnuSession(options.resume) ?? coutDansHistorique(dossierConfig(compteObj || {}), options.resume) ?? 0;
+}
+
 function messageUtilisateur(texte, blocsImages = []) {
   const content = blocsImages.length ? [...blocsImages, { type: 'text', text: texte }] : texte;
   return { type: 'user', message: { role: 'user', content }, parent_tool_use_id: null };
@@ -180,9 +243,10 @@ function messageUtilisateur(texte, blocsImages = []) {
  * @param compteObj  le compte résolu par session.js (objet) ; `compte` reste son identifiant
  * @param canal  objet facultatif rempli avec `injecter(texte)` tant que la session tourne
  * @param surImage rappel (base64, type, outil) pour chaque image reçue dans le résultat d'un outil
+ * @param requete  query du SDK (remplaçable dans les tests)
  * @returns {Promise<{result, sessionId, init, erreur, limite, exception}>}
  */
-export async function lancer({ prompt, images = [], options, compte, compteObj = null, surInit, surOutil, surActivite, surImage, surCommande, surModification, surPensee, surCompaction, surContexte, surSousAgents, canal, conso = {}, envSession = null, compaction = null }) {
+export async function lancer({ prompt, images = [], options, compte, compteObj = null, surInit, surOutil, surActivite, surImage, surCommande, surModification, surPensee, surCompaction, surContexte, surSousAgents, canal, conso = {}, envSession = null, compaction, requete = query }) {
   const surFlux = surPensee ? suiviPensees(surPensee) : null;
   const file = [];
   let reveil = null;
@@ -222,12 +286,17 @@ export async function lancer({ prompt, images = [], options, compte, compteObj =
     };
   }
 
-  q = query({
+  // Conversation reprise ou copiée : son coût repart du total déjà porté. Le plafond de dépense (maxBudgetUsd, ce qu'il
+  // reste à dépenser pour la tâche) se compare à ce même total : il est décalé d'autant.
+  const coutDepart = coutDeDepart(options, compteObj);
+  const plafond = coutDepart > 0 && typeof options.maxBudgetUsd === 'number' ? { maxBudgetUsd: Math.round((options.maxBudgetUsd + coutDepart) * 100) / 100 } : {};
+  q = requete({
     prompt: entree(),
     options: {
       // Réflexion résumée (lisible) et flux partiel : nécessaires pour les pensées en direct.
       ...(surPensee ? { includePartialMessages: true, thinking: { type: 'adaptive', display: 'summarized' } } : {}),
       ...options,
+      ...plafond,
       ...(options.settings ? { settings: reglagesEnFichier(options.settings) } : {}),
       env: environnement(compteObj, { ...envSessionPour(conso.role, compteObj, { compaction }), ...(envSession || {}) }),
     },
@@ -245,7 +314,7 @@ export async function lancer({ prompt, images = [], options, compte, compteObj =
   let appelCourant = null;
   let modeleCourant = null;
   let contexteDernier = 0;
-  let coutVu = 0;
+  let coutVu = coutDepart;
   const compter = (id, u, modele, principal = true) => {
     if (!id || !u) return;
     const avant = appelsVus.get(id);
@@ -334,10 +403,12 @@ export async function lancer({ prompt, images = [], options, compte, compteObj =
         if (m.rate_limit_info?.status === 'rejected') sortie.limite = m.rate_limit_info;
         majLimiteEvenement(meta.compte, m.rate_limit_info);
       } else if (m.type === 'result') {
-        // total_cost_usd est cumulé sur la session : on n'ajoute que l'écart.
+        // total_cost_usd est cumulé sur la conversation, reprises comprises : on n'ajoute que l'écart depuis le dernier
+        // total vu (le total déjà porté pour une reprise). Plus bas que lui : Claude Code est reparti de zéro.
         if (typeof m.total_cost_usd === 'number') {
           enregistrerCout(meta, m.total_cost_usd >= coutVu ? m.total_cost_usd - coutVu : m.total_cost_usd);
           coutVu = m.total_cost_usd;
+          noterCoutSession(sortie.sessionId, coutVu);
         }
         // m.usage = total du tour (tous ses appels) : ce qui n'a pas encore été vu est ajouté maintenant.
         if (m.usage) {

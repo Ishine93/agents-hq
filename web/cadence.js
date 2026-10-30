@@ -146,6 +146,8 @@ export function sceneEnMouvement(dir) {
   if (dir.glissements && dir.glissements.length) return true;
   const asc = dir.asc;
   if (asc && asc.ouverture > 0 && asc.ouverture < 1) return true;
+  // easter egg du décor en cours (web/clics.js)
+  if (dir.clics && dir.clics.actif()) return true;
   if (dir.avatars) {
     for (const av of dir.avatars.values()) {
       if ((av.chemin && av.chemin.length) || av.versAsc || av.fondu) return true;

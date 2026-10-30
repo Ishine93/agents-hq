@@ -129,9 +129,10 @@ export async function demarrer(etageId, type, par = 'toi', attenteMs = 20000) {
   Object.assign(s, { etat: 'demarrage', depuis: Date.now(), par, erreur: null, externe: null, lignes: [] });
   ajouterLignes(s, `> ${s.commande}${def.portArg && s.port ? ` ${def.portArg} ${s.port}` : ''}   ${tr('(dans {dossier})', { dossier: e.projet })}`);
   // Le port est toujours passé explicitement : il vaut celui du registre, même si le projet dit autre chose.
-  const args = def.portArg && s.port ? [...def.args, def.portArg, String(s.port)] : def.args;
+  // (hoteArg : option d'adresse d'écoute, pour un service qui écoute partout par défaut ; rojo écoute déjà en local)
+  const args = [...def.args, ...(def.portArg && s.port ? [def.portArg, String(s.port)] : []), ...(def.hoteArg ? [def.hoteArg, '127.0.0.1'] : [])];
   // (Windows : fenêtre cachée ; POSIX : groupe de processus à part, pour arrêter tout l'arbre d'un coup)
-  const enfant = spawn(def.exe, args, { cwd: e.projet, ...plateforme.optionsSpawnService(), env: process.env });
+  const enfant = spawn(def.exe, args, { cwd: e.projet, ...plateforme.optionsSpawnService(), env: { ...process.env, HOST: '127.0.0.1' } }); // 1.0.11 : serveurs qui lisent HOST en local, sans fenêtre du pare-feu
   processus.set(s.id, enfant);
   s.pid = enfant.pid;
   publier(s);

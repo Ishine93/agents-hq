@@ -11,8 +11,12 @@ import { trouverCompte } from './comptes.js';
 import { adaptateurDe } from './ia/fournisseurs.js';
 import { modelePour, reglageDg } from './routeur.js';
 import { t as tr } from './i18n.js';
+import { optionsQuestion } from './taches.js';
 
 const nomTache = (t) => t.prenom || t.ref;
+
+// Claude garde une conversation dans son cache environ une heure après son dernier appel (1.0.11).
+const CACHE_CHAUD_MS = 55 * 60 * 1000;
 
 function consigne(texte) {
   return [
@@ -35,6 +39,24 @@ async function forker({ session, modele, compte, cwd, conso, texte }) {
   });
   const texteReponse = typeof s.result?.result === 'string' ? s.result.result.trim() : '';
   return texteReponse || tr('(pas de réponse : {raison})', { raison: raisonEchec(s) || '?' });
+}
+
+// Copie de la conversation d'une tâche, avec les réglages exacts de la tâche (relue dans le cache). La réponse
+// arrive dans le champ summary de la sortie structurée (texte libre pour une demande directe). null : pas de réponse.
+async function forkerTache(t, d, { compte, conso, texte }) {
+  const structuree = !t.x.direct;
+  const s = await executerSession({
+    prompt: [
+      consigne(texte),
+      ...(structuree ? ['', 'Mets ta réponse dans le champ « summary » de ta sortie structurée, avec status « done » et les autres champs vides.'] : []),
+    ].join('\n'),
+    compte,
+    conso,
+    surPensee: () => {}, // même réflexion que la tâche (réglage qui compte pour le cache)
+    options: optionsQuestion(t, d, t.x.session),
+  });
+  const texteReponse = structuree ? s.result?.structured_output?.summary : s.result?.result;
+  return typeof texteReponse === 'string' && texteReponse.trim() ? texteReponse.trim() : null;
 }
 
 // ---------------------------------------------------------------- repli sans fork (Codex, agents ACP)
@@ -143,10 +165,13 @@ export async function questionTache(t, texte) {
   const compte = t.x.compteSession || t.compte || d?.compte;
   const cwd = e?.projet || RACINE;
   const conso = { role: 'question', dossier: d?.id, tache: t.id, etage: t.etage };
-  let rep;
+  let rep = null;
   let marque = {};
-  if (saitForker(compte)) rep = await forker({ session: t.x.session, modele: t.modele, compte, cwd, texte, conso });
-  else {
+  // La copie de sa conversation tant qu'elle est dans le cache de Claude. Plus vieille, elle serait réécrite entière
+  // (environ 5 $ pour un agent Fable) : l'agent répond alors d'après son activité visible, presque gratuitement.
+  const chaud = Date.now() - (t.derniereActivite || 0) < CACHE_CHAUD_MS;
+  if (saitForker(compte) && chaud && d) rep = await forkerTache(t, d, { compte, conso, texte }).catch(() => null);
+  if (!rep) {
     const r = await repli({ modele: t.modele, compte, cwd, conso, texte, qui: `l'agent ${nomTache(t)}`, activite: activiteTache(t) });
     rep = r.texte;
     marque = { activiteVisible: true };

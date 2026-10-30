@@ -12,9 +12,6 @@ const CONFIG = path.join(RACINE, 'config');
 const DEFAUTS = path.join(CONFIG, 'defauts');
 const lire = (...p) => fs.readFileSync(path.join(RACINE, ...p), 'utf8');
 const lireJson = (...p) => JSON.parse(lire(...p));
-// Dossier des binaires du Node portable (runtime/node sur Windows, runtime/node/bin sur Mac).
-export const NODE_DIR = plateforme.nodeBin();
-
 // Les défauts (config/defauts/*.json) écrivent leurs chemins à la façon Windows (« \\ » dans le JSON).
 // Sur Mac, ces séparateurs deviennent des « / » au moment de la création du fichier personnel.
 export const adapterDefauts = (brut, plat = plateforme.PLATEFORME) => (plateforme.estWindows(plat) ? brut : brut.replaceAll('\\\\', '/'));
@@ -56,6 +53,12 @@ function assurerConfig() {
     perso.onboarding = true;
     ecrireJson(path.join(CONFIG, 'reglages.json'), perso);
   }
+  // 1.0.11 : Standard devient le coût par défaut des nouvelles installations ; une installation d'avant qui n'avait
+  // jamais choisi garde Équilibré, l'ancien défaut (ses valeurs de Personnalisé restent).
+  if (!nouveau && !perso.travail?.cout) {
+    perso.travail = { ...(perso.travail || {}), cout: 'equilibre' };
+    ecrireJson(path.join(CONFIG, 'reglages.json'), perso);
+  }
   ajouterSallesCommunes(path.join(CONFIG, 'etages.json'));
 }
 
@@ -84,6 +87,17 @@ function chargerReglages() {
 
 // Objet partagé : modifierReglages() le met à jour sur place, les modules qui l'ont importé voient le changement.
 export const REGLAGES = chargerReglages();
+
+/**
+ * Garde-fou Fable (1.0.11) : 'off' (rien), 'seuil' (te demander sous le seuil de sa semaine), 'toujours' (te demander à
+ * chaque plan qui en prévoit), 'jamais' (Fable n'est plus proposé au DG pour les tâches ; le modèle du DG ne change pas).
+ * Réglages d'avant : actif false = 'off', sinon 'seuil'.
+ */
+export const MODES_FABLE = ['off', 'seuil', 'toujours', 'jamais'];
+export function modeFable(g = REGLAGES.gardeFable || {}) {
+  if (MODES_FABLE.includes(g.mode)) return g.mode;
+  return g.actif === false ? 'off' : 'seuil';
+}
 
 export function modifierReglages(patch) {
   const fichier = path.join(CONFIG, 'reglages.json');

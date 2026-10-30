@@ -40,6 +40,22 @@ function ovale(g, cx, cy, rx, ry, col) {
   }
 }
 
+// Bulle de texte des easter eggs, la pointe en bas à gauche sur (x, y) (en bas à droite si `gauche` : la bulle
+// s'étend alors vers la gauche, pour un meuble près du mur de droite) ; `ech` : taille du texte (1 ou 2).
+function bulle(g, O, txt, x, y, col, ech = 1, gauche = false) {
+  const tc = O.texteCanvas(txt, col);
+  const w = tc.width * ech + 8;
+  const h = tc.height * ech + 6;
+  const bx = Math.round(x) - (gauche ? w : 0);
+  const by = Math.round(y) - h - 4;
+  O.cadre(g, bx, by, w, h, '#15151f', '#fff4d6');
+  g.drawImage(tc, bx + 4, by + 3, tc.width * ech, tc.height * ech);
+  g.fillStyle = '#15151f';
+  const px = gauche ? bx + w - 6 : bx + 3;
+  g.fillRect(px, by + h, 3, 3);
+  g.fillRect(gauche ? px + 2 : px - 2, by + h + 2, 2, 2);
+}
+
 // Texte posé sur une face « y constant » (il descend de 1 pixel tous les 2 vers la droite).
 function texteBiais(g, O, txt, x, y, col) {
   const t = O.texteCanvas(txt, col);
@@ -136,7 +152,6 @@ function coinsOuverture(g, O, T, zc) {
 // bien qu'un avatar qui passe devant la tête est dessiné après. Les dormeurs du bas se couchent ensuite, puis la
 // moitié b (pied) dessine en `haut` la paroi du pied, la dalle et tout l'étage du haut (par-dessus les dormeurs du
 // bas), et en `devant` le toit et l'échelle (par-dessus les dormeurs du haut). Rien n'est coupé : pas de couture.
-// Le sprite principal de la moitié b reprend `haut` et `devant` d'un seul tenant, pour les aperçus.
 function capsule(it, typeTheme, etat, O) {
   const v = it.variante || 0;
   const couvBas = O.COUVERTURES[v % O.COUVERTURES.length];
@@ -180,12 +195,9 @@ function capsule(it, typeTheme, etat, O) {
   };
   const moitieB = (fn, apres) => feuille(O, -1.05, -0.05, 1.05, 1.1, htop, (g, P) => fn(g, outilsCapsule(O, P, 1)), apres);
   const veilleuseHaut = (g, P) => veilleuse(g, O, outilsCapsule(O, P, 1), CAP.toit0);
-  // Le sprite principal reprend tout (pour les aperçus qui ne dessinent que lui) ; en jeu, `haut` et `devant` le
-  // redessinent par-dessus les dormeurs, à leur place dans le tri.
-  const s = moitieB((g, T) => {
-    dessinHaut(g, T);
-    dessinDevant(g, T);
-  }, veilleuseHaut);
+  // Tout est dans `haut` et `devant`, dessinés par-dessus les dormeurs à leur place dans le tri : le sprite principal
+  // reste vide.
+  const s = { c: O.creerCanvas(1, 1), dx: 0, dy: 0 };
   s.haut = moitieB(dessinHaut, veilleuseHaut);
   s.devant = moitieB(dessinDevant);
   return s;
@@ -218,6 +230,65 @@ function distributeurJp(it, typeTheme, etat, O) {
     Y(0.18, 0.72, 5, 13, '#1a1d26');
     Y(0.2, 0.7, 6, 8, '#3a3f4a');
   }, true);
+}
+
+// Easter egg du distributeur : il s'emballe (boutons qui clignotent, il tremble, « JACKPOT ! ») et crache des
+// canettes qui roulent par terre devant lui.
+function animeDistributeur(g, it, tx, ty, t, O, effet) {
+  if (!effet) return;
+  const P = O.projeteur(tx + 32, ty);
+  const d = effet.depuis;
+  for (let r = 0; r < 3; r++) {
+    for (let i = 0; i < 5; i++) {
+      const u = 0.22 + i * 0.12;
+      const on = (Math.floor(d / 110) + r + i) % 2 === 0;
+      O.quadY(g, P, 0.84, u + 0.01, u + 0.05, 34 + r * 8, 35 + r * 8, on ? '#ffffff' : '#ff4a4a');
+    }
+  }
+  if (d < 1000) {
+    // il tremble
+    const v = Math.round(Math.sin(d / 25) * 1.5);
+    g.fillStyle = '#ffffff';
+    for (let k = 0; k < 3; k++) {
+      const [x1, y1] = P(0.1, 0.84, 20 + k * 16);
+      const [x2, y2] = P(0.9, 0.84, 20 + k * 16);
+      g.fillRect(Math.round(x1) - 8 - v, Math.round(y1), 4, 1);
+      g.fillRect(Math.round(x2) + 5 + v, Math.round(y2), 4, 1);
+    }
+  }
+  // les canettes : elles sortent de la trappe, retombent devant et roulent un peu
+  const cols = ['#e8452f', '#2a6fd0', '#3aa655', '#ffd23f', '#8a5a30', '#ff8fb1'];
+  for (let k = 0; k < 11; k++) {
+    const e = (d - 900 - k * 330) / 650;
+    if (e < 0) continue;
+    const rnd = O.aleatoire(O.hacher('canette' + k + ',' + it.x + ',' + it.y));
+    const u1 = 0.2 + rnd() * 0.6;
+    const v1 = 1.15 + rnd() * 0.55;
+    const m = Math.min(1, e);
+    const roule = Math.max(0, Math.min(1, e - 1)) * (0.15 + rnd() * 0.2);
+    const u = 0.45 + (u1 - 0.45) * m;
+    const v = 0.86 + (v1 - 0.86) * m + roule;
+    const z = 9 * (1 - m) + Math.sin(m * Math.PI) * 14;
+    const [x, y] = P(u, v, z);
+    const X = Math.round(x);
+    const Y = Math.round(y);
+    const col = cols[k % cols.length];
+    // couchée : un cylindre cerclé de noir, bande claire, couvercle d'alu ; le reflet tourne quand elle roule
+    g.fillStyle = '#15151f';
+    g.fillRect(X - 6, Y - 6, 13, 7);
+    g.fillStyle = col;
+    g.fillRect(X - 5, Y - 5, 11, 5);
+    g.fillStyle = O.nuance(col, 0.35);
+    g.fillRect(X - 2, Y - 5, 4, 5);
+    g.fillStyle = '#ffffff';
+    g.fillRect(X - 5 + (Math.floor((e + k) * 8) % 9), Y - 5, 1, 1);
+    g.fillStyle = '#c0c8d0';
+    g.fillRect(X + 5, Y - 5, 1, 5);
+  }
+  if (d > 900 && d < 5600) {
+    const [x, y] = P(0.5, 0.5, 72);
+    bulle(g, O, O.enseigne('JACKPOT !', 'JACKPOT!'), x + 4, y - 4, '#c8323c', d < 1050 ? 1 : 2, true);
+  }
 }
 
 // Bambous en pot, minces : ils ne cachent pas l'enseigne du hall.
@@ -323,11 +394,13 @@ function shishiOdoshi(it, typeTheme, etat, O) {
     }
   });
 }
-function animeShishi(g, it, tx, ty, t, O) {
+function animeShishi(g, it, tx, ty, t, O, effet) {
   const P = O.projeteur(tx + 32, ty);
   // le bambou se remplit (lent), bascule (vite) puis revient
   const c = (t % 5200) / 5200;
-  const a = c < 0.8 ? -0.25 + c * 0.35 : c < 0.86 ? 0.55 : 0.55 - ((c - 0.86) / 0.14) * 0.8;
+  let a = c < 0.8 ? -0.25 + c * 0.35 : c < 0.86 ? 0.55 : 0.55 - ((c - 0.86) / 0.14) * 0.8;
+  // easter egg : un « TOC ! » de toute beauté, le bambou rebondit
+  if (effet && effet.phase === 1) a = 0.7 - Math.abs(Math.sin(effet.depuis / 70)) * 0.5 * (1 - effet.depuis / 700);
   const [px, py] = P(0.32, 0.46, 16);
   const L = 15;
   const dx = Math.cos(a) * L;
@@ -342,6 +415,71 @@ function animeShishi(g, it, tx, ty, t, O) {
   const [bx, by] = P(0.36, 0.44, 31);
   g.fillStyle = 'rgba(160,215,255,0.7)';
   g.fillRect(Math.round(bx), Math.round(by), 1, 4 + Math.round(Math.sin(t / 90)));
+  if (effet) grenouilleShishi(g, P, O, effet);
+}
+
+// … et le bruit réveille une grenouille : elle bondit hors du bassin, coasse devant la fontaine, puis replonge.
+function grenouilleShishi(g, P, O, effet) {
+  const d = effet.depuis;
+  // (les bulles partent vers la gauche : le bambou en pot voisin, plus en avant, les cacherait)
+  if (d < 1200) {
+    const [x, y] = P(0.3, 0.45, 34);
+    bulle(g, O, O.enseigne('TOC !', 'CLACK!'), x - 2, y - 2, '#5a4a32', d < 120 ? 1 : 2, true);
+  }
+  // bassin (0,64 ; 0,42 ; 9) → devant la fontaine (0,7 ; 1,25 ; 0) et retour
+  const aller = Math.min(1, Math.max(0, (d - 700) / 600));
+  const retour = Math.min(1, Math.max(0, (d - 3900) / 600));
+  if (d < 700 || retour >= 1) {
+    // ronds dans l'eau au départ et au retour
+    if (d >= 4500 || (d >= 500 && d < 900)) {
+      const e = d >= 4500 ? (d - 4500) / 700 : (d - 500) / 400;
+      const [x, y] = P(0.64, 0.42, 9);
+      g.fillStyle = 'rgba(220,240,255,0.85)';
+      const r = Math.round(3 + e * 7);
+      g.fillRect(Math.round(x) - r, Math.round(y), r * 2 + 1, 1);
+      g.fillRect(Math.round(x) - r + 2, Math.round(y) - 2, 2, 1);
+      g.fillRect(Math.round(x) + r - 3, Math.round(y) - 2, 2, 1);
+      if (d >= 4500 && d < 5000) bulle(g, O, O.enseigne('PLOUF !', 'SPLASH!'), x - 6, y - 6, '#2f6fc0', 1, true);
+    }
+    return;
+  }
+  const m = retour > 0 ? 1 - retour : aller;
+  const enVol = (aller > 0 && aller < 1) || (retour > 0 && retour < 1);
+  const u = 0.64 + (0.7 - 0.64) * m;
+  const v = 0.42 + (1.25 - 0.42) * m;
+  const z = 9 * (1 - m) + (enVol ? Math.sin(m * Math.PI) * 22 : 0);
+  const [x, y] = P(u, v, z);
+  grenouille(g, x, y, enVol);
+  if (!enVol && d > 1500 && d < 3800 && Math.floor(d / 500) % 2 === 0) bulle(g, O, O.enseigne('CROA !', 'RIBBIT!'), x - 4, y - 10, '#3f7a2a', 1, true);
+}
+function grenouille(g, x, y, saut) {
+  const X = Math.round(x);
+  const Y = Math.round(y);
+  g.fillStyle = '#15151f';
+  g.fillRect(X - 6, Y - 7, 13, 8);
+  g.fillRect(X - 5, Y - 10, 4, 4);
+  g.fillRect(X + 2, Y - 10, 4, 4);
+  if (saut) {
+    g.fillRect(X - 7, Y, 3, 4);
+    g.fillRect(X + 5, Y, 3, 4);
+  }
+  g.fillStyle = '#5aa83a';
+  g.fillRect(X - 5, Y - 6, 11, 6);
+  g.fillRect(X - 4, Y - 9, 2, 3);
+  g.fillRect(X + 3, Y - 9, 2, 3);
+  if (saut) {
+    g.fillRect(X - 6, Y + 1, 1, 2);
+    g.fillRect(X + 6, Y + 1, 1, 2);
+  }
+  g.fillStyle = '#c8e8a0';
+  g.fillRect(X - 2, Y - 3, 5, 3);
+  g.fillStyle = '#ffffff';
+  g.fillRect(X - 4, Y - 9, 1, 1);
+  g.fillRect(X + 3, Y - 9, 1, 1);
+  g.fillStyle = '#15151f';
+  g.fillRect(X - 3, Y - 8, 1, 1);
+  g.fillRect(X + 4, Y - 8, 1, 1);
+  g.fillRect(X - 2, Y - 4, 5, 1);
 }
 
 // Rocher du jardin sec, entouré de cercles de graviers ratissés.
@@ -587,11 +725,8 @@ function tente(it, typeTheme, etat, O) {
       box(g, 1.94, 1.92, 1.98, 1.96, 0, 3, '#9aa3ad');
     }
   };
-  // la porte passe devant le dormeur (`haut`) ; le sprite principal la reprend pour les aperçus
-  const s = dessin((g, T) => {
-    corps(g, T);
-    porte(g, T);
-  });
+  // la porte passe devant le dormeur (`haut`)
+  const s = dessin(corps);
   s.haut = dessin(porte);
   return s;
 }
@@ -657,8 +792,8 @@ function hamac(it, typeTheme, etat, O) {
     for (const w of [0.04, 0.5, 0.96]) trait(g, pt(1.96, w, zBarre), pt(2.42, 0.5, zNoeud), '#d8d0b8');
   };
   const dessin = (...fns) => feuille(O, x0, y0, x1, y1, 50, (g, P) => fns.forEach((fn) => fn(g, axeLit(O, P, axe), ptLit(P, axe))));
-  // le bord avant borde le dormeur (`haut`) ; le sprite principal le reprend pour les aperçus
-  const s = dessin(fond, devant);
+  // le bord avant borde le dormeur (`haut`)
+  const s = dessin(fond);
   s.haut = dessin(devant);
   return s;
 }
@@ -748,23 +883,53 @@ function feuCamp(it, typeTheme, etat, O) {
     O.quadZ(g, P, 7, 0.44, 0.3, 0.56, 0.4, '#ff7a1a');
   });
 }
-function animeFeu(g, it, tx, ty, t, O) {
+function animeFeu(g, it, tx, ty, t, O, effet) {
   const P = O.projeteur(tx + 32, ty);
   const [cx, cy] = P(0.5, 0.5, 6);
+  // easter egg : le feu s'embrase d'un coup (flammes géantes, gerbe d'étincelles), puis sa fumée dessine un cœur
+  const d = effet ? effet.depuis : 0;
+  const flambee = effet && effet.phase === 1 ? Math.sin(Math.min(1, d / 1800) * Math.PI) : 0;
+  const grand = 1 + flambee * 2.2;
   const flammes = [[-5, 14, '#ff6a1a'], [4, 16, '#ff6a1a'], [0, 22, '#ff8a2a'], [-2, 15, '#ffb52e'], [2, 12, '#ffe27a']];
   flammes.forEach(([dx, h, col], i) => {
-    const os = Math.sin(t / 110 + i * 1.7) * 2;
-    const hh = h + Math.sin(t / 170 + i) * 3;
-    const l = i < 3 ? 5 : 3;
-    O.poly(g, [[cx + dx - l, cy], [cx + dx + os, cy - hh], [cx + dx + l, cy]], col);
+    const os = Math.sin(t / 110 + i * 1.7) * 2 * grand;
+    const hh = (h + Math.sin(t / 170 + i) * 3) * grand;
+    const l = (i < 3 ? 5 : 3) * (1 + flambee * 0.6);
+    O.poly(g, [[cx + dx * (1 + flambee * 0.5) - l, cy], [cx + dx + os, cy - hh], [cx + dx * (1 + flambee * 0.5) + l, cy]], col);
   });
-  // étincelles qui montent
-  for (let i = 0; i < 5; i++) {
+  // étincelles qui montent (une gerbe pendant la flambée)
+  const n = 5 + Math.round(flambee * 14);
+  for (let i = 0; i < n; i++) {
     const c = ((t + i * 470) % 2300) / 2300;
-    const x = cx + Math.sin(i * 2.3 + c * 5) * 6;
-    const y = cy - 14 - c * 40;
+    const x = cx + Math.sin(i * 2.3 + c * 5) * (6 + flambee * 14);
+    const y = cy - 14 - c * (40 + flambee * 50);
     g.fillStyle = `rgba(255,210,122,${(1 - c).toFixed(2)})`;
-    g.fillRect(Math.round(x), Math.round(y), 1, 1);
+    g.fillRect(Math.round(x), Math.round(y), 1 + (flambee > 0.3 && i % 3 === 0 ? 1 : 0), 1);
+  }
+  if (effet && effet.phase === 2) coeurFumee(g, cx, cy, d - 1800, effet.duree - 1800);
+}
+// Le cœur de fumée : des volutes montent du feu, se rangent en cœur au-dessus de lui, puis s'élèvent et s'effacent.
+function coeurFumee(g, cx, cy, d, duree) {
+  const s = d / duree;
+  const N = 22;
+  for (let k = 0; k < N; k++) {
+    const a = (k / N) * Math.PI * 2;
+    const hx = 16 * Math.pow(Math.sin(a), 3);
+    const hy = -(13 * Math.cos(a) - 5 * Math.cos(2 * a) - 2 * Math.cos(3 * a) - Math.cos(4 * a));
+    // chaque volute part du feu à son tour, rejoint sa place dans le cœur
+    const m = Math.min(1, Math.max(0, (s - (k / N) * 0.25) / 0.2));
+    if (m <= 0) continue;
+    const e = 1 - (1 - m) * (1 - m);
+    const montee = Math.max(0, s - 0.45) * 40;
+    const x = cx + hx * 1.3 * e + Math.sin(d / 400 + k) * (1 - e) * 4;
+    const y = cy - 18 + (-62 + hy * 1.3 + 18) * e - montee;
+    const alpha = 0.85 * Math.min(1, (1 - s) / 0.3);
+    if (alpha <= 0) continue;
+    g.globalAlpha = alpha;
+    ovale(g, x, y, 3, 2, '#c9c9d4');
+    g.fillStyle = '#ececf2';
+    g.fillRect(Math.round(x) - 1, Math.round(y) - 2, 2, 1);
+    g.globalAlpha = 1;
   }
 }
 
@@ -832,15 +997,133 @@ function canoe(it, typeTheme, etat, O) {
   });
 }
 
-// Glacière avec un sachet de guimauves posé dessus.
+// Glacière avec un sachet de guimauves posé dessus. Easter egg (etat.effet) : phase 1, le couvercle se soulève (deux
+// yeux brillent dans la fente, voir animeGlaciere) ; ensuite il reste ouvert et le sachet a disparu.
 function glaciereCamp(it, typeTheme, etat, O) {
-  return O.spriteTuile(26, (g, P) => {
+  const effet = etat.effet || 0;
+  return O.spriteTuile(40, (g, P) => {
     O.prisme(g, P, 0.22, 0.28, 0.78, 0.72, 0, 15, '#2f6fc0');
-    O.prisme(g, P, 0.2, 0.26, 0.8, 0.74, 15, 18, '#f4f4f4');
     O.prisme(g, P, 0.42, 0.72, 0.58, 0.76, 10, 13, '#f4f4f4');
-    O.prisme(g, P, 0.3, 0.36, 0.52, 0.56, 18, 22, '#ffd6e6');
-    O.prisme(g, P, 0.33, 0.39, 0.38, 0.44, 22, 23, '#ffffff');
+    if (effet >= 2) {
+      // ouverte : l'intérieur sombre, le couvercle relevé contre le fond
+      O.quadZ(g, P, 15, 0.26, 0.32, 0.74, 0.68, '#1a2433');
+      O.prisme(g, P, 0.2, 0.22, 0.8, 0.27, 15, 36, '#f4f4f4');
+      return;
+    }
+    const z0 = effet === 1 ? 19 : 15;
+    if (effet === 1) O.prisme(g, P, 0.24, 0.3, 0.76, 0.7, 15, z0, '#15151f');
+    O.prisme(g, P, 0.2, 0.26, 0.8, 0.74, z0, z0 + 3, '#f4f4f4');
+    O.prisme(g, P, 0.3, 0.36, 0.52, 0.56, z0 + 3, z0 + 7, '#ffd6e6');
+    O.prisme(g, P, 0.33, 0.39, 0.38, 0.44, z0 + 7, z0 + 8, '#ffffff');
   });
+}
+// Le raton laveur de la glacière : yeux dans la fente, tête qui sort avec le sachet de guimauves (« MIAM ! »), puis il
+// saute dehors et file vers les sapins, le sachet dans la gueule.
+function animeGlaciere(g, it, tx, ty, t, O, effet) {
+  if (!effet) return;
+  const P = O.projeteur(tx + 32, ty);
+  const d = effet.depuis;
+  if (effet.phase === 1) {
+    if (d > 250 && Math.floor(d / 380) % 4 !== 3) {
+      // sur la face +x de la fente : la face +y est souvent cachée par le sapin voisin
+      for (const v of [0.3, 0.45]) {
+        const [x, y] = P(0.76, v, 16.5);
+        g.fillStyle = '#ffe27a';
+        g.fillRect(Math.round(x) - 1, Math.round(y) - 1, 2, 2);
+      }
+    }
+    const v = Math.round(Math.sin(d / 30));
+    const [x, y] = P(0.5, 0.5, 18);
+    g.fillStyle = '#ffffff';
+    g.fillRect(Math.round(x) - 22 + v, Math.round(y) + 2, 4, 1);
+    g.fillRect(Math.round(x) + 19 - v, Math.round(y) + 2, 4, 1);
+    return;
+  }
+  if (effet.phase === 2) {
+    // la tête et les pattes dépassent, il grignote
+    const sortie = Math.min(1, (d - 1000) / 300);
+    const [x, y] = P(0.5, 0.5, 13 + sortie * 13);
+    teteRaton(g, x, y, Math.floor(d / 200) % 2);
+    if (d > 1500) bulle(g, O, O.enseigne('MIAM !', 'YUM!'), x + 8, y - 12, '#8a5a30');
+    return;
+  }
+  // phase 3 : il saute hors de la glacière puis court selon +x (vers les sapins) et disparaît
+  const e = (d - 3200) / (effet.duree - 3200);
+  const u = 0.5 + e * 4.2;
+  const saut = e < 0.08 ? Math.sin((e / 0.08) * Math.PI) * 14 + (1 - e / 0.08) * 15 : Math.abs(Math.sin(d / 90)) * 2;
+  const [x, y] = P(u, 0.62, saut);
+  g.globalAlpha = Math.min(1, (1 - e) / 0.15);
+  raton(g, x, y, Math.floor(d / 90) % 2);
+  g.globalAlpha = 1;
+}
+function teteRaton(g, x, y, f) {
+  const X = Math.round(x);
+  const Y = Math.round(y);
+  const C = '#15151f';
+  g.fillStyle = C;
+  g.fillRect(X - 6, Y - 9, 13, 10);
+  g.fillRect(X - 6, Y - 12, 4, 4);
+  g.fillRect(X + 3, Y - 12, 4, 4);
+  g.fillStyle = '#9a9aa2';
+  g.fillRect(X - 5, Y - 8, 11, 8);
+  g.fillRect(X - 5, Y - 11, 2, 3);
+  g.fillRect(X + 4, Y - 11, 2, 3);
+  // le masque, les yeux, le museau blanc
+  g.fillStyle = '#2a2a30';
+  g.fillRect(X - 5, Y - 6, 11, 3);
+  g.fillStyle = '#ffffff';
+  g.fillRect(X - 3, Y - 5, 1, 1);
+  g.fillRect(X + 3, Y - 5, 1, 1);
+  g.fillStyle = '#e4e4ea';
+  g.fillRect(X - 2, Y - 3, 5, 3);
+  g.fillStyle = C;
+  g.fillRect(X, Y - 3, 1, 1);
+  // les pattes tiennent le sachet de guimauves
+  g.fillStyle = C;
+  g.fillRect(X - 6, Y - 1 + f, 13, 5);
+  g.fillStyle = '#ffd6e6';
+  g.fillRect(X - 3, Y + f, 7, 3);
+  g.fillStyle = '#ffffff';
+  g.fillRect(X - 2, Y + f, 2, 1);
+  g.fillStyle = '#6a6a72';
+  g.fillRect(X - 5, Y + f, 2, 2);
+  g.fillRect(X + 4, Y + f, 2, 2);
+}
+// Raton laveur de profil (tourné vers la droite de l'écran), (x, y) sous ses pattes ; `f` : foulée.
+function raton(g, x, y, f) {
+  const X = Math.round(x);
+  const Y = Math.round(y);
+  const C = '#15151f';
+  // queue rayée
+  g.fillStyle = C;
+  g.fillRect(X - 15, Y - 11 + f, 9, 5);
+  g.fillStyle = '#8a8a92';
+  g.fillRect(X - 14, Y - 10 + f, 8, 3);
+  g.fillStyle = '#3a3a40';
+  g.fillRect(X - 13, Y - 10 + f, 1, 3);
+  g.fillRect(X - 10, Y - 10 + f, 1, 3);
+  // corps et pattes
+  g.fillStyle = C;
+  g.fillRect(X - 7, Y - 11, 13, 9);
+  g.fillRect(X - 6 + f * 2, Y - 3, 3, 3);
+  g.fillRect(X + 2 - f * 2, Y - 3, 3, 3);
+  g.fillStyle = '#9a9aa2';
+  g.fillRect(X - 6, Y - 10, 11, 7);
+  // tête, oreille, masque
+  g.fillStyle = C;
+  g.fillRect(X + 3, Y - 16, 9, 8);
+  g.fillRect(X + 4, Y - 18, 3, 3);
+  g.fillStyle = '#b4b4bc';
+  g.fillRect(X + 4, Y - 15, 7, 6);
+  g.fillStyle = '#2a2a30';
+  g.fillRect(X + 4, Y - 13, 7, 2);
+  g.fillStyle = '#ffffff';
+  g.fillRect(X + 8, Y - 13, 1, 1);
+  // le sachet dans la gueule
+  g.fillStyle = C;
+  g.fillRect(X + 10, Y - 12, 6, 6);
+  g.fillStyle = '#ffd6e6';
+  g.fillRect(X + 11, Y - 11, 4, 4);
 }
 
 // ---------- camping : sols ----------
@@ -990,7 +1273,17 @@ export const MEUBLES = {
   canoe,
   glaciere_camp: glaciereCamp,
 };
-export const ANIMES = { shishi_odoshi: animeShishi, feu_camp: animeFeu };
+export const ANIMES = {
+  shishi_odoshi: animeShishi, feu_camp: animeFeu, distributeur_jp: animeDistributeur, glaciere_camp: animeGlaciere,
+};
+// Easter eggs (web/clics.js) : distributeur (jackpot de canettes), fontaine en bambou (« TOC ! » et la grenouille),
+// feu de camp (flambée et cœur de fumée), glacière (le raton laveur qui vole les guimauves).
+export const CLICS = {
+  distributeur_jp: { duree: 6500, phases: [900] },
+  shishi_odoshi: { duree: 5200, phases: [700] },
+  feu_camp: { duree: 7500, phases: [1800] },
+  glaciere_camp: { duree: 7000, phases: [1000, 3200] },
+};
 export const JEUX = {};
 export const SOLS = {
   tatami,

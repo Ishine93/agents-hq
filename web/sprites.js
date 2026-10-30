@@ -25,25 +25,48 @@ export function creerCanvas(w, h) {
   return c;
 }
 
-export function hexRgb(h) {
-  const s = h.replace('#', '');
+// Couleur '#rgb', '#rrggbb', 'rgb(r, g, b)' ou 'rgba(r, g, b, a)' -> [r, g, b, a] (a = null sans transparence).
+export function lireCouleur(c) {
+  const s = String(c).trim();
+  if (s[0] !== '#') {
+    const m = /^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*(?:,\s*([\d.]+)\s*)?\)$/i.exec(s);
+    if (m) return [+m[1], +m[2], +m[3], m[4] === undefined ? null : +m[4]];
+  }
+  return lireHex(s.replace('#', ''));
+}
+function lireHex(s) {
   const n = parseInt(s.length === 3 ? s.split('').map((x) => x + x).join('') : s, 16);
-  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255, null];
+}
+export function hexRgb(h) {
+  return lireCouleur(h).slice(0, 3);
 }
 export function rgbHex(r, g, b) {
   const f = (v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0');
   return '#' + f(r) + f(g) + f(b);
 }
-// f > 0 éclaircit vers le blanc, f < 0 assombrit vers le noir.
+// Même couleur, avec sa transparence s'il y en a une ('rgba(…)'), sinon en '#rrggbb'.
+function ecrireCouleur(r, g, b, a) {
+  if (a === null) return rgbHex(r, g, b);
+  const f = (v) => Math.max(0, Math.min(255, Math.round(v)));
+  return `rgba(${f(r)},${f(g)},${f(b)},${Math.round(Math.max(0, Math.min(1, a)) * 1000) / 1000})`;
+}
+// f > 0 éclaircit vers le blanc, f < 0 assombrit vers le noir. Accepte aussi 'rgba(…)' (verre) : la transparence reste.
 export function nuance(hex, f) {
-  const [r, g, b] = hexRgb(hex);
-  if (f >= 0) return rgbHex(r + (255 - r) * f, g + (255 - g) * f, b + (255 - b) * f);
-  return rgbHex(r * (1 + f), g * (1 + f), b * (1 + f));
+  const [r, g, b, a] = lireCouleur(hex);
+  if (f >= 0) return ecrireCouleur(r + (255 - r) * f, g + (255 - g) * f, b + (255 - b) * f, a);
+  return ecrireCouleur(r * (1 + f), g * (1 + f), b * (1 + f), a);
 }
 export function melange(a, b, t) {
-  const A = hexRgb(a);
-  const B = hexRgb(b);
-  return rgbHex(A[0] + (B[0] - A[0]) * t, A[1] + (B[1] - A[1]) * t, A[2] + (B[2] - A[2]) * t);
+  const A = lireCouleur(a);
+  const B = lireCouleur(b);
+  const alpha = A[3] === null && B[3] === null ? null : (A[3] ?? 1) + ((B[3] ?? 1) - (A[3] ?? 1)) * t;
+  return ecrireCouleur(A[0] + (B[0] - A[0]) * t, A[1] + (B[1] - A[1]) * t, A[2] + (B[2] - A[2]) * t, alpha);
+}
+// Même teinte, transparence multipliée par k (une couleur sans transparence compte pour 1).
+export function transparence(c, k) {
+  const [r, g, b, a] = lireCouleur(c);
+  return ecrireCouleur(r, g, b, (a ?? 1) * k);
 }
 export function hacher(str) {
   let h = 2166136261;
@@ -126,6 +149,16 @@ export function prisme(g, P, x0, y0, x1, y1, z0, z1, c, cg, cd) {
     poly(g, [P(x1, y0, z1), P(x1, y1, z1), P(x1, y1, z0), P(x1, y0, z0)], cd);
   }
   poly(g, [P(x0, y0, z1), P(x1, y0, z1), P(x1, y1, z1), P(x0, y1, z1)], ct);
+}
+// Volume de verre : on voit à travers, donc les faces du fond d'abord, plus pâles, puis celles de devant ; le dessus
+// est le plus clair. `col` : une couleur 'rgba(…)' (verre bleuté par défaut).
+export const VERRE = 'rgba(170,220,255,0.25)';
+export function prismeVerre(g, P, x0, y0, x1, y1, z0, z1, col = VERRE) {
+  quadY(g, P, y0, x0, x1, z0, z1, transparence(col, 0.6));
+  quadX(g, P, x0, y0, y1, z0, z1, transparence(col, 0.6));
+  quadY(g, P, y1, x0, x1, z0, z1, col);
+  quadX(g, P, x1, y0, y1, z0, z1, transparence(nuance(col, -0.12), 1.3));
+  quadZ(g, P, z1, x0, y0, x1, y1, transparence(nuance(col, 0.2), 1.6));
 }
 export function quadY(g, P, y, x0, x1, z0, z1, col) {
   poly(g, [P(x0, y, z1), P(x1, y, z1), P(x1, y, z0), P(x0, y, z0)], col);

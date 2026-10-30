@@ -35,6 +35,15 @@ function changement() {
 }
 export const surChangement = (fn) => abonnes.add(fn);
 
+// 1.0.11 : jusque-là, une conversation reprise ou copiée comptait une deuxième fois tout son coût passé. Une seule
+// fois, le rapport « $ → % de la fenêtre » appris sur ces coûts est effacé, et les estimations en $ ne se servent
+// plus que des tâches finies après cette date. Les tokens, eux, étaient justes : ils restent.
+if (!etat.coutsFiablesDepuis) {
+  etat.coutsFiablesDepuis = Date.now();
+  delete etat.calibrage;
+  changement();
+}
+
 setInterval(() => {
   if (!sale) return;
   sale = false;
@@ -108,6 +117,21 @@ export function enregistrerAppel(meta, usage, modele, nouveau = true) {
 export function enregistrerCout(meta, delta) {
   if (!(delta > 0)) return;
   repartir(meta, { cout: delta });
+}
+
+/**
+ * Dernier coût total vu pour chaque conversation Claude (1.0.11). Claude Code repart de ce total quand on reprend
+ * ou qu'on copie une conversation : c'est le point de départ de l'écart à ajouter.
+ */
+export const coutConnuSession = (id) => (id && typeof etat.sessions?.[id] === 'number' ? etat.sessions[id] : null);
+
+export function noterCoutSession(id, total) {
+  if (!id || typeof total !== 'number') return;
+  etat.sessions ||= {};
+  delete etat.sessions[id]; // remise en dernier : le ménage retire les plus anciennes
+  etat.sessions[id] = total;
+  limiter(etat.sessions, 500);
+  changement();
 }
 
 /** Compaction automatique d'une session (lot A2) : nombre et tokens résumés. */
