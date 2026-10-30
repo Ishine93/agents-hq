@@ -2445,10 +2445,11 @@ const COULEUR_ETAT = {
 
 let cacheTableau = { cle: '', r: null };
 export function spriteTableau(carte, plan, etats, nbVisibles) {
-  const cle = JSON.stringify([plan && plan.dossier, plan && plan.taches.length, etats, nbVisibles]);
-  if (cacheTableau.cle === cle) return cacheTableau.r;
   const debut = carte.tableau.x0 * 32 + 4;
   const largeur = (carte.tableau.x1 - carte.tableau.x0) * 32 - 8;
+  // la place du tableau fait partie de la clé : deux étages qui montrent le même plan n'ont pas le tableau au même endroit
+  const cle = JSON.stringify([debut, largeur, plan && plan.dossier, plan && plan.taches.length, etats, nbVisibles]);
+  if (cacheTableau.cle === cle) return cacheTableau.r;
   const hauteur = 54;
   const plat = creerCanvas(largeur, hauteur);
   const g = plat.getContext('2d');

@@ -134,7 +134,9 @@ export class Moteur {
         return;
       }
       const [ax, ay] = this.versArt(e.clientX, e.clientY);
-      const av = this.dir.trouver(ax, ay);
+      const trouve = this.dir.trouver(ax, ay);
+      // un meuble à surprise du décor ne se trahit pas au survol : ni main, ni surbrillance
+      const av = trouve && trouve.type !== 'decor' ? trouve : null;
       this.dir.survol = av ? av.id : null;
       c.style.cursor = av ? 'pointer' : 'grab';
     });

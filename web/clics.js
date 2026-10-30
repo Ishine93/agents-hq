@@ -9,6 +9,8 @@
 //     declenche: ['autre_type'], // facultatif : meubles du même étage animés en même temps (même départ)
 //     phases: [7000],           // facultatif : instants (ms) qui découpent l'effet en phases 1, 2, 3…
 //   }
+// Horloge : Date.now(), celle de la scène (moteur.image la passe aux dessins). Un départ pris sur une autre horloge
+// (performance.now) ferait croire l'effet fini depuis toujours.
 // Pendant l'effet, chaque meuble concerné (le meuble cliqué et ceux de `declenche`) reçoit :
 //   - à son dessin fixe : etat.effet = numéro de phase (1, 2…) ; absent hors effet (pour changer d'apparence) ;
 //   - à son animation : un objet effet { depuis, duree, progres, phase, source, clique } (voir effetDe).
@@ -71,7 +73,7 @@ export class EffetsDecor {
   }
 
   /** Un effet tourne-t-il encore (pour garder la cadence d'images pendant l'effet) ? Oublie ceux qui sont finis. */
-  actif(now = performance.now()) {
+  actif(now = Date.now()) {
     for (const [k, e] of this.actifs) if (now - e.t0 >= e.def.duree) this.actifs.delete(k);
     return this.actifs.size > 0;
   }

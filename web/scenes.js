@@ -2905,7 +2905,7 @@ export class Directeur {
   }
 
   /** Clic sur un meuble cliquable : lance son effet, dans le navigateur seulement (rien n'est envoyé au serveur). */
-  cliquerDecor(it, now = performance.now()) {
+  cliquerDecor(it, now = Date.now()) { // l'horloge des dessins (moteur.image), voir web/clics.js
     return this.clics.declencher(it, now);
   }
 }
